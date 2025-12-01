@@ -58,6 +58,9 @@ temp/
 /python-server/yolov8*.pt
 /python-server/temp/**
 
+# Ignore a models folder inside python-server to avoid committing model binaries
+/python-server/models/**
+
 # Virtualenvs and Python caches inside python-server
 /python-server/yolovenv/
 /python-server/venv/
