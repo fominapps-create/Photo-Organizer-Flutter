@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- P monogram on stacked squares -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#06B025;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#0EA5E9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="sparkle" cx="50%" cy="50%">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="180" fill="url(#bg)"/>
+  
+  <!-- Back square (tilted) with shadow -->
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#000000" opacity="0.15"
+        transform="rotate(-6 512 512) translate(7, 7)"/>
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#ffffff" opacity="0.4"
+        transform="rotate(-6 512 512)"/>
+  
+  <!-- Middle square (slight tilt) with shadow -->
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#000000" opacity="0.1"
+        transform="rotate(-3 512 512) translate(4, 4)"/>
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#ffffff" opacity="0.65"
+        transform="rotate(-3 512 512)"/>
+  
+  <!-- Front square (straight) with shadow -->
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#000000" opacity="0.08"
+        transform="translate(3, 3)"/>
+  <rect x="287" y="287" width="450" height="450" rx="70" 
+        fill="#ffffff" opacity="0.95"/>
+  
+  <!-- Bold letter P on front -->
+  <path d="M 385 385 L 385 639 L 485 639 L 485 575 L 575 575 C 640 575 672 543 672 495 C 672 447 640 415 575 415 L 575 385 Z M 485 445 L 565 445 C 595 445 612 460 612 495 C 612 530 595 545 565 545 L 485 545 Z" 
+        fill="url(#bg)" 
+        opacity="0.85"/>
+  
+  <!-- Auto awesome sparkle (4-point stars like Material icon) -->
+  <g transform="translate(640, 410)">
+    <!-- Large sparkle -->
+    <path d="M 0,-70 L 10,-10 L 70,0 L 10,10 L 0,70 L -10,10 L -70,0 L -10,-10 Z" 
+          fill="#FFA500" 
+          opacity="1"/>
+    <!-- Medium sparkle -->
+    <path d="M -50,-55 L -44,-40 L -30,-35 L -44,-30 L -50,-15 L -56,-30 L -70,-35 L -56,-40 Z" 
+          fill="#FF8C00" 
+          opacity="0.95"/>
+    <!-- Small sparkle -->
+    <path d="M 45,35 L 50,45 L 60,50 L 50,55 L 45,65 L 40,55 L 30,50 L 40,45 Z" 
+          fill="#FFA500" 
+          opacity="0.9"/>
+  </g>
+</svg>

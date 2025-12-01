@@ -1,0 +1,37 @@
+<svg width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Letters P + O with sparkle -->
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4A90E2;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#7B68EE;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E91E63;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="sparkle2">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="180" fill="url(#bg2)"/>
+  
+  <!-- Letter P -->
+  <path d="M 220 300 L 220 750 L 320 750 L 320 580 L 480 580 C 580 580 620 540 620 460 C 620 380 580 340 480 340 L 480 300 Z M 320 380 L 450 380 C 490 380 520 400 520 460 C 520 520 490 540 450 540 L 320 540 Z" 
+        fill="#ffffff" 
+        opacity="0.95"/>
+  
+  <!-- Letter O -->
+  <circle cx="680" cy="525" r="160" fill="none" stroke="#ffffff" stroke-width="100" opacity="0.95"/>
+  
+  <!-- Sparkle accent -->
+  <g transform="translate(780, 350)">
+    <path d="M 0,-80 L 20,-20 L 80,0 L 20,20 L 0,80 L -20,20 L -80,0 L -20,-20 Z" 
+          fill="url(#sparkle2)" 
+          stroke="#ffffff" 
+          stroke-width="8"
+          opacity="1"/>
+    <circle cx="-60" cy="-60" r="15" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="65" cy="65" r="12" fill="#FFD700" opacity="0.9"/>
+  </g>
+</svg>

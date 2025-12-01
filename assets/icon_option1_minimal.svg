@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Minimal rounded square with sparkle -->
+  <defs>
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4A90E2;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#7B68EE;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E91E63;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="sparkle1">
+      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="180" fill="url(#bg1)"/>
+  
+  <!-- Large white rounded square - centered -->
+  <rect x="262" y="262" width="500" height="500" rx="80" fill="#ffffff" opacity="0.95"/>
+  
+  <!-- Sparkle overlay on square -->
+  <g transform="translate(512, 512)">
+    <path d="M 0,-140 L 35,-35 L 140,0 L 35,35 L 0,140 L -35,35 L -140,0 L -35,-35 Z" 
+          fill="url(#sparkle1)" 
+          stroke="#4A90E2" 
+          stroke-width="12"
+          opacity="1"/>
+    <path d="M 0,-90 L 20,-20 L 90,0 L 20,20 L 0,90 L -20,20 L -90,0 L -20,-20 Z" 
+          fill="#ffffff" 
+          opacity="0.95"/>
+  </g>
+</svg>
