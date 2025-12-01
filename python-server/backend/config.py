@@ -17,7 +17,12 @@ TEMP_FOLDER = os.getenv("TEMP_FOLDER", "temp")
 SOURCE_FOLDER = os.getenv("SOURCE_FOLDER", r"C:\Users\MIKE\Pictures\Screenshots")
 TARGET_FOLDER = os.getenv("TARGET_FOLDER", r"C:\Users\MIKE\Pictures\Organized")
 
-CONFIDENCE_THRESHOLD = 0.3  
+"""
+Minimum confidence for a detection to be accepted by the server.
+For the free autoscan mode we prefer a conservative threshold to reduce
+noisy / low-confidence tags. Settable via env var if needed.
+"""
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.8"))
 MIN_BOX_PERCENT = 0.2       # 30% for objects
 MIN_PERSON_PERCENT = 0.1    # 10% for persons
 
