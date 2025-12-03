@@ -678,7 +678,7 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
         ),
       ),
       body: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
         child: Column(
           children: [
             // Show inline organizing progress when the organize flow is active.

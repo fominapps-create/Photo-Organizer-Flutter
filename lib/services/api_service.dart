@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'dart:developer' as developer;
+import 'dart:convert';
 
 // Conditional import: use real platform detection on native builds, stub on web.
 import 'platform_stub.dart' if (dart.library.io) 'platform_io.dart';
@@ -258,7 +259,25 @@ class ApiService {
 
   static Future<http.Response> getAllOrganizedImagesWithTags() async {
     final url = Uri.parse('$_baseUrl/all-organized-images-with-tags/');
-    final response = await http.get(url);
+    final response = await http.get(url).timeout(const Duration(seconds: 5));
     return response;
+  }
+
+  static Future<List<String>> getAllTags() async {
+    try {
+      final url = Uri.parse('$_baseUrl/all-tags/');
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+        if (jsonData['tags'] is List) {
+          return List<String>.from(jsonData['tags']);
+        }
+      }
+      return [];
+    } catch (e) {
+      developer.log('Failed to fetch tags: $e');
+      return [];
+    }
   }
 }

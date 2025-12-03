@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pillow
+requests
+numpy
+# add other dependencies as needed (yolov5/torch/ultralytics etc.)

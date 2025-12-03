@@ -3,10 +3,13 @@
 // the code straightforward for the current UX changes.
 // ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
+import 'dart:ui';
+import 'dart:developer' as developer;
 import 'gallery_screen.dart';
 import 'folder_gallery_screen.dart';
 import 'settings_screen.dart';
 import 'album_screen.dart';
+import 'search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -24,6 +27,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+  final bool _isSearchActive = false;
   final GlobalKey<FolderGalleryScreenState> _folderKey =
       GlobalKey<FolderGalleryScreenState>();
   final GlobalKey<GalleryScreenState> _galleryKey =
@@ -56,6 +60,9 @@ class _HomeScreenState extends State<HomeScreen> {
         onAlbumCreated: () {
           _albumKey.currentState?.reload();
         },
+        onSearchChanged: () {
+          setState(() {}); // Rebuild to show/hide + button
+        },
       ),
       FolderGalleryScreen(
         key: _folderKey,
@@ -78,140 +85,284 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Widget _buildNavItem(int index, IconData icon, String label) {
+    final isSelected = _selectedIndex == index;
+    return InkWell(
+      onTap: () => _onItemTapped(index),
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        width: 80,
+        height: 48,
+        decoration: BoxDecoration(
+          shape: BoxShape.rectangle,
+          borderRadius: BorderRadius.circular(28),
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.05),
+                    Colors.white.withValues(alpha: 0.02),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          border: Border.all(
+            color: isSelected
+                ? (widget.isDarkMode
+                      ? Colors.white.withValues(alpha: 0.2)
+                      : Colors.black.withValues(alpha: 0.2))
+                : Colors.transparent,
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: isSelected
+                    ? Colors.lightBlue.shade300
+                    : (widget.isDarkMode
+                          ? Colors.white.withValues(alpha: 0.85)
+                          : Colors.black87.withValues(alpha: 0.85)),
+                size: 22,
+                shadows: widget.isDarkMode
+                    ? (isSelected
+                          ? [
+                              const Shadow(
+                                color: Colors.black26,
+                                offset: Offset(0, 1),
+                                blurRadius: 3,
+                              ),
+                            ]
+                          : [
+                              const Shadow(
+                                color: Colors.black38,
+                                offset: Offset(0, 1),
+                                blurRadius: 2,
+                              ),
+                            ])
+                    : null,
+              ),
+              const SizedBox(height: 1),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected
+                      ? Colors.lightBlue.shade300
+                      : (widget.isDarkMode
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : Colors.black87.withValues(alpha: 0.85)),
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  shadows: widget.isDarkMode
+                      ? [
+                          const Shadow(
+                            color: Colors.black54,
+                            offset: Offset(0, 1),
+                            blurRadius: 3,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Sparks-by-album flow moved into the Gallery screen.
 
   @override
   Widget build(BuildContext context) {
     // (explorer state is accessible from the screens when needed)
+    final searchQuery = _galleryKey.currentState?.searchQuery ?? '';
+    if (_selectedIndex == 0) {
+      print(
+        'HomeScreen build - searchQuery: "$searchQuery", isEmpty: ${searchQuery.isEmpty}',
+      );
+    }
 
     return Scaffold(
-      body: Column(
+      extendBody: true,
+      backgroundColor: Colors.transparent,
+      body: Stack(
         children: [
-          Container(
-            height: 20,
-            alignment: Alignment.center,
-            color: Colors.transparent,
-            child: Text(
-              'Home Screen',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).textTheme.bodySmall?.color,
+          Column(
+            children: [
+              Container(
+                height: 20,
+                alignment: Alignment.center,
+                color: Colors.transparent,
+                child: Text(
+                  'Home Screen',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).textTheme.bodySmall?.color,
+                  ),
+                ),
+              ),
+              Expanded(child: _screens[_selectedIndex]),
+            ],
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                color: widget.isDarkMode ? Colors.grey.shade900 : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 20,
+                    offset: const Offset(0, -5),
+                  ),
+                ],
+              ),
+              child: SafeArea(top: false, child: SizedBox(height: 48)),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 18,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildNavItem(0, Icons.folder_outlined, 'Gallery'),
+                  _buildNavItem(1, Icons.photo_library_outlined, 'Organized'),
+                  _buildNavItem(2, Icons.photo_album_outlined, 'Albums'),
+                ],
               ),
             ),
           ),
-          Expanded(child: _screens[_selectedIndex]),
+          // Floating + button (add more filters) - shows when filters are active
+          if (_selectedIndex == 0 &&
+              (_galleryKey.currentState?.searchQuery ?? '').isNotEmpty)
+            Positioned(
+              right: 24,
+              bottom: 176,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.lightBlue.shade300,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: () {
+                    // Get actual current tags from loaded photos
+                    final currentTags =
+                        _galleryKey.currentState?.getAllCurrentTags() ?? {};
+                    final availableTags = currentTags.toList()..sort();
+
+                    // Debug: log what tags we're passing
+                    developer.log('Available tags for search: $availableTags');
+
+                    // Get current search terms to exclude already selected tags
+                    final currentSearch =
+                        _galleryKey.currentState?.searchQuery ?? '';
+                    final existingTags = currentSearch
+                        .split(' ')
+                        .where((t) => t.isNotEmpty)
+                        .toSet();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => SearchScreen(
+                          recommendedTags: availableTags,
+                          excludeTags: existingTags,
+                          onTagSelected: (tag) {
+                            // Append to existing search
+                            if (_selectedIndex == 0) {
+                              final newSearch = currentSearch.isEmpty
+                                  ? tag
+                                  : '$currentSearch $tag';
+                              _galleryKey.currentState?.searchByTag(newSearch);
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  icon: Icon(
+                    Icons.add,
+                    color: widget.isDarkMode
+                        ? Colors.grey.shade900
+                        : Colors.white,
+                    size: 24,
+                  ),
+                ),
+              ),
+            ),
+          // Floating search button
+          Positioned(
+            right: 16,
+            bottom: 110,
+            child: Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.isDarkMode ? Colors.grey.shade900 : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: Icon(
+                  Icons.search,
+                  color: widget.isDarkMode
+                      ? Colors.lightBlue.shade300
+                      : Colors.blue.shade700,
+                  size: 28,
+                ),
+                onPressed: () {
+                  // Get actual tags from photos
+                  final currentTags =
+                      _galleryKey.currentState?.getAllCurrentTags() ?? {};
+                  final availableTags = currentTags.toList()..sort();
+
+                  // Open search screen with actual photo tags
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SearchScreen(
+                        recommendedTags: availableTags,
+                        onTagSelected: (tag) {
+                          // Apply search filter in gallery
+                          if (_selectedIndex == 0) {
+                            _galleryKey.currentState?.searchByTag(tag);
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
         ],
-      ),
-      bottomNavigationBar: BottomAppBar(
-        shape: const CircularNotchedRectangle(),
-        notchMargin: 8.0,
-        elevation: 0,
-        padding: EdgeInsets.zero,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            Expanded(
-              child: InkWell(
-                onTap: () => _onItemTapped(0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.folder_outlined,
-                        color: _selectedIndex == 0
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Gallery',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _selectedIndex == 0
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey,
-                          fontWeight: _selectedIndex == 0
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: () => _onItemTapped(1),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _selectedIndex == 1
-                            ? Icons.photo_library
-                            : Icons.photo_library_outlined,
-                        color: _selectedIndex == 1
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Organized',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _selectedIndex == 1
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey,
-                          fontWeight: _selectedIndex == 1
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: () => _onItemTapped(2),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _selectedIndex == 2
-                            ? Icons.photo_album
-                            : Icons.photo_album_outlined,
-                        color: _selectedIndex == 2
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.grey,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Albums',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _selectedIndex == 2
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey,
-                          fontWeight: _selectedIndex == 2
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

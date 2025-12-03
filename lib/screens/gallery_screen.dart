@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:typed_data';
+import 'dart:ui';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
@@ -9,11 +10,18 @@ import 'album_screen.dart';
 import 'pricing_screen.dart';
 import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
+import 'photo_viewer.dart';
 
 class GalleryScreen extends StatefulWidget {
   final VoidCallback? onSettingsTap;
   final VoidCallback? onAlbumCreated;
-  const GalleryScreen({super.key, this.onSettingsTap, this.onAlbumCreated});
+  final VoidCallback? onSearchChanged;
+  const GalleryScreen({
+    super.key,
+    this.onSettingsTap,
+    this.onAlbumCreated,
+    this.onSearchChanged,
+  });
   @override
   GalleryScreenState createState() => GalleryScreenState();
 }
@@ -28,11 +36,12 @@ class GalleryScreenState extends State<GalleryScreen> {
   Map<String, List<String>> albums = {};
   String searchQuery = '';
   bool showDebug = false;
+  bool _showSearchBar = true;
   // Force showing device-local photos even when server images exist
   bool _forceDeviceView = false;
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
-  int _crossAxisCount = 2;
+  int _crossAxisCount = 4;
   bool _isSelectMode = false;
   final Set<String> _selectedKeys = {};
   final Map<String, double> _textWidthCache = {};
@@ -40,6 +49,10 @@ class GalleryScreenState extends State<GalleryScreen> {
   bool _scanning = false;
   double _scanProgress = 0.0; // 0.0-1.0
   int _scanTotal = 0;
+  bool _scanPaused = false;
+  int _scanProcessed = 0;
+  int _currentUnscannedCount = 0;
+  double _lastScale = 1.0; // Track last scale for incremental pinch zoom
 
   double _measureTextWidth(String text, TextStyle style) {
     final key = text; // style is constant here, so text is fine as cache key
@@ -149,36 +162,18 @@ class GalleryScreenState extends State<GalleryScreen> {
       }
     }
 
-    // If there are no chips (none fit or no short tags), show a 'None' placeholder when nothing else is present
+    // If there are no chips (none fit or no short tags), show a 'None' chip
     if (chips.isEmpty && hiddenCount == 0) {
       chips.add(
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.grey,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Text(
-            'None',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-        ),
-      );
-    }
-
-    // If chips is empty but we have hidden tags (e.g. long-only tags), show +N even if it might exceed width
-    if (chips.isEmpty && hiddenCount > 0) {
-      final plusStr = '+$hiddenCount';
-      chips.add(
         GestureDetector(
-          onTap: () => _showHiddenTagsMenu(fullTags, visibleTags),
+          onTap: () => searchByTag('None'),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.black54,
+              color: Colors.grey,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(plusStr, style: style),
+            child: Text('None', style: style),
           ),
         ),
       );
@@ -226,10 +221,59 @@ class GalleryScreenState extends State<GalleryScreen> {
     developer.log('Total photos in gallery: ${imageUrls.length}');
     setState(() => loading = false);
     // Start automatic scan of local images when appropriate
+    await _updateUnscannedCount();
     _startAutoScanIfNeeded();
   }
 
+  Future<void> _updateUnscannedCount() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final localUrls = imageUrls
+          .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+          .toList();
+      final unscanned = localUrls
+          .where((u) => !prefs.containsKey(p.basename(u)))
+          .length;
+      if (mounted) setState(() => _currentUnscannedCount = unscanned);
+    } catch (_) {
+      if (mounted) setState(() => _currentUnscannedCount = 0);
+    }
+  }
+
   void reload() => _loadAllImages();
+
+  void focusSearch() {
+    setState(() {
+      _showSearchBar = !_showSearchBar;
+      if (_showSearchBar) {
+        // Small delay to ensure TextField is visible before focusing
+        Future.delayed(const Duration(milliseconds: 100), () {
+          _searchFocusNode.requestFocus();
+        });
+      }
+    });
+  }
+
+  void searchByTag(String tag) {
+    setState(() {
+      _showSearchBar = true;
+      searchQuery = tag;
+      _searchController.text = tag;
+    });
+    widget.onSearchChanged?.call();
+  }
+
+  /// Get all unique tags from currently loaded photos
+  Set<String> getAllCurrentTags() {
+    final allTags = <String>{};
+    // Only include tags from photos that actually exist in imageUrls
+    for (final url in imageUrls) {
+      final key = p.basename(url);
+      final tags = photoTags[key] ?? [];
+      allTags.addAll(tags);
+    }
+    return allTags;
+  }
 
   Future<void> _startAutoScanIfNeeded() async {
     // Only scan if there are local images and we aren't already scanning
@@ -255,10 +299,18 @@ class GalleryScreenState extends State<GalleryScreen> {
     _scanTotal = toScan.length;
     setState(() {
       _scanning = true;
+      // Don't reset _scanPaused - let user control pause/resume
+      _scanProcessed = 0;
       _scanProgress = 0.0;
     });
 
+    // Update unscanned count asynchronously without blocking
+    _updateUnscannedCount();
+
     await _scanImages(toScan);
+
+    // Update unscanned count after scanning completes
+    await _updateUnscannedCount();
 
     setState(() {
       _scanning = false;
@@ -267,10 +319,60 @@ class GalleryScreenState extends State<GalleryScreen> {
     });
   }
 
+  // Manual scan helper restored: scans missing images by default,
+  // or force-rescans all device images when `force` is true.
+  Future<void> _manualScan({bool force = false}) async {
+    if (_scanning) return;
+    final localUrls = imageUrls
+        .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+        .toList();
+    if (localUrls.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final toScan = force
+        ? localUrls
+        : localUrls.where((u) => !prefs.containsKey(p.basename(u))).toList();
+    if (toScan.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No images to scan')));
+      return;
+    }
+
+    _scanTotal = toScan.length;
+    setState(() {
+      _scanning = true;
+      // Don't reset _scanPaused - let user control pause/resume
+      _scanProcessed = 0;
+      _scanProgress = 0.0;
+    });
+
+    // Update unscanned count asynchronously without blocking
+    _updateUnscannedCount();
+
+    await _scanImages(toScan);
+
+    // Update unscanned count after scanning completes
+    await _updateUnscannedCount();
+
+    setState(() {
+      _scanning = false;
+      _scanProgress = 0.0;
+      _scanTotal = 0;
+      _scanProcessed = 0;
+    });
+  }
+
   Future<void> _scanImages(List<String> urls) async {
     final prefs = await SharedPreferences.getInstance();
     for (var i = 0; i < urls.length; i++) {
       final u = urls[i];
+      // Cooperative pause: wait while paused
+      while (_scanPaused) {
+        if (!mounted) return;
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
       try {
         // Get a file reference for upload
         File? file;
@@ -317,12 +419,13 @@ class GalleryScreenState extends State<GalleryScreen> {
         developer.log('Auto-scan error for $u: $e');
       }
 
-      // update progress
+      // update progress and processed count
       setState(() {
+        _scanProcessed = (i + 1);
         _scanProgress = (i + 1) / (_scanTotal == 0 ? 1 : _scanTotal);
       });
       // brief pause so UI updates smoothly and server isn't overwhelmed
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 100));
     }
   }
 
@@ -483,8 +586,19 @@ class GalleryScreenState extends State<GalleryScreen> {
   List<String> _getFilteredImageUrls() {
     return imageUrls.where((u) {
       final tags = photoTags[p.basename(u)] ?? [];
-      return searchQuery.isEmpty ||
-          tags.any((t) => t.toLowerCase().contains(searchQuery.toLowerCase()));
+      if (searchQuery.isEmpty) return true;
+
+      // Split search query into individual search terms
+      final searchTerms = searchQuery
+          .split(' ')
+          .where((term) => term.isNotEmpty)
+          .map((term) => term.toLowerCase())
+          .toList();
+
+      // Check if any photo tag contains any of the search terms
+      return searchTerms.any(
+        (searchTerm) => tags.any((t) => t.toLowerCase().contains(searchTerm)),
+      );
     }).toList();
   }
 
@@ -587,6 +701,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                       searchQuery = tag;
                       _searchController.text = tag;
                     });
+                    widget.onSearchChanged?.call();
                     FocusScope.of(context).requestFocus(_searchFocusNode);
                   },
                 ),
@@ -629,6 +744,117 @@ class GalleryScreenState extends State<GalleryScreen> {
                     ),
                   )
                   .toList(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showUnscannedModal() async {
+    final prefs = await SharedPreferences.getInstance();
+    final unscanned = imageUrls
+        .where(
+          (u) =>
+              (u.startsWith('local:') || u.startsWith('file:')) &&
+              !prefs.containsKey(p.basename(u)),
+        )
+        .toList();
+    if (unscanned.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No unscanned images')));
+      return;
+    }
+
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.75,
+            child: GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 1.0,
+              ),
+              itemCount: unscanned.length,
+              itemBuilder: (c, idx) {
+                final url = unscanned[idx];
+                final key = p.basename(url);
+                return GestureDetector(
+                  onTap: () async {
+                    Navigator.pop(c);
+                    if (url.startsWith('local:')) {
+                      final id = url.substring('local:'.length);
+                      final asset = _localAssets[id];
+                      if (asset != null) {
+                        final file = await asset.file;
+                        if (file != null && mounted) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PhotoViewer(
+                                filePath: file.path,
+                                heroTag: key,
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    } else if (url.startsWith('file:')) {
+                      final path = url.substring('file:'.length);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PhotoViewer(filePath: path, heroTag: key),
+                        ),
+                      );
+                    } else {
+                      final resolved = ApiService.resolveImageUrl(url);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PhotoViewer(networkUrl: resolved, heroTag: key),
+                        ),
+                      );
+                    }
+                  },
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: url.startsWith('local:')
+                        ? FutureBuilder<Uint8List?>(
+                            future: _getThumbForAsset(url.substring(6)),
+                            builder: (ctx, snap) {
+                              if (snap.hasData && snap.data != null) {
+                                return Image.memory(
+                                  snap.data!,
+                                  fit: BoxFit.cover,
+                                );
+                              }
+                              return Container(color: Colors.black26);
+                            },
+                          )
+                        : (url.startsWith('file:')
+                              ? Image.file(
+                                  File(url.substring('file:'.length)),
+                                  fit: BoxFit.cover,
+                                )
+                              : Image.network(
+                                  ApiService.resolveImageUrl(url),
+                                  fit: BoxFit.cover,
+                                )),
+                  ),
+                );
+              },
             ),
           ),
         );
@@ -791,110 +1017,19 @@ class GalleryScreenState extends State<GalleryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: Colors.white),
-          onPressed: widget.onSettingsTap,
-        ),
-        actions: [
-          if (_isSelectMode) ...[
-            IconButton(
-              icon: const Icon(Icons.select_all, color: Colors.white),
-              tooltip: 'Select all visible',
-              onPressed: _selectAllVisible,
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Center(
-                child: Text(
-                  '${_selectedKeys.length} selected',
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              tooltip: 'Cancel selection',
-              onPressed: () => setState(() {
-                _isSelectMode = false;
-                _selectedKeys.clear();
-              }),
-            ),
-          ] else ...[
-            IconButton(
-              icon: const Icon(Icons.zoom_out, color: Colors.white),
-              tooltip: 'Show more photos per row',
-              onPressed: () => setState(() {
-                if (_crossAxisCount < 5) _crossAxisCount++;
-                developer.log('Grid columns increased: $_crossAxisCount');
-              }),
-            ),
-            IconButton(
-              icon: const Icon(Icons.zoom_in, color: Colors.white),
-              tooltip: 'Show fewer photos per row',
-              onPressed: () => setState(() {
-                if (_crossAxisCount > 1) _crossAxisCount--;
-                developer.log('Grid columns decreased: $_crossAxisCount');
-              }),
-            ),
-            IconButton(
-              icon: Icon(
-                showDebug ? Icons.bug_report_sharp : Icons.bug_report,
-                color: Colors.white,
-              ),
-              onPressed: () => setState(() => showDebug = !showDebug),
-            ),
-            IconButton(
-              icon: Icon(
-                _forceDeviceView ? Icons.phone_iphone : Icons.cloud,
-                color: Colors.white,
-              ),
-              // Tooltip should describe the action that will happen when pressed.
-              tooltip: _forceDeviceView
-                  ? 'Show server photos'
-                  : 'Show device photos',
-              onPressed: () async {
-                setState(() => _forceDeviceView = !_forceDeviceView);
-                if (_forceDeviceView) {
-                  await _loadDevicePhotos();
-                } else {
-                  await _loadAllImages();
-                }
-              },
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.check_box_outline_blank,
-                color: Colors.white,
-              ),
-              tooltip: 'Select items',
-              onPressed: () => setState(() => _isSelectMode = true),
-            ),
-          ],
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(20),
-          child: Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              'Gallery Screen',
-              style: TextStyle(
-                fontSize: 12,
-                color:
-                    Theme.of(context).appBarTheme.foregroundColor ??
-                    Theme.of(context).textTheme.bodySmall?.color,
-              ),
-            ),
-          ),
-        ),
-      ),
       extendBodyBehindAppBar: true,
       body: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Theme.of(context).scaffoldBackgroundColor,
+              Theme.of(context).brightness == Brightness.dark
+                  ? Colors.grey.shade900
+                  : Colors.grey.shade300,
+            ],
+          ),
         ),
         child: loading
             ? const Center(
@@ -907,300 +1042,1258 @@ class GalleryScreenState extends State<GalleryScreen> {
                   style: TextStyle(color: Colors.white, fontSize: 18),
                 ),
               )
-            : SafeArea(
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      child: TextField(
-                        controller: _searchController,
-                        focusNode: _searchFocusNode,
-                        onChanged: (v) => setState(() => searchQuery = v),
-                        decoration: InputDecoration(
-                          prefixIcon: const Icon(Icons.search),
-                          hintText: 'Search by tag...',
-                          suffixIcon: _searchController.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchController.clear();
-                                      searchQuery = '';
-                                    });
-                                    // re-request focus so user can start typing immediately
-                                    FocusScope.of(
-                                      context,
-                                    ).requestFocus(_searchFocusNode);
-                                  },
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: Color(0xFFF2F0EF).withAlpha(50),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Show album chips (horizontal) when albums exist.
-                    if (albums.isNotEmpty)
-                      SizedBox(
-                        height: 64,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          scrollDirection: Axis.horizontal,
-                          itemBuilder: (ctx, idx) {
-                            final name = albums.keys.elementAt(idx);
-                            final count = albums[name]?.length ?? 0;
-                            return ActionChip(
-                              label: Text('$name ($count)'),
-                              onPressed: () {
-                                // Open AlbumScreen to show album contents
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (c) => const AlbumScreen(),
+            : Column(
+                children: [
+                  const SizedBox(height: 20),
+                  // Gallery title and Credits
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+                    child: SizedBox(
+                      height: 50,
+                      child: Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          // Three dots menu and scan stats on the left
+                          Positioned(
+                            left: -15,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.more_vert,
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    size: 28,
                                   ),
-                                );
-                              },
-                            );
-                          },
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemCount: albums.length,
-                        ),
-                      ),
-
-                    Expanded(
-                      child: Builder(
-                        builder: (context) {
-                          final filtered = imageUrls.where((u) {
-                            final tags = photoTags[p.basename(u)] ?? [];
-                            return searchQuery.isEmpty ||
-                                tags.any(
-                                  (t) => t.toLowerCase().contains(
-                                    searchQuery.toLowerCase(),
-                                  ),
-                                );
-                          }).toList();
-                          return GridView.builder(
-                            padding: const EdgeInsets.all(12),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: _crossAxisCount,
-                                  mainAxisSpacing: 12,
-                                  crossAxisSpacing: 12,
-                                  childAspectRatio: 1.0,
+                                  onPressed: widget.onSettingsTap,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
                                 ),
-                            itemCount: filtered.length,
-                            itemBuilder: (context, index) {
-                              final url = filtered[index];
-                              final key = p.basename(url);
-                              final fullTags = photoTags[key] ?? [];
-                              // Only show tags <= 8 characters in the grid
-                              final shortTags = fullTags
-                                  .where((t) => t.length <= 8)
-                                  .toList();
-                              final visibleTags = shortTags.take(3).toList();
-
-                              final isSelected = _selectedKeys.contains(key);
-                              return GestureDetector(
-                                onTap: () {
-                                  if (_isSelectMode) {
-                                    setState(() {
-                                      if (isSelected) {
-                                        _selectedKeys.remove(key);
-                                      } else {
-                                        _selectedKeys.add(key);
-                                      }
-                                    });
-                                    return;
-                                  }
-                                },
-                                onLongPress: () {
-                                  setState(() {
-                                    _isSelectMode = true;
-                                    _selectedKeys.add(key);
-                                  });
-                                },
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      url.startsWith('local:')
-                                          ? FutureBuilder<Uint8List?>(
-                                              future: _getThumbForAsset(
-                                                url.substring(6),
-                                              ),
-                                              builder: (context, snap) {
-                                                if (snap.hasData &&
-                                                    snap.data != null) {
-                                                  return Image.memory(
-                                                    snap.data!,
-                                                    fit: BoxFit.cover,
-                                                  );
-                                                }
-                                                if (snap.connectionState ==
-                                                    ConnectionState.waiting) {
-                                                  return Container(
-                                                    color: Colors.black26,
-                                                  );
-                                                }
-                                                return Container(
-                                                  color: Colors.black26,
-                                                  child: const Icon(
-                                                    Icons.broken_image,
-                                                    color: Colors.white54,
-                                                  ),
-                                                );
-                                              },
-                                            )
-                                          : (url.startsWith('file:')
-                                                ? (() {
-                                                    final path = url.substring(
-                                                      'file:'.length,
-                                                    );
-                                                    return ClipRRect(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            12,
-                                                          ),
-                                                      child: Image.file(
-                                                        File(path),
-                                                        fit: BoxFit.cover,
-                                                      ),
-                                                    );
-                                                  })()
-                                                : Image.network(
-                                                    ApiService.resolveImageUrl(
-                                                      url,
-                                                    ),
-                                                    fit: BoxFit.cover,
-                                                    // Show a neutral placeholder instead of the
-                                                    // engine's red X when the server returns 404
-                                                    // or other network errors.
-                                                    errorBuilder:
-                                                        (
-                                                          context,
-                                                          error,
-                                                          stackTrace,
-                                                        ) {
-                                                          return Container(
-                                                            color:
-                                                                Colors.black26,
-                                                            child: const Center(
-                                                              child: Icon(
-                                                                Icons
-                                                                    .broken_image,
-                                                                color: Colors
-                                                                    .white54,
-                                                                size: 36,
-                                                              ),
-                                                            ),
-                                                          );
-                                                        },
-                                                  )),
-                                      if (_isSelectMode)
-                                        Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: isSelected
-                                                  ? Colors.blueAccent
-                                                  : Colors.black54,
-                                            ),
-                                            padding: const EdgeInsets.all(6),
-                                            child: Icon(
-                                              isSelected
-                                                  ? Icons.check
-                                                  : Icons
-                                                        .check_box_outline_blank,
-                                              color: Colors.white,
-                                              size: 18,
-                                            ),
-                                          ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.1,
                                         ),
-                                      Positioned(
-                                        left: 8,
-                                        right: 8,
-                                        bottom: 8,
-                                        child: LayoutBuilder(
-                                          builder: (context, constraints) {
-                                            final chips =
-                                                _buildTagChipsForWidth(
-                                                  visibleTags,
-                                                  fullTags,
-                                                  constraints.maxWidth,
-                                                );
-                                            return Wrap(
-                                              spacing: 4,
-                                              children: chips,
-                                            );
-                                          },
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _currentUnscannedCount == 0
+                                            ? Icons.check_circle
+                                            : Icons.pending_outlined,
+                                        color: _currentUnscannedCount == 0
+                                            ? Colors.green.shade600
+                                            : Colors.orange.shade700,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        _currentUnscannedCount == 0
+                                            ? '${imageUrls.length}'
+                                            : '${imageUrls.length - _currentUnscannedCount}/${imageUrls.length}',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade800,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Scanned',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
+                              ],
+                            ),
+                          ),
+                          // Credits on the right
+                          Positioned(
+                            right: 5,
+                            top: 0,
+                            child: Container(
+                              padding: const EdgeInsets.only(
+                                left: 12,
+                                right: 4,
+                                top: 6,
+                                bottom: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.1),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 80,
+                                    ),
+                                    child: ShaderMask(
+                                      shaderCallback: (bounds) =>
+                                          const LinearGradient(
+                                            begin: Alignment.centerLeft,
+                                            end: Alignment.centerRight,
+                                            colors: [
+                                              Colors.black87,
+                                              Color(0xFFC0C0C0),
+                                              Colors.black87,
+                                            ],
+                                            stops: [0.1, 0.5, 0.93],
+                                          ).createShader(bounds),
+                                      child: Text(
+                                        '1,000',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.5,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Transform.scale(
+                                    scale: 1.8,
+                                    child: Image.asset(
+                                      'assets/T Creadit Icon.png',
+                                      width: 30,
+                                      height: 30,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Unscanned button on the right (if any unscanned)
+                          if (_currentUnscannedCount > 0)
+                            Positioned(
+                              right: 5,
+                              bottom: 0,
+                              child: GestureDetector(
+                                onTap: _showUnscannedModal,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.orange.shade400,
+                                        Colors.orange.shade600,
+                                      ],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.pending_outlined,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Unscanned $_currentUnscannedCount',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Active search filters
+                  if (searchQuery.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  ...searchQuery
+                                      .split(' ')
+                                      .where((tag) => tag.isNotEmpty)
+                                      .map(
+                                        (tag) => Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 8,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [
+                                                  Colors.lightBlue.shade400,
+                                                  Colors.lightBlue.shade600,
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color:
+                                                    Colors.lightBlue.shade300,
+                                                width: 1.5,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.2),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  tag,
+                                                  style: TextStyle(
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      final tags = searchQuery
+                                                          .split(' ')
+                                                          .where(
+                                                            (t) =>
+                                                                t != tag &&
+                                                                t.isNotEmpty,
+                                                          )
+                                                          .toList();
+                                                      searchQuery = tags.join(
+                                                        ' ',
+                                                      );
+                                                      _searchController.text =
+                                                          searchQuery;
+                                                    });
+                                                    widget.onSearchChanged
+                                                        ?.call();
+                                                  },
+                                                  child: Icon(
+                                                    Icons.close,
+                                                    size: 16,
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            decoration: BoxDecoration(
+                              color:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? Colors.grey.shade800
+                                  : Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  searchQuery = '';
+                                  _searchController.text = '';
+                                });
+                                widget.onSearchChanged?.call();
+                              },
+                              icon: const Icon(Icons.clear_all, size: 16),
+                              label: const Text('Clear'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.lightBlue.shade300,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Show album chips (horizontal) when albums exist.
+                  if (albums.isNotEmpty)
+                    SizedBox(
+                      height: 64,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        scrollDirection: Axis.horizontal,
+                        itemBuilder: (ctx, idx) {
+                          final name = albums.keys.elementAt(idx);
+                          final count = albums[name]?.length ?? 0;
+                          return ActionChip(
+                            label: Text('$name ($count)'),
+                            onPressed: () {
+                              // Open AlbumScreen to show album contents
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (c) => const AlbumScreen(),
+                                ),
                               );
                             },
                           );
                         },
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemCount: albums.length,
                       ),
                     ),
 
-                    // Show scanning progress when auto-scan is active
-                    if (_scanning)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 8.0,
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        GestureDetector(
+                          onScaleStart: (details) {
+                            _lastScale = 1.0;
+                          },
+                          onScaleUpdate: (details) {
+                            // Calculate the scale change since last update
+                            final scaleDelta = details.scale - _lastScale;
+
+                            // Only update if there's a significant change (threshold to prevent jitter)
+                            if (scaleDelta.abs() > 0.15) {
+                              setState(() {
+                                if (scaleDelta > 0) {
+                                  // Pinch out - zoom in (fewer columns)
+                                  if (_crossAxisCount > 1) _crossAxisCount--;
+                                } else {
+                                  // Pinch in - zoom out (more columns)
+                                  if (_crossAxisCount < 5) _crossAxisCount++;
+                                }
+                              });
+                              _lastScale = details.scale;
+                            }
+                          },
+                          onScaleEnd: (details) {
+                            _lastScale = 1.0;
+                          },
+                          child: Builder(
+                            builder: (context) {
+                              final filtered = imageUrls.where((u) {
+                                final tags = photoTags[p.basename(u)] ?? [];
+                                if (searchQuery.isEmpty) return true;
+
+                                // Special case: "None" searches for untagged photos
+                                if (searchQuery.trim().toLowerCase() ==
+                                    'none') {
+                                  return tags.isEmpty;
+                                }
+
+                                // Split search query into individual search terms
+                                final searchTerms = searchQuery
+                                    .split(' ')
+                                    .where((term) => term.isNotEmpty)
+                                    .map((term) => term.toLowerCase())
+                                    .toList();
+
+                                // Check if any photo tag contains any of the search terms
+                                return searchTerms.any(
+                                  (searchTerm) => tags.any(
+                                    (t) => t.toLowerCase().contains(searchTerm),
+                                  ),
+                                );
+                              }).toList();
+
+                              // Adjust spacing based on column count - fewer columns = more spacing
+                              final spacing = _crossAxisCount <= 2
+                                  ? 4.0
+                                  : (_crossAxisCount == 3 ? 3.0 : 2.0);
+
+                              return Column(
+                                children: [
+                                  // Select All button row
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      16,
+                                      16,
+                                      4,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              // Select all visible photos
+                                              if (_selectedKeys.length ==
+                                                      filtered.length &&
+                                                  _selectedKeys.isNotEmpty) {
+                                                // Deselect all and exit select mode
+                                                _selectedKeys.clear();
+                                                _isSelectMode = false;
+                                              } else {
+                                                // Enter select mode and select all
+                                                _isSelectMode = true;
+                                                _selectedKeys.clear();
+                                                for (final url in filtered) {
+                                                  _selectedKeys.add(
+                                                    p.basename(url),
+                                                  );
+                                                }
+                                              }
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  _isSelectMode &&
+                                                      _selectedKeys.isNotEmpty
+                                                  ? Colors.blue.shade50
+                                                  : Colors.white,
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color:
+                                                    _isSelectMode &&
+                                                        _selectedKeys.isNotEmpty
+                                                    ? Colors.blue.shade400
+                                                    : Colors.grey.shade300,
+                                                width: 2,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.1),
+                                                  blurRadius: 4,
+                                                  offset: const Offset(0, 2),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  _selectedKeys.length ==
+                                                              filtered.length &&
+                                                          _selectedKeys
+                                                              .isNotEmpty
+                                                      ? Icons.check_box
+                                                      : Icons
+                                                            .check_box_outline_blank,
+                                                  color:
+                                                      _isSelectMode &&
+                                                          _selectedKeys
+                                                              .isNotEmpty
+                                                      ? Colors.blue.shade700
+                                                      : Colors.grey.shade600,
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  _selectedKeys.length ==
+                                                              filtered.length &&
+                                                          _selectedKeys
+                                                              .isNotEmpty
+                                                      ? 'Deselect All'
+                                                      : 'Select All',
+                                                  style: TextStyle(
+                                                    color:
+                                                        _isSelectMode &&
+                                                            _selectedKeys
+                                                                .isNotEmpty
+                                                        ? Colors.blue.shade700
+                                                        : Colors.grey.shade800,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        if (_isSelectMode &&
+                                            _selectedKeys.isNotEmpty) ...[
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            '${_selectedKeys.length} selected',
+                                            style: TextStyle(
+                                              color: Colors.grey.shade600,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  // Photo Grid
+                                  Expanded(
+                                    child: GridView.builder(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        12,
+                                        12,
+                                        12,
+                                        12,
+                                      ),
+                                      gridDelegate:
+                                          SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: _crossAxisCount,
+                                            mainAxisSpacing: spacing,
+                                            crossAxisSpacing: spacing,
+                                            childAspectRatio: 1.0,
+                                          ),
+                                      itemCount: filtered.length,
+                                      itemBuilder: (context, index) {
+                                        final url = filtered[index];
+                                        final key = p.basename(url);
+                                        final fullTags = photoTags[key] ?? [];
+                                        // Only show tags <= 8 characters in the grid
+                                        final shortTags = fullTags
+                                            .where((t) => t.length <= 8)
+                                            .toList();
+                                        final visibleTags = shortTags
+                                            .take(3)
+                                            .toList();
+
+                                        final isSelected = _selectedKeys
+                                            .contains(key);
+                                        return GestureDetector(
+                                          onTap: () async {
+                                            if (_isSelectMode) {
+                                              setState(() {
+                                                if (isSelected) {
+                                                  _selectedKeys.remove(key);
+                                                } else {
+                                                  _selectedKeys.add(key);
+                                                }
+                                              });
+                                              return;
+                                            }
+
+                                            // Open full-screen viewer. For local assets, load the file first.
+                                            if (url.startsWith('local:')) {
+                                              final id = url.substring(
+                                                'local:'.length,
+                                              );
+                                              final asset = _localAssets[id];
+                                              if (asset != null) {
+                                                final file = await asset.file;
+                                                if (file != null && mounted) {
+                                                  Navigator.push(
+                                                    context,
+                                                    MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          PhotoViewer(
+                                                            filePath: file.path,
+                                                            heroTag: key,
+                                                          ),
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            } else if (url.startsWith(
+                                              'file:',
+                                            )) {
+                                              final path = url.substring(
+                                                'file:'.length,
+                                              );
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) => PhotoViewer(
+                                                    filePath: path,
+                                                    heroTag: key,
+                                                  ),
+                                                ),
+                                              );
+                                            } else {
+                                              final resolved =
+                                                  ApiService.resolveImageUrl(
+                                                    url,
+                                                  );
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) => PhotoViewer(
+                                                    networkUrl: resolved,
+                                                    heroTag: key,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          },
+                                          onLongPress: () {
+                                            setState(() {
+                                              _isSelectMode = true;
+                                              _selectedKeys.add(key);
+                                            });
+                                          },
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              6,
+                                            ),
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
+                                                Hero(
+                                                  tag: key,
+                                                  child:
+                                                      url.startsWith('local:')
+                                                      ? FutureBuilder<
+                                                          Uint8List?
+                                                        >(
+                                                          future:
+                                                              _getThumbForAsset(
+                                                                url.substring(
+                                                                  6,
+                                                                ),
+                                                              ),
+                                                          builder: (context, snap) {
+                                                            if (snap.hasData &&
+                                                                snap.data !=
+                                                                    null) {
+                                                              return Image.memory(
+                                                                snap.data!,
+                                                                fit: BoxFit
+                                                                    .cover,
+                                                              );
+                                                            }
+                                                            if (snap.connectionState ==
+                                                                ConnectionState
+                                                                    .waiting) {
+                                                              return Container(
+                                                                color: Colors
+                                                                    .black26,
+                                                              );
+                                                            }
+                                                            return Container(
+                                                              color: Colors
+                                                                  .black26,
+                                                              child: const Icon(
+                                                                Icons
+                                                                    .broken_image,
+                                                                color: Colors
+                                                                    .white54,
+                                                              ),
+                                                            );
+                                                          },
+                                                        )
+                                                      : (url.startsWith('file:')
+                                                            ? (() {
+                                                                final path = url
+                                                                    .substring(
+                                                                      'file:'
+                                                                          .length,
+                                                                    );
+                                                                return ClipRRect(
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        6,
+                                                                      ),
+                                                                  child: Image.file(
+                                                                    File(path),
+                                                                    fit: BoxFit
+                                                                        .cover,
+                                                                  ),
+                                                                );
+                                                              })()
+                                                            : Image.network(
+                                                                ApiService.resolveImageUrl(
+                                                                  url,
+                                                                ),
+                                                                fit: BoxFit
+                                                                    .cover,
+                                                                // Show a neutral placeholder instead of the
+                                                                // engine's red X when the server returns 404
+                                                                // or other network errors.
+                                                                errorBuilder:
+                                                                    (
+                                                                      context,
+                                                                      error,
+                                                                      stackTrace,
+                                                                    ) {
+                                                                      return Container(
+                                                                        color: Colors
+                                                                            .black26,
+                                                                        child: const Center(
+                                                                          child: Icon(
+                                                                            Icons.broken_image,
+                                                                            color:
+                                                                                Colors.white54,
+                                                                            size:
+                                                                                36,
+                                                                          ),
+                                                                        ),
+                                                                      );
+                                                                    },
+                                                              )),
+                                                ),
+                                                if (_isSelectMode)
+                                                  Positioned(
+                                                    top: 8,
+                                                    left: 8,
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: isSelected
+                                                            ? Colors.blueAccent
+                                                            : Colors.black54,
+                                                      ),
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            6,
+                                                          ),
+                                                      child: Icon(
+                                                        isSelected
+                                                            ? Icons.check_box
+                                                            : Icons.crop_square,
+                                                        color: Colors.white,
+                                                        size: 18,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Positioned(
+                                                  left: 8,
+                                                  right: 8,
+                                                  bottom: 8,
+                                                  child: LayoutBuilder(
+                                                    builder:
+                                                        (context, constraints) {
+                                                          final chips =
+                                                              _buildTagChipsForWidth(
+                                                                visibleTags,
+                                                                fullTags,
+                                                                constraints
+                                                                    .maxWidth,
+                                                              );
+                                                          return Wrap(
+                                                            spacing: 4,
+                                                            children: chips,
+                                                          );
+                                                        },
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            LinearProgressIndicator(
-                              value: _scanTotal > 0 ? _scanProgress : null,
+
+                        // Floating controls overlay - bottom right (menu buttons)
+                        Positioned(
+                          bottom: 80,
+                          right: 8,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '${(_scanProgress * 100).round()}% Scanning images...',
-                              style: const TextStyle(color: Colors.white),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    showDebug
+                                        ? Icons.bug_report_sharp
+                                        : Icons.bug_report,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: () =>
+                                      setState(() => showDebug = !showDebug),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.camera_alt,
+                                    color: Colors.white,
+                                  ),
+                                  tooltip: 'Scan now',
+                                  onPressed: () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      builder: (ctx) {
+                                        return SafeArea(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              ListTile(
+                                                leading: const Icon(
+                                                  Icons.photo_library,
+                                                ),
+                                                title: const Text(
+                                                  'Scan missing images',
+                                                ),
+                                                onTap: () {
+                                                  Navigator.pop(ctx);
+                                                  _manualScan(force: false);
+                                                },
+                                              ),
+                                              ListTile(
+                                                leading: const Icon(
+                                                  Icons.delete_forever,
+                                                ),
+                                                title: const Text(
+                                                  'Remove all persisted tags',
+                                                ),
+                                                subtitle: const Text(
+                                                  'Clears saved scan results for all photos',
+                                                ),
+                                                onTap: () async {
+                                                  Navigator.pop(ctx);
+                                                  final confirm = await showDialog<bool>(
+                                                    context: context,
+                                                    builder: (dctx) => AlertDialog(
+                                                      title: const Text(
+                                                        'Confirm',
+                                                      ),
+                                                      content: const Text(
+                                                        'Are you sure you want to remove all persisted tags? '
+                                                        'This cannot be undone.',
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                dctx,
+                                                                false,
+                                                              ),
+                                                          child: const Text(
+                                                            'Cancel',
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                dctx,
+                                                                true,
+                                                              ),
+                                                          child: const Text(
+                                                            'Remove',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                  if (confirm != true) return;
+                                                  try {
+                                                    final prefs =
+                                                        await SharedPreferences.getInstance();
+                                                    for (final u in imageUrls) {
+                                                      final key = p.basename(u);
+                                                      if (prefs.containsKey(
+                                                        key,
+                                                      ))
+                                                        await prefs.remove(key);
+                                                      photoTags.remove(key);
+                                                    }
+                                                    if (mounted)
+                                                      setState(() {});
+                                                    ScaffoldMessenger.of(
+                                                      context,
+                                                    ).showSnackBar(
+                                                      const SnackBar(
+                                                        content: Text(
+                                                          'All persisted tags removed',
+                                                        ),
+                                                      ),
+                                                    );
+                                                  } catch (e) {
+                                                    developer.log(
+                                                      'Failed to remove tags: $e',
+                                                    );
+                                                    if (mounted)
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      ).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Failed to remove tags',
+                                                          ),
+                                                        ),
+                                                      );
+                                                  }
+                                                },
+                                              ),
+                                              ListTile(
+                                                leading: const Icon(
+                                                  Icons.refresh,
+                                                ),
+                                                title: const Text(
+                                                  'Force rescan all device images',
+                                                ),
+                                                onTap: () {
+                                                  Navigator.pop(ctx);
+                                                  _manualScan(force: true);
+                                                },
+                                              ),
+                                              ListTile(
+                                                leading: const Icon(
+                                                  Icons.cancel,
+                                                ),
+                                                title: const Text('Cancel'),
+                                                onTap: () => Navigator.pop(ctx),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                  ],
-                ),
+
+                        // Floating glassmorphic scanning progress overlay
+                        if (_scanning)
+                          Positioned(
+                            left: 16,
+                            right: 100,
+                            bottom: 100,
+                            child: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.grey.shade900
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.1),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 10),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.lightBlue.shade300,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          _scanPaused
+                                              ? Icons.pause_circle_filled
+                                              : Icons.sync,
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.grey.shade900
+                                              : Colors.white,
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  '${(_scanProgress * 100).round()}%',
+                                                  style: TextStyle(
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                    fontSize: 20,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  'Scanning images',
+                                                  style: TextStyle(
+                                                    color:
+                                                        (Theme.of(
+                                                                      context,
+                                                                    ).brightness ==
+                                                                    Brightness
+                                                                        .dark
+                                                                ? Colors.white
+                                                                : Colors
+                                                                      .black87)
+                                                            .withValues(
+                                                              alpha: 0.9,
+                                                            ),
+                                                    fontSize: 15,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '$_scanProcessed / $_scanTotal processed',
+                                              style: TextStyle(
+                                                color:
+                                                    (Theme.of(
+                                                                  context,
+                                                                ).brightness ==
+                                                                Brightness.dark
+                                                            ? Colors.white
+                                                            : Colors.black87)
+                                                        .withValues(alpha: 0.8),
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: Icon(
+                                          _scanPaused
+                                              ? Icons.play_circle_filled
+                                              : Icons.pause_circle_filled,
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                          size: 32,
+                                        ),
+                                        tooltip: _scanPaused
+                                            ? 'Resume scan'
+                                            : 'Pause scan',
+                                        onPressed: () => setState(
+                                          () => _scanPaused = !_scanPaused,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: _scanTotal > 0
+                                          ? _scanProgress
+                                          : null,
+                                      minHeight: 5,
+                                      backgroundColor:
+                                          (Theme.of(context).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87)
+                                              .withValues(alpha: 0.3),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? Colors.white
+                                            : Colors.blue.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
       ),
       // Pricing moved to Settings screen; FAB removed.
       bottomNavigationBar: _isSelectMode && _selectedKeys.isNotEmpty
-          ? SafeArea(
-              child: Container(
-                height: 64,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${_selectedKeys.length} selected',
-                        style: const TextStyle(color: Colors.white),
+          ? ClipRRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.white.withValues(alpha: 0.25),
+                        Colors.white.withValues(alpha: 0.15),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    border: Border(
+                      top: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.3),
+                        width: 0.5,
                       ),
                     ),
-                    ElevatedButton.icon(
-                      onPressed: _createAlbumFromSelection,
-                      icon: const Icon(Icons.create_new_folder),
-                      label: Text('Create Album (${_selectedKeys.length})'),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    child: Container(
+                      height: 64,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${_selectedKeys.length} selected',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black26,
+                                    offset: Offset(0, 1),
+                                    blurRadius: 2,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.blue.withValues(alpha: 0.8),
+                                  Colors.blueAccent.withValues(alpha: 0.8),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.blue.withValues(alpha: 0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: ElevatedButton.icon(
+                              onPressed: _createAlbumFromSelection,
+                              icon: const Icon(
+                                Icons.create_new_folder,
+                                size: 20,
+                              ),
+                              label: Text(
+                                'Create Album (${_selectedKeys.length})',
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.transparent,
+                                foregroundColor: Colors.white,
+                                shadowColor: Colors.transparent,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             )

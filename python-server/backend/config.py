@@ -22,7 +22,7 @@ Minimum confidence for a detection to be accepted by the server.
 For the free autoscan mode we prefer a conservative threshold to reduce
 noisy / low-confidence tags. Settable via env var if needed.
 """
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.8"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
 MIN_BOX_PERCENT = 0.2       # 30% for objects
 MIN_PERSON_PERCENT = 0.1    # 10% for persons
 

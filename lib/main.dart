@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
 import 'services/api_service.dart';
 
@@ -71,24 +72,36 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
       theme: ThemeData(
         brightness: Brightness.light,
         primarySwatch: Colors.blue,
+        textTheme: GoogleFonts.robotoTextTheme(ThemeData.light().textTheme),
         // Use a subtle off-white for light mode backgrounds to reduce
         // glare compared to pure white. Use #F2F0EF as requested.
         scaffoldBackgroundColor: const Color(0xFFF2F0EF),
         cardColor: const Color(0xFFF2F0EF),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF2F0EF),
+        appBarTheme: AppBarTheme(
+          backgroundColor: const Color(0xFFF2F0EF),
           foregroundColor: Colors.black,
           elevation: 0,
+          titleTextStyle: GoogleFonts.roboto(
+            color: Colors.black,
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         primarySwatch: Colors.blue,
+        textTheme: GoogleFonts.robotoTextTheme(ThemeData.dark().textTheme),
         scaffoldBackgroundColor: const Color(0xFF121212),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1E1E1E),
+        appBarTheme: AppBarTheme(
+          backgroundColor: const Color(0xFF1E1E1E),
           foregroundColor: Colors.white,
           elevation: 0,
+          titleTextStyle: GoogleFonts.roboto(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         cardColor: const Color(0xFF1E1E1E),
       ),
