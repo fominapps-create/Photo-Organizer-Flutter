@@ -12,6 +12,9 @@ ALLOW_REMOTE = os.getenv("ALLOW_REMOTE", "False").lower() in ("1", "true", "yes"
 RELOAD = os.getenv("RELOAD", "True").lower() in ("1", "true", "yes")
 ALLOW_ORIGINS = os.getenv("ALLOW_ORIGINS")  # comma-separated list or None to keep defaults
 
+# Enable legacy file moving/organization. Default: False (tag-only mode).
+ENABLE_MOVING = os.getenv("ENABLE_MOVING", "False").lower() in ("1", "true", "yes")
+
 TEMP_FOLDER = os.getenv("TEMP_FOLDER", "temp")
 # Machine-specific defaults preserved but better set via environment or .env
 SOURCE_FOLDER = os.getenv("SOURCE_FOLDER", r"C:\Users\MIKE\Pictures\Screenshots")

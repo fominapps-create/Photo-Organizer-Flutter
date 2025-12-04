@@ -8,6 +8,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
+import '../services/tag_store.dart';
+import '../services/photo_id.dart';
 
 class GalleryScreen extends StatefulWidget {
   final VoidCallback? onSettingsTap;
@@ -22,334 +24,10 @@ class GalleryScreenState extends State<GalleryScreen> {
   // When showing device-local assets we store them here keyed by asset id
   final Map<String, AssetEntity> _localAssets = {};
   // Cache thumbnails for local assets to avoid repeated work
-  final Map<String, Uint8List> _thumbCache = {};
-  Map<String, List<String>> photoTags = {};
-  bool loading = true;
-  // Autoscan state
-  bool _autoscanRunning = false;
-  int _autoscanProgress = 0;
-  int _autoscanTotal = 0;
-  int _autoscanSaved = 0;
-  String searchQuery = '';
-  bool showDebug = false;
-  // When true, force showing device-local photos instead of server-organized folders
-  bool _forceDeviceView = false;
-  late final TextEditingController _searchController;
-  late final FocusNode _searchFocusNode;
-  int _crossAxisCount = 2;
-  bool _isSelectMode = false;
-  final Set<String> _selectedKeys = {};
-  final Map<String, double> _textWidthCache = {};
-
-  double _measureTextWidth(String text, TextStyle style) {
-    final key = text; // style is constant here, so text is fine as cache key
-    if (_textWidthCache.containsKey(key)) return _textWidthCache[key]!;
-    final textPainter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout();
-    final w = textPainter.size.width;
-    _textWidthCache[key] = w;
-    return w;
-  }
-
-  List<Widget> _buildTagChipsForWidth(
-    List<String> visibleTags,
-    List<String> fullTags,
-    double maxWidth,
-  ) {
-    const double horizontalPadding =
-        6 * 2; // EdgeInsets.symmetric(horizontal: 6)
-    const double chipSpacing = 4.0;
-    final TextStyle style = const TextStyle(
-      color: Colors.white,
-      fontWeight: FontWeight.bold,
-    );
-
-    double used = 0.0;
-    final List<Widget> chips = [];
-    final List<double> chipWidths = [];
-
-    for (var t in visibleTags) {
-      final bool isPremium = t.startsWith('premium:');
-      final displayText = isPremium ? t.replaceFirst('premium:', '') : t;
-      final textWidth = _measureTextWidth(displayText, style);
-      final w = textWidth + horizontalPadding + (isPremium ? 18.0 : 0.0);
-      final nextUsed = chips.isEmpty ? used + w : used + chipSpacing + w;
-      if (nextUsed <= maxWidth) {
-        // add this chip
-        used = nextUsed;
-        chipWidths.add(w);
-        chips.add(
-          GestureDetector(
-            onTap: () => _showTagMenu(t),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isPremium ? Colors.amber.shade700 : _colorForTag(t),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isPremium) ...[
-                    const Icon(Icons.star, size: 14, color: Colors.white),
-                    const SizedBox(width: 4),
-                  ],
-                  Text(displayText, style: style),
-                ],
-              ),
-            ),
-          ),
-        );
-      } else {
-        // stop trying to add tags that don't fit; we'll consider +N after the loop
-        break;
-      }
-    }
-
-    final hiddenCount = fullTags.length - chips.length;
-    if (hiddenCount > 0) {
-      final plusStr = '+$hiddenCount';
-      final plusWidth = _measureTextWidth(plusStr, style) + horizontalPadding;
-      final nextUsed = chips.isEmpty
-          ? used + plusWidth
-          : used + chipSpacing + plusWidth;
-      if (nextUsed <= maxWidth) {
-        // If +N fits in remaining width, just add it
-        chips.add(
-          GestureDetector(
-            onTap: () => _showHiddenTagsMenu(fullTags, visibleTags),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(plusStr, style: style),
-            ),
-          ),
-        );
-      } else if (chips.isNotEmpty) {
-        // If it doesn't fit, see if we can replace the last chip with +N
-        final lastChipWidth = chipWidths.isNotEmpty ? chipWidths.last : 0.0;
-        final usedWithoutLast = chips.length == 1
-            ? 0.0
-            : used - (chipSpacing + lastChipWidth);
-        final testUsed =
-            usedWithoutLast +
-            (chips.isEmpty ? plusWidth : chipSpacing + plusWidth);
-        if (testUsed <= maxWidth) {
-          chips.removeLast();
-          chipWidths.removeLast();
-          chips.add(
-            GestureDetector(
-              onTap: () => _showHiddenTagsMenu(fullTags, visibleTags),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(plusStr, style: style),
-              ),
-            ),
-          );
-        }
-      }
-    }
-
-    // If there are no chips (none fit or no short tags), show a 'None' placeholder when nothing else is present
-    if (chips.isEmpty && hiddenCount == 0) {
-      chips.add(
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: Colors.grey,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Text(
-            'None',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-        ),
-      );
-    }
-
-    // If chips is empty but we have hidden tags (e.g. long-only tags), show +N even if it might exceed width
-    if (chips.isEmpty && hiddenCount > 0) {
-      final plusStr = '+$hiddenCount';
-      chips.add(
-        GestureDetector(
-          onTap: () => _showHiddenTagsMenu(fullTags, visibleTags),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.black54,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(plusStr, style: style),
-          ),
-        ),
-      );
-    }
-
-    return chips;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController = TextEditingController(text: searchQuery);
-    _searchFocusNode = FocusNode();
-    _searchController.addListener(() {
-      // keep searchQuery in sync and refresh the suffixIcon
-      if (searchQuery != _searchController.text) {
-        setState(() {
-          searchQuery = _searchController.text;
-        });
-      }
-    });
-    _loadAllImages().then((_) => _maybeStartAutoScan());
-  }
-
-  Future<void> _maybeStartAutoScan() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final enabled = prefs.getBool('autoscan_enabled') ?? true;
-      final wifiOnly = prefs.getBool('autoscan_wifi_only') ?? true;
-      final lastMs = prefs.getInt('last_autoscan_ms') ?? 0;
-      final last = DateTime.fromMillisecondsSinceEpoch(lastMs);
-      // Do not autoscan more than once per 24 hours by default
-      if (!enabled) return;
-      if (DateTime.now().difference(last).inHours < 24) return;
-
-      if (wifiOnly) {
-        final conn = await Connectivity().checkConnectivity();
-        if (conn != ConnectivityResult.wifi) {
-          developer.log('Autoscan skipped: not on Wi‑Fi');
-          return;
-        }
-      }
-
-      // Request permissions to access photos
-      final perm = await PhotoManager.requestPermissionExtend();
-      if (!perm.isAuth) {
-        developer.log('Autoscan skipped: permission denied');
-        return;
-      }
-
-      // Enumerate assets and run a capped sample autoscan (default 200)
-      const sampleLimit = 200;
-      final albums = await PhotoManager.getAssetPathList(onlyAll: true);
-      if (albums.isEmpty) return;
-      final all = albums.first;
-      final total = await all.assetCountAsync;
-      final take = total < sampleLimit ? total : sampleLimit;
-      final assets = await all.getAssetListRange(start: 0, end: take);
-
-      // Start scanning in background
-      _runAutoScan(assets);
-    } catch (e) {
-      developer.log('Autoscan failed to start: $e');
-    }
-  }
-
-  Future<void> _runAutoScan(List<AssetEntity> assets) async {
-    if (_autoscanRunning) return;
-    setState(() {
-      _autoscanRunning = true;
-      _autoscanProgress = 0;
-      _autoscanTotal = assets.length;
-      _autoscanSaved = 0;
-    });
-
-    final prefs = await SharedPreferences.getInstance();
-    bool completed = true;
-    for (final asset in assets) {
-      if (!_autoscanRunning) {
-        completed = false;
-        break;
-      }
-      try {
-        final key = p.basename(asset.title ?? asset.id);
-        // Skip if we already have server tags persisted
-        if (prefs.getString(key) != null) {
-          setState(() => _autoscanProgress++);
-          continue;
-        }
-
-        // Get a reasonably sized thumbnail (long edge ~768)
-        final thumb = await asset.thumbnailDataWithSize(
-          const ThumbnailSize(768, 768),
-          quality: 80,
-        );
-        if (thumb == null) {
-          setState(() => _autoscanProgress++);
-          continue;
-        }
-
-        // Write to a temp file and upload
-        final tmp = File('${Directory.systemTemp.path}/${asset.id}.jpg');
-        await tmp.writeAsBytes(thumb);
-
-        final res = await ApiService.uploadImage(tmp, module: 'preview');
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            final data = json.decode(res.body);
-            final tags = (data['tags'] as List?)?.cast<String>() ?? [];
-            if (tags.isNotEmpty) {
-              await prefs.setString(key, json.encode(tags));
-              // also update in-memory map so UI refreshes immediately
-              setState(() {
-                photoTags[key] = tags;
-                _autoscanSaved++;
-              });
-            }
-          } catch (_) {}
-        }
-
-        // cleanup
-        try {
-          if (await tmp.exists()) await tmp.delete();
-        } catch (_) {}
-      } catch (e) {
-        developer.log('Autoscan upload failed for asset ${asset.id}: $e');
-      }
-
-      setState(() => _autoscanProgress++);
-    }
-
-    await prefs.setInt(
-      'last_autoscan_ms',
-      DateTime.now().millisecondsSinceEpoch,
-    );
-    if (completed) {
-      await prefs.setInt(
-        'last_autoscan_ms',
-        DateTime.now().millisecondsSinceEpoch,
-      );
-    }
-    setState(() {
-      _autoscanRunning = false;
-      _autoscanProgress = 0;
-      _autoscanTotal = 0;
-    });
-
-    // notify user (only if still mounted)
-    if (!mounted) return;
-    if (completed) {
+  // This file is a re-export of the canonical `gallery_screen.dart` to avoid
+  // duplicate implementations. Import the primary implementation instead.
+  export 'gallery_screen.dart';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Autoscan complete — scanned ${assets.length}, saved $_autoscanSaved tags',
-          ),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
           content: Text(
             'Autoscan canceled — progress $_autoscanProgress/${assets.length}, saved $_autoscanSaved tags',
           ),
@@ -411,7 +89,7 @@ class GalleryScreenState extends State<GalleryScreen> {
           final url = item['url'] as String;
           final tags = List<String>.from(item['tags'] ?? []);
           urls.add(url);
-          photoTags[p.basename(url)] = tags; // preload server tags
+          photoTags[_keyForUrl(url)] = tags; // preload server tags
         }
         setState(() => imageUrls = urls);
         return;
@@ -477,19 +155,31 @@ class GalleryScreenState extends State<GalleryScreen> {
     }
   }
 
+  String _keyForUrl(String url) {
+    // Always derive a canonical photoID for use as tag keys.
+    try {
+      return PhotoId.canonicalId(url);
+    } catch (_) {
+      if (url.startsWith('local:')) return url.substring('local:'.length);
+      if (url.startsWith('file:')) return 'file://' + url.substring('file:'.length);
+      return url;
+    }
+  }
+
   Future<void> _loadTags() async {
     final prefs = await SharedPreferences.getInstance();
+
     for (final url in imageUrls) {
-      final key = p.basename(url);
+      final key = _keyForUrl(url);
       if (photoTags.containsKey(key) && (photoTags[key]?.isNotEmpty ?? false)) {
         continue; // prefer server
       }
-      final j = prefs.getString(key);
-      if (j != null) {
-        try {
-          final tags = (json.decode(j) as List).cast<String>();
-          photoTags[key] = tags;
-        } catch (_) {}
+      final local = await TagStore.loadLocalTags(key);
+      if (local != null) {
+        // Update UI immediately for this single photo so tags appear in real-time.
+        setState(() {
+          photoTags[key] = local;
+        });
       }
     }
   }
@@ -504,7 +194,7 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   List<String> _getFilteredImageUrls() {
     return imageUrls.where((u) {
-      final tags = photoTags[p.basename(u)] ?? [];
+      final tags = photoTags[_keyForUrl(u)] ?? [];
       return searchQuery.isEmpty ||
           tags.any((t) => t.toLowerCase().contains(searchQuery.toLowerCase()));
     }).toList();
@@ -514,7 +204,7 @@ class GalleryScreenState extends State<GalleryScreen> {
     final visible = _getFilteredImageUrls();
     setState(() {
       for (final url in visible) {
-        _selectedKeys.add(p.basename(url));
+        _selectedKeys.add(_keyForUrl(url));
       }
     });
   }
@@ -522,8 +212,8 @@ class GalleryScreenState extends State<GalleryScreen> {
   Future<void> _createAlbumFromSelection() async {
     if (_selectedKeys.isEmpty) return;
     final selectedUrls = imageUrls
-        .where((u) => _selectedKeys.contains(p.basename(u)))
-        .toList();
+      .where((u) => _selectedKeys.contains(_keyForUrl(u)))
+      .toList();
     if (selectedUrls.isEmpty) return;
     final controller = TextEditingController(text: 'Album');
     final name = await showDialog<String>(
@@ -693,8 +383,8 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   Future<void> _createAlbumWithTag(String tag) async {
     final tagged = imageUrls
-        .where((u) => (photoTags[p.basename(u)] ?? []).contains(tag))
-        .toList();
+      .where((u) => (photoTags[_keyForUrl(u)] ?? []).contains(tag))
+      .toList();
     if (tagged.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No images found with tag "$tag"')),
@@ -926,7 +616,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                           child: Builder(
                             builder: (context) {
                               final filtered = imageUrls.where((u) {
-                                final tags = photoTags[p.basename(u)] ?? [];
+                                final tags = photoTags[_keyForUrl(u)] ?? [];
                                 return searchQuery.isEmpty ||
                                     tags.any(
                                       (t) => t.toLowerCase().contains(
@@ -946,9 +636,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                                 itemCount: filtered.length,
                                 itemBuilder: (context, index) {
                                   final url = filtered[index];
-                                  final key = url.startsWith('local:')
-                                      ? url.substring(6)
-                                      : p.basename(url);
+                                    final key = _keyForUrl(url);
                                   final fullTags = photoTags[key] ?? [];
                                   // Only show tags <= 8 characters in the grid
                                   final shortTags = fullTags

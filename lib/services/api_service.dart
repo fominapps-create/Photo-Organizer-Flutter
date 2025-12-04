@@ -163,6 +163,7 @@ class ApiService {
 
   static Future<http.Response> uploadImage(
     dynamic file, {
+    required String photoID,
     String? module,
     Duration timeout = const Duration(seconds: 30),
     int retries = 2,
@@ -180,6 +181,8 @@ class ApiService {
             request.headers['X-Upload-Token'] = _uploadToken!;
           }
           // Include module as a form field so server can route to the correct AI module
+          // Required photoID per API contract
+          request.fields['photoID'] = photoID;
           if (module != null && module.isNotEmpty) {
             request.fields['module'] = module;
           }
@@ -204,6 +207,8 @@ class ApiService {
             request.headers['X-Upload-Token'] = _uploadToken!;
           }
           // Include module as a form field so server can route to the correct AI module
+          // Required photoID per API contract
+          request.fields['photoID'] = photoID;
           if (module != null && module.isNotEmpty) {
             request.fields['module'] = module;
           }
@@ -242,11 +247,20 @@ class ApiService {
     throw lastError ?? Exception('Upload failed after $retries attempts');
   }
 
+  /// Upload multiple files. Each item must be a Map with keys: `file` and `photoID`.
   static Future<List<http.Response>> uploadImages(List<dynamic> files) async {
     List<http.Response> responses = [];
-    for (var file in files) {
-      final res = await uploadImage(file);
-      responses.add(res);
+    for (var item in files) {
+      if (item is Map &&
+          item.containsKey('file') &&
+          item.containsKey('photoID')) {
+        final res = await uploadImage(item['file'], photoID: item['photoID']);
+        responses.add(res);
+      } else {
+        throw Exception(
+          'uploadImages requires items of shape {"file": file, "photoID": id}',
+        );
+      }
     }
     return responses;
   }

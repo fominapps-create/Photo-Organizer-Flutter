@@ -65,7 +65,8 @@ class _OrganizeProgressScreenState extends State<OrganizeProgressScreen> {
 
         final start = DateTime.now();
         try {
-          await ApiService.uploadImage(file, module: module);
+          final photoID = 'file://${path}';
+          await ApiService.uploadImage(file, photoID: photoID, module: module);
           final dur = DateTime.now().difference(start).inMilliseconds;
           totalMs += dur;
           counted++;
@@ -190,7 +191,12 @@ class _OrganizeProgressScreenState extends State<OrganizeProgressScreen> {
           final path = item.substring('file:'.length);
           final file = File(path);
           if (await file.exists()) {
-            final res = await ApiService.uploadImage(file, module: cat);
+            final photoID = 'file://${path}';
+            final res = await ApiService.uploadImage(
+              file,
+              photoID: photoID,
+              module: cat,
+            );
             try {
               final body = json.decode(res.body) as Map<String, dynamic>;
               // prefer server-provided url if any

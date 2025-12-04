@@ -16,7 +16,7 @@ from fastapi import BackgroundTasks, Header
 # available in the global environment (this keeps the file runnable in editors
 # without changing runtime behavior when FastAPI *is* installed).
 try:
-    from fastapi import FastAPI, UploadFile, HTTPException, Header
+    from fastapi import FastAPI, UploadFile, HTTPException, Header, File, Form
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
 except Exception:  # pragma: no cover - editor fallback
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 from .backend_main import process_single_image, get_model
 from .clip_model import get_clip_model, classify_image
 from .ocr_enhancement import enhance_screenshot_tag, is_ocr_available
+from . import tags_db as _tags_db
 from pydantic import BaseModel
 from .config import TEMP_FOLDER, TARGET_FOLDER, CONFIDENCE_THRESHOLD
 from .model import load_model  # kept for legacy usage elsewhere
@@ -44,6 +45,7 @@ TAGS_DB_PATH = os.path.join(os.path.dirname(__file__), 'tags_db.json')
 
 
 def _load_tags_db() -> Dict[str, List[str]]:
+    # Deprecated: use `tags_db` module helpers. Kept for backward compatibility in this file.
     try:
         if os.path.exists(TAGS_DB_PATH):
             with open(TAGS_DB_PATH, 'r', encoding='utf-8') as f:
@@ -54,11 +56,11 @@ def _load_tags_db() -> Dict[str, List[str]]:
 
 
 def _save_tags_db(db: Dict[str, List[str]]) -> None:
+    # Deprecated wrapper; prefer `tags_db.set_tags` and `tags_db.get_tags`.
     try:
         with open(TAGS_DB_PATH, 'w', encoding='utf-8') as f:
             json.dump(db, f, ensure_ascii=False, indent=2)
     except Exception:
-        # Best-effort only; don't crash the API if saving fails
         logging.warning('Failed to save tags DB')
 import logging
 
@@ -128,7 +130,7 @@ except Exception:
 
 # --- Routes ---
 @app.post("/process-image/")
-async def detect_tags(file: "UploadFile", x_upload_token: str | None = Header(None)):
+async def detect_tags(file: "UploadFile" = File(...), photoID: str = Form(...), x_upload_token: str | None = Header(None)):
     """
     Upload an image and return all detected object tags (YOLO classes above threshold).
     """
@@ -241,16 +243,20 @@ async def detect_tags(file: "UploadFile", x_upload_token: str | None = Header(No
     except Exception:
         logging.exception('Error cleaning up files in non-persistent mode')
 
-    # Tags are persisted by process_single_image under the final filename (if moved)
-    # Return the final URL (when available) to the client so it can save tags locally
-    # under the final filename. This is required because the server may rename or move
-    # the uploaded file during organization, and client-side tags must be persisted
-    # using the final filename to match what the gallery will display.
-    return {"filename": file.filename, "tags": tags, "url": final_url}
+    # Persist tags under provided `photoID` (tag-only mode required by architecture).
+    try:
+        try:
+            _tags_db.set_tags(photoID, tags)
+        except Exception:
+            logging.exception('Failed to persist tags under photoID')
+    except Exception:
+        pass
+
+    return {"filename": file.filename, "photoID": photoID, "tags": tags, "url": final_url}
 
 
 @app.post("/process-images-batch/")
-async def detect_tags_batch(files: List["UploadFile"], x_upload_token: str | None = Header(None)):
+async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str = Form(...), x_upload_token: str | None = Header(None)):
     """
     Upload multiple images and return detected tags for all (faster batch processing).
     """
@@ -308,24 +314,41 @@ async def detect_tags_batch(files: List["UploadFile"], x_upload_token: str | Non
                 os.remove(temp_path)
         raise HTTPException(status_code=500, detail=f"Batch classification error: {e}")
     
-    # Build response
+    # Build response — map results to provided photoIDs when supplied
+    # photoIDs is required and must be a JSON array string matching the uploaded files order
+    ids_list = None
+    try:
+        import json as _json
+        ids_list = _json.loads(photoIDs)
+        if not isinstance(ids_list, list):
+            raise ValueError('photoIDs must be a JSON array')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid photoIDs: {e}")
+
     results = []
-    for filename, tags, temp_path in zip(filenames, batch_tags, temp_paths):
-        # Optionally organize files (skipped for batch to keep it fast)
-        # For batch uploads, we just return tags without organizing
+    for idx, (filename, tags, temp_path) in enumerate(zip(filenames, batch_tags, temp_paths)):
+        photo_id = None
+        if ids_list and idx < len(ids_list):
+            photo_id = ids_list[idx]
+            try:
+                _tags_db.set_tags(photo_id, tags)
+            except Exception:
+                logging.exception('Failed to persist tags for photoID in batch')
+
         results.append({
             "filename": filename,
+            "photoID": photo_id,
             "tags": tags,
             "url": None  # Not organizing in batch mode for speed
         })
-        
+
         # Cleanup temp files
         try:
             if not PERSIST_UPLOADS and os.path.exists(temp_path):
                 os.remove(temp_path)
         except Exception:
             pass
-    
+
     return {"results": results, "count": len(results)}
 
 
@@ -375,30 +398,46 @@ def list_all_organized_images(x_upload_token: str | None = Header(None)):
     return {"images": images}
 
 
-@app.get('/tags/{filename}/')
-def get_tags_for_file(filename: str, x_upload_token: str | None = Header(None)):
+@app.get('/tags/{photo_id}/')
+def get_tags_for_file(photo_id: str, x_upload_token: str | None = Header(None)):
     _require_token(x_upload_token)
-    """Return tags for a specific filename if present in DB."""
-    db = _load_tags_db()
-    return {"filename": filename, "tags": db.get(filename, [])}
+    """Return tags for a specific photoID if present in DB."""
+    try:
+        tags = _tags_db.get_tags(photo_id)
+    except Exception:
+        logging.exception('Failed to read tags for photoID')
+        raise HTTPException(status_code=500, detail='Failed to read tags')
+    return {"photoID": photo_id, "tags": tags}
+
+
+@app.get('/tags/')
+def get_tags_query(photoID: str | None = None, x_upload_token: str | None = Header(None)):
+    """Return tags for a photoID supplied as a query parameter (supports URIs with slashes)."""
+    _require_token(x_upload_token)
+    if not photoID:
+        raise HTTPException(status_code=400, detail='photoID query parameter required')
+    try:
+        tags = _tags_db.get_tags(photoID)
+    except Exception:
+        logging.exception('Failed to read tags for photoID')
+        raise HTTPException(status_code=500, detail='Failed to read tags')
+    return {"photoID": photoID, "tags": tags}
 
 
 class _TagsPayload(BaseModel):
     tags: List[str]
 
 
-@app.post('/tags/{filename}/')
-def set_tags_for_file(filename: str, payload: _TagsPayload, x_upload_token: str | None = Header(None)):
+@app.post('/tags/{photo_id}/')
+def set_tags_for_file(photo_id: str, payload: _TagsPayload, x_upload_token: str | None = Header(None)):
     _require_token(x_upload_token)
-    """Set tags for a filename (dev/test helper)."""
+    """Set tags for a photoID (dev/test helper)."""
     try:
-        # Best-effort only — don't crash if saving fails
-        from . import tags_db as _tags_db
-        _tags_db.set_tags(filename, payload.tags)
+        _tags_db.set_tags(photo_id, payload.tags)
     except Exception:
         logging.exception('Failed to set tags')
         raise HTTPException(status_code=500, detail="Failed to set tags")
-    return {"filename": filename, "tags": payload.tags}
+    return {"photoID": photo_id, "tags": payload.tags}
 
 
 @app.get('/all-organized-images-with-tags/')

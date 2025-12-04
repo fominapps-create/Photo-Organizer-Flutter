@@ -5,10 +5,13 @@ import 'dart:typed_data';
 import 'dart:ui';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/photo_id.dart';
+import '../services/tag_store.dart';
 import 'dart:io';
 import 'album_screen.dart';
 import 'pricing_screen.dart';
 import 'package:path/path.dart' as p;
+import '../services/photo_id.dart';
 import '../services/api_service.dart';
 import 'photo_viewer.dart';
 
@@ -29,6 +32,10 @@ class GalleryScreen extends StatefulWidget {
 class GalleryScreenState extends State<GalleryScreen> {
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
+  // Keys currently being scanned in the active scan session
+  final Set<String> _scanningKeys = {};
+  // Recent save events for visual debugging (most recent first)
+  final List<String> _recentSaves = [];
   bool loading = true;
   // Device-local asset storage and thumbnail cache for local view
   final Map<String, AssetEntity> _localAssets = {};
@@ -220,20 +227,29 @@ class GalleryScreenState extends State<GalleryScreen> {
     await _loadTags();
     developer.log('Total photos in gallery: ${imageUrls.length}');
     setState(() => loading = false);
-    // Start automatic scan of local images when appropriate
+    // Start automatic scan of local images is disabled — require manual
+    // trigger via the Scan button to avoid unexpected uploads on open.
     await _updateUnscannedCount();
-    _startAutoScanIfNeeded();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final auto = prefs.getBool('autoscan_auto_start') ?? false;
+      if (auto) {
+        _startAutoScanIfNeeded();
+      }
+    } catch (_) {}
   }
 
   Future<void> _updateUnscannedCount() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
       final localUrls = imageUrls
           .where((u) => u.startsWith('local:') || u.startsWith('file:'))
           .toList();
-      final unscanned = localUrls
-          .where((u) => !prefs.containsKey(p.basename(u)))
-          .length;
+      int unscanned = 0;
+      for (final u in localUrls) {
+        final key = _keyForUrl(u);
+        final t = await TagStore.loadLocalTags(key);
+        if (t == null) unscanned++;
+      }
       if (mounted) setState(() => _currentUnscannedCount = unscanned);
     } catch (_) {
       if (mounted) setState(() => _currentUnscannedCount = 0);
@@ -268,7 +284,7 @@ class GalleryScreenState extends State<GalleryScreen> {
     final allTags = <String>{};
     // Only include tags from photos that actually exist in imageUrls
     for (final url in imageUrls) {
-      final key = p.basename(url);
+      final key = _keyForUrl(url);
       final tags = photoTags[key] ?? [];
       allTags.addAll(tags);
     }
@@ -284,13 +300,13 @@ class GalleryScreenState extends State<GalleryScreen> {
     if (localUrls.isEmpty) return;
 
     // Only consider images that have no persisted scan entry.
-    // Presence of a SharedPreferences key for the photo basename indicates
-    // the image was scanned at least once (even if tags list is empty).
-    final prefs = await SharedPreferences.getInstance();
-    final missing = localUrls.where((u) {
-      final key = p.basename(u);
-      return !prefs.containsKey(key);
-    }).toList();
+    // Use TagStore to check for local tags (async-safe canonical keys).
+    final missing = <String>[];
+    for (final u in localUrls) {
+      final key = _keyForUrl(u);
+      final t = await TagStore.loadLocalTags(key);
+      if (t == null) missing.add(u);
+    }
     if (missing.isEmpty) return;
 
     // Start scanning (capped to avoid runaway uploads during development)
@@ -328,10 +344,16 @@ class GalleryScreenState extends State<GalleryScreen> {
         .toList();
     if (localUrls.isEmpty) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final toScan = force
-        ? localUrls
-        : localUrls.where((u) => !prefs.containsKey(p.basename(u))).toList();
+    List<String> toScan = [];
+    if (force) {
+      toScan = localUrls;
+    } else {
+      for (final u in localUrls) {
+        final key = _keyForUrl(u);
+        final t = await TagStore.loadLocalTags(key);
+        if (t == null) toScan.add(u);
+      }
+    }
     if (toScan.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -368,6 +390,13 @@ class GalleryScreenState extends State<GalleryScreen> {
     final prefs = await SharedPreferences.getInstance();
     for (var i = 0; i < urls.length; i++) {
       final u = urls[i];
+      final loopKey = _keyForUrl(u);
+      // mark this key as scanning so UI can show a temporary indicator
+      if (!mounted) return;
+      setState(() {
+        _scanningKeys.add(loopKey);
+      });
+
       // Cooperative pause: wait while paused
       while (_scanPaused) {
         if (!mounted) return;
@@ -391,7 +420,18 @@ class GalleryScreenState extends State<GalleryScreen> {
           // File not available for upload — do not persist tags so it can be retried later
           developer.log('Skipping scan for $u: file not found');
         } else {
-          final res = await ApiService.uploadImage(file);
+          // Determine canonical photoID: use asset id when available, otherwise file:// path
+          String photoID;
+          if (u.startsWith('local:')) {
+            photoID = u.substring('local:'.length);
+          } else if (u.startsWith('file:')) {
+            final path = u.substring('file:'.length);
+            photoID = 'file://' + path;
+          } else {
+            photoID = _keyForUrl(u);
+          }
+
+          final res = await ApiService.uploadImage(file, photoID: photoID);
           if (res.statusCode >= 200 && res.statusCode < 300) {
             try {
               final body = json.decode(res.body);
@@ -402,13 +442,40 @@ class GalleryScreenState extends State<GalleryScreen> {
                 tags = (body['labels'] as List).cast<String>();
               }
               // Persist the tags (may be empty) to mark this image as scanned
-              photoTags[p.basename(u)] = tags;
-              await prefs.setString(p.basename(u), json.encode(tags));
+              final key = PhotoId.canonicalId(photoID);
+              // Update UI immediately for this photo and clear scanning flag
+              setState(() {
+                photoTags[key] = tags;
+                _scanningKeys.remove(key);
+              });
+              developer.log(
+                'Scan result for $u -> key=$key tags=${tags.join(', ')}',
+              );
+              await TagStore.saveLocalTags(key, tags);
+              developer.log('Saved local tags for $key');
+              // Add to recent saves for on-screen debug
+              if (mounted) {
+                setState(() {
+                  _recentSaves.insert(0, '$key: ${tags.join(', ')}');
+                  if (_recentSaves.length > 8) _recentSaves.removeLast();
+                });
+              }
             } catch (e) {
               // If parsing fails even though server returned 2xx, mark as scanned with empty tags
               developer.log('Failed parsing scan response for $u: $e');
-              photoTags[p.basename(u)] = [];
-              await prefs.setString(p.basename(u), json.encode([]));
+              final key = PhotoId.canonicalId(photoID);
+              setState(() {
+                photoTags[key] = [];
+                _scanningKeys.remove(key);
+              });
+              developer.log('Saving empty tags for $key after parse error');
+              await TagStore.saveLocalTags(key, []);
+              if (mounted) {
+                setState(() {
+                  _recentSaves.insert(0, '$key: (empty)');
+                  if (_recentSaves.length > 8) _recentSaves.removeLast();
+                });
+              }
             }
           } else {
             // Server error or rejection — do not persist so we can retry later
@@ -417,6 +484,13 @@ class GalleryScreenState extends State<GalleryScreen> {
         }
       } catch (e) {
         developer.log('Auto-scan error for $u: $e');
+      }
+
+      // Ensure scanningKeys is cleaned up if an exception occurred before removal
+      if (mounted && _scanningKeys.contains(loopKey)) {
+        setState(() {
+          _scanningKeys.remove(loopKey);
+        });
       }
 
       // update progress and processed count
@@ -440,7 +514,7 @@ class GalleryScreenState extends State<GalleryScreen> {
           final url = item['url'] as String;
           final tags = List<String>.from(item['tags'] ?? []);
           urls.add(url);
-          photoTags[p.basename(url)] = tags; // preload server tags
+          photoTags[_keyForUrl(url)] = tags; // preload server tags
         }
         if (urls.isNotEmpty) {
           setState(() => imageUrls = urls);
@@ -558,19 +632,29 @@ class GalleryScreenState extends State<GalleryScreen> {
     }
   }
 
+  String _keyForUrl(String url) {
+    try {
+      return PhotoId.canonicalId(url);
+    } catch (_) {
+      if (url.startsWith('local:')) return url.substring('local:'.length);
+      if (url.startsWith('file:'))
+        return 'file://' + url.substring('file:'.length);
+      return url;
+    }
+  }
+
   Future<void> _loadTags() async {
-    final prefs = await SharedPreferences.getInstance();
     for (final url in imageUrls) {
-      final key = p.basename(url);
+      final key = _keyForUrl(url);
       if (photoTags.containsKey(key) && (photoTags[key]?.isNotEmpty ?? false)) {
         continue; // prefer server
       }
-      final j = prefs.getString(key);
-      if (j != null) {
-        try {
-          final tags = (json.decode(j) as List).cast<String>();
-          photoTags[key] = tags;
-        } catch (_) {}
+      final local = await TagStore.loadLocalTags(key);
+      if (local != null) {
+        developer.log('Loaded local tags for $key: ${local.join(', ')}');
+        setState(() {
+          photoTags[key] = local;
+        });
       }
     }
   }
@@ -585,7 +669,7 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   List<String> _getFilteredImageUrls() {
     return imageUrls.where((u) {
-      final tags = photoTags[p.basename(u)] ?? [];
+      final tags = photoTags[_keyForUrl(u)] ?? [];
       if (searchQuery.isEmpty) return true;
 
       // Split search query into individual search terms
@@ -606,7 +690,7 @@ class GalleryScreenState extends State<GalleryScreen> {
     final visible = _getFilteredImageUrls();
     setState(() {
       for (final url in visible) {
-        _selectedKeys.add(p.basename(url));
+        _selectedKeys.add(_keyForUrl(url));
       }
     });
   }
@@ -614,7 +698,7 @@ class GalleryScreenState extends State<GalleryScreen> {
   Future<void> _createAlbumFromSelection() async {
     if (_selectedKeys.isEmpty) return;
     final selectedUrls = imageUrls
-        .where((u) => _selectedKeys.contains(p.basename(u)))
+        .where((u) => _selectedKeys.contains(_keyForUrl(u)))
         .toList();
     if (selectedUrls.isEmpty) return;
     final controller = TextEditingController(text: 'Album');
@@ -753,13 +837,13 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   Future<void> _showUnscannedModal() async {
     final prefs = await SharedPreferences.getInstance();
-    final unscanned = imageUrls
-        .where(
-          (u) =>
-              (u.startsWith('local:') || u.startsWith('file:')) &&
-              !prefs.containsKey(p.basename(u)),
-        )
-        .toList();
+    final unscanned = <String>[];
+    for (final u in imageUrls) {
+      if (!(u.startsWith('local:') || u.startsWith('file:'))) continue;
+      final key = _keyForUrl(u);
+      final t = await TagStore.loadLocalTags(key);
+      if (t == null) unscanned.add(u);
+    }
     if (unscanned.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -787,7 +871,7 @@ class GalleryScreenState extends State<GalleryScreen> {
               itemCount: unscanned.length,
               itemBuilder: (c, idx) {
                 final url = unscanned[idx];
-                final key = p.basename(url);
+                final key = _keyForUrl(url);
                 return GestureDetector(
                   onTap: () async {
                     Navigator.pop(c);
@@ -864,7 +948,7 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   Future<void> _createAlbumWithTag(String tag) async {
     final tagged = imageUrls
-        .where((u) => (photoTags[p.basename(u)] ?? []).contains(tag))
+        .where((u) => (photoTags[_keyForUrl(u)] ?? []).contains(tag))
         .toList();
     if (tagged.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1457,7 +1541,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                           child: Builder(
                             builder: (context) {
                               final filtered = imageUrls.where((u) {
-                                final tags = photoTags[p.basename(u)] ?? [];
+                                final tags = photoTags[_keyForUrl(u)] ?? [];
                                 if (searchQuery.isEmpty) return true;
 
                                 // Special case: "None" searches for untagged photos
@@ -1514,7 +1598,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                                                 _selectedKeys.clear();
                                                 for (final url in filtered) {
                                                   _selectedKeys.add(
-                                                    p.basename(url),
+                                                    _keyForUrl(url),
                                                   );
                                                 }
                                               }
@@ -1626,15 +1710,34 @@ class GalleryScreenState extends State<GalleryScreen> {
                                       itemCount: filtered.length,
                                       itemBuilder: (context, index) {
                                         final url = filtered[index];
-                                        final key = p.basename(url);
+                                        final key = _keyForUrl(url);
                                         final fullTags = photoTags[key] ?? [];
-                                        // Only show tags <= 8 characters in the grid
-                                        final shortTags = fullTags
-                                            .where((t) => t.length <= 8)
-                                            .toList();
-                                        final visibleTags = shortTags
-                                            .take(3)
-                                            .toList();
+                                        // If this photo is currently being scanned and has no tags yet,
+                                        // show a temporary scanning indicator. Otherwise prefer short tags
+                                        // (<=8 chars). If no short tags exist but full tags do, show the
+                                        // first available tag truncated so the UI visibly changes.
+                                        List<String> visibleTags;
+                                        if (fullTags.isEmpty &&
+                                            _scanningKeys.contains(key)) {
+                                          visibleTags = ['Scanning...'];
+                                        } else {
+                                          final shortTags = fullTags
+                                              .where((t) => t.length <= 8)
+                                              .toList();
+                                          if (shortTags.isNotEmpty) {
+                                            visibleTags = shortTags
+                                                .take(3)
+                                                .toList();
+                                          } else if (fullTags.isNotEmpty) {
+                                            final first = fullTags.first;
+                                            final tr = first.length > 10
+                                                ? (first.substring(0, 10) + '…')
+                                                : first;
+                                            visibleTags = [tr];
+                                          } else {
+                                            visibleTags = [];
+                                          }
+                                        }
 
                                         final isSelected = _selectedKeys
                                             .contains(key);
@@ -1967,11 +2070,10 @@ class GalleryScreenState extends State<GalleryScreen> {
                                                     final prefs =
                                                         await SharedPreferences.getInstance();
                                                     for (final u in imageUrls) {
-                                                      final key = p.basename(u);
-                                                      if (prefs.containsKey(
+                                                      final key = _keyForUrl(u);
+                                                      await TagStore.removeLocalTags(
                                                         key,
-                                                      ))
-                                                        await prefs.remove(key);
+                                                      );
                                                       photoTags.remove(key);
                                                     }
                                                     if (mounted)
@@ -2031,6 +2133,58 @@ class GalleryScreenState extends State<GalleryScreen> {
                               ],
                             ),
                           ),
+                        ),
+                        // On-screen recent save debug panel (bottom-left)
+                        Positioned(
+                          bottom: 80,
+                          left: 8,
+                          child: _recentSaves.isEmpty
+                              ? const SizedBox.shrink()
+                              : Container(
+                                  width: 220,
+                                  constraints: const BoxConstraints(
+                                    maxHeight: 220,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.6),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.all(8),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Recent saves',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Flexible(
+                                        child: SingleChildScrollView(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: _recentSaves
+                                                .map(
+                                                  (s) => Text(
+                                                    s,
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                         ),
 
                         // Floating glassmorphic scanning progress overlay

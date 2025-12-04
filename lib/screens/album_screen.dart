@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
+import '../services/tag_store.dart';
+import '../services/photo_id.dart';
 
 class AlbumScreen extends StatefulWidget {
   const AlbumScreen({super.key});
@@ -69,7 +71,8 @@ class AlbumScreenState extends State<AlbumScreen> {
               itemCount: items.length,
               itemBuilder: (context, idx) {
                 final url = items[idx];
-                final tags = photoTags[p.basename(url)] ?? [];
+                final key = PhotoId.canonicalId(url);
+                final tags = photoTags[key] ?? [];
                 return Container(
                   width: 140,
                   margin: const EdgeInsets.all(8),
@@ -158,15 +161,17 @@ class AlbumScreenState extends State<AlbumScreen> {
   }
 
   Future<void> _loadTags() async {
+    // Load local tags saved via TagStore which uses keys in the form `tags_<photoID>`.
     SharedPreferences prefs = await SharedPreferences.getInstance();
     Set<String> keys = prefs.getKeys();
     for (var key in keys) {
-      if (key != 'albums') {
-        final dynamic value = prefs.get(key);
-        if (value is String) {
+      if (key.startsWith('tags_')) {
+        final photoID = key.substring('tags_'.length);
+        final raw = prefs.getString(key);
+        if (raw != null) {
           try {
-            final List<dynamic> tagsList = json.decode(value);
-            photoTags[key] = tagsList.cast<String>();
+            final List<dynamic> tagsList = json.decode(raw);
+            photoTags[photoID] = tagsList.cast<String>();
           } catch (_) {}
         }
       }

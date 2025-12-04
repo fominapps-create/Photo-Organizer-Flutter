@@ -19,6 +19,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   late bool _scanOnWifi;
+  late bool _autoscanAutoStart;
 
   @override
   void initState() {
@@ -31,12 +32,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _scanOnWifi = prefs.getBool('scan_on_wifi_only') ?? true;
+      _autoscanAutoStart = prefs.getBool('autoscan_auto_start') ?? false;
     });
   }
 
   Future<void> _saveScanOnWifi(bool val) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('scan_on_wifi_only', val);
+  }
+
+  Future<void> _saveAutoscanAutoStart(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('autoscan_auto_start', val);
   }
 
   Future<void> _toggleTheme(bool value) async {
@@ -100,6 +107,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _saveScanOnWifi(v);
             },
             secondary: const Icon(Icons.wifi),
+          ),
+          SwitchListTile(
+            title: const Text('Start autoscan on app open'),
+            subtitle: const Text(
+              'Automatically start autoscan when gallery opens',
+            ),
+            value: _autoscanAutoStart,
+            onChanged: (v) async {
+              setState(() => _autoscanAutoStart = v);
+              await _saveAutoscanAutoStart(v);
+            },
+            secondary: const Icon(Icons.playlist_play),
           ),
           const Divider(),
           const Padding(

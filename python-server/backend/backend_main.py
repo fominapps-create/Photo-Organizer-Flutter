@@ -5,7 +5,18 @@ import cv2
 from .model import load_model
 from .handlers import person, animals, documents, junk, utils
 from . import tags_db
-from .config import SOURCE_FOLDER, CONFIDENCE_THRESHOLD, AUTO_TAG_MAX
+from .config import SOURCE_FOLDER, CONFIDENCE_THRESHOLD, AUTO_TAG_MAX, PERSIST_UPLOADS
+from .config import PERSIST_UPLOADS as _PERSIST_UPLOADS
+from .config import ALLOW_REMOTE
+from .config import RELOAD
+from .config import UPLOAD_TOKEN
+from .config import TEMP_FOLDER
+from .config import TARGET_FOLDER
+from .config import ALLOW_ORIGINS
+from .config import SOURCE_FOLDER
+from .config import CONFIDENCE_THRESHOLD
+from .config import AUTO_TAG_MAX
+from . import config as _cfg
 
 # --- Load YOLO model once ---
 model = None
@@ -69,7 +80,13 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
             if AUTO_TAG_MAX is not None and isinstance(AUTO_TAG_MAX, int):
                 computed_tags = computed_tags[:AUTO_TAG_MAX]
 
-    # Move file with object name
+    # If moving/organizing is disabled in config, skip physical organization.
+    if getattr(_cfg, 'ENABLE_MOVING', False) is False:
+        print(f"Skipping file move (ENABLE_MOVING=False). Computed tags: {computed_tags}")
+        # Do not persist tags here — API layer should persist tags by photoID when available.
+        return "skipped"
+
+    # Move file with object name (legacy behavior)
     final_dst = utils.move_to_folder(img_path, dest, main_object)
     if final_dst:
         final_name = os.path.basename(final_dst)

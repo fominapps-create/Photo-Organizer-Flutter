@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/tag_store.dart';
+import '../services/photo_id.dart';
 import '../services/network_utils.dart';
 import '../services/settings_utils.dart';
 import 'package:path/path.dart' as p;
@@ -47,6 +49,7 @@ class ExplorerScreenState extends State<ExplorerScreen>
     with SingleTickerProviderStateMixin {
   String currentPath = 'No folder selected';
   List<File> images = [];
+  List<String> imagePhotoIds = [];
   List<Uint8List> webImages = [];
   List<String> webImageNames = [];
   bool isLoading = false;
@@ -610,7 +613,10 @@ class ExplorerScreenState extends State<ExplorerScreen>
         final totalCount = images.length + imageFiles.length;
         currentPath = 'Selected $totalCount images';
         totalImagesToLoad = imageFiles.length;
-        images.addAll(imageFiles);
+        for (final f in imageFiles) {
+          images.add(f);
+          imagePhotoIds.add(PhotoId.canonicalId(f));
+        }
         progress = 1.0;
         isLoading = false;
       });
@@ -827,6 +833,12 @@ class ExplorerScreenState extends State<ExplorerScreen>
       }
 
       final file = filesToUpload[i];
+      String photoIdForThis;
+      if (kIsWeb) {
+        photoIdForThis = webImageNames[i];
+      } else {
+        photoIdForThis = PhotoId.canonicalId(file as File);
+      }
       int fileSize;
 
       // Get file size
@@ -918,7 +930,13 @@ class ExplorerScreenState extends State<ExplorerScreen>
           }
 
           try {
-            final res = await ApiService.uploadImage(batchFile);
+            final fileObj = batchFile as Map;
+            final batchFileRef = fileObj['file'];
+            final batchPhotoID = fileObj['photoID'];
+            final res = await ApiService.uploadImage(
+              batchFileRef,
+              photoID: batchPhotoID,
+            );
             if (!mounted) return;
 
             developer.log(
@@ -963,19 +981,23 @@ class ExplorerScreenState extends State<ExplorerScreen>
                   );
                 }
                 developer.log('Parsed tags: $tags');
-                SharedPreferences prefs = await SharedPreferences.getInstance();
-                String key;
-                // Prefer the final server-provided filename if available (response includes 'url')
-                if (response.containsKey('url') && response['url'] != null) {
-                  key = p.basename(response['url']);
-                } else if (kIsWeb) {
-                  final webIndex = processedCount - images.length;
-                  key = webImageNames[webIndex];
-                } else {
-                  key = p.basename((batchFile as File).path);
+                try {
+                  String photoID;
+                  // Prefer explicit photoID returned by the server
+                  if (response.containsKey('photoID') &&
+                      response['photoID'] != null) {
+                    photoID = response['photoID'];
+                  } else if (kIsWeb) {
+                    final webIndex = processedCount - images.length;
+                    photoID = webImageNames[webIndex];
+                  } else {
+                    photoID = batchPhotoID;
+                  }
+                  await TagStore.saveLocalTags(photoID, tags);
+                  developer.log('Saved tags for $photoID: $tags');
+                } catch (e) {
+                  developer.log('Failed saving tags to TagStore: $e');
                 }
-                await prefs.setString(key, json.encode(tags));
-                developer.log('Saved tags for $key: $tags');
               } catch (e) {
                 developer.log('Failed to save tags: $e');
               }
@@ -1045,8 +1067,8 @@ class ExplorerScreenState extends State<ExplorerScreen>
         currentBatchSize = 0;
       }
 
-      // Add file to current batch
-      currentBatch.add(file);
+      // Add file (and precomputed photoID) to current batch
+      currentBatch.add({'file': file, 'photoID': photoIdForThis});
       currentBatchSize += fileSize;
     }
 
@@ -1106,7 +1128,13 @@ class ExplorerScreenState extends State<ExplorerScreen>
         }
 
         try {
-          final res = await ApiService.uploadImage(batchFile);
+          final fileObj = batchFile as Map;
+          final batchFileRef = fileObj['file'];
+          final batchPhotoID = fileObj['photoID'];
+          final res = await ApiService.uploadImage(
+            batchFileRef,
+            photoID: batchPhotoID,
+          );
           if (!mounted) return;
 
           processedCount++;
