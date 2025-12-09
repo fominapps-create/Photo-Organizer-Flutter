@@ -34,6 +34,7 @@ class ApiService {
 
     if (PlatformInfo.isAndroid) {
       return [
+        'http://192.168.1.198:8000', // Your local server IP (physical device)
         'http://10.0.2.2:8000', // Android emulator -> host
         'http://192.168.1.100:8000', // Common local IP patterns
         'http://192.168.0.100:8000',

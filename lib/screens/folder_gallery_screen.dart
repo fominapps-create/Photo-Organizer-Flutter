@@ -103,14 +103,7 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
         } catch (_) {}
       } catch (_) {}
 
-      // Do NOT automatically start a device scan on startup; require the
-      // user to trigger scanning manually via the Scan button. This avoids
-      // unexpectedly consuming bandwidth or CPU when the screen loads.
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final auto = prefs.getBool('autoscan_auto_start') ?? false;
-        if (auto) await _startScanIfNeeded();
-      } catch (_) {}
+      await _startScanIfNeeded();
       await _loadAlbums();
       // If we discovered device albums, show a brief SnackBar so the user
       // knows the scan ran and photos should be visible immediately.
@@ -137,9 +130,10 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       // When the app returns to the foreground, refresh server status
-      // and reload persisted albums. Do NOT auto-start a scan; the user
-      // must trigger scanning manually.
+      // and re-run the device scan / reload persisted albums so the
+      // gallery always reflects current device storage contents.
       _checkServer();
+      _startScanIfNeeded();
       _loadAlbums();
     }
   }
