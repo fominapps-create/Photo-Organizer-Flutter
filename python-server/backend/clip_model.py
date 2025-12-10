@@ -9,38 +9,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Expanded categories for impressive accuracy
-# Using very specific descriptions to improve CLIP accuracy
+# Simplified categories for speed - short prompts process much faster
+# Document: text pages, forms, receipts, printed text
 PHOTO_CATEGORIES = [
-    # People - be very specific about human faces and bodies
-    "photograph of people, humans, faces, persons, man, woman, human beings, crowd, selfie, portrait",
-    
-    # Animals - specific animal features
-    "photograph of animals, pets, dogs, cats, birds, wildlife, creatures with fur or feathers",
-    
-    # Food - specific food characteristics
-    "photograph of food, meals, dishes, plates of food, cooked food, fruits, vegetables, beverages, dining",
-    
-    # Scenery - natural outdoor environments
-    "photograph of natural scenery, landscapes, mountains, forests, beaches, oceans, nature, outdoor views, sky",
-    
-    # Gaming screenshots - video game interfaces
-    "screenshot of a video game, gaming interface, game graphics, 3D game, game menu, video game screen",
-    
-    # Social media screenshots - app interfaces with specific UI elements
-    "screenshot of social media feed with visible likes, comments, profile pictures, Instagram interface, Twitter timeline, Facebook posts, TikTok videos, social network UI",
-    
-    # Messaging screenshots - chat interfaces with conversation bubbles
-    "screenshot of messaging app with visible chat bubbles, conversation threads, WhatsApp green interface, Telegram blue interface, Discord server chat, text message conversation, message timestamps",
-    
-    # Documents (SCREENSHOT) - digital document screenshots
-    "screenshot of digital document, PDF viewer, document reader, text file, spreadsheet, presentation slide, digital form, scanned document on screen",
-    
-    # General screenshots - other digital content
-    "screenshot of website, web page, browser, app interface, digital screen, phone screen, statistics dashboard, graphs on screen",
-    
-    # Other - catch-all for things that don't fit (will be filtered out)
-    "photograph of objects, items, products, buildings, vehicles, indoor spaces, abstract images",
+    "people",
+    "animals",
+    "food",
+    "scenery",
+    "text document with visible writing",
 ]
 
 
@@ -101,19 +77,22 @@ class CLIPPhotoClassifier:
             # Map category indices to clean names
             category_names = [
                 "people", "animals", "food", "scenery",
-                "gaming", "social-media", "messaging", 
-                "Document Screenshot", "screenshots", "other"
+                "document"
             ]
             
-            # Stricter thresholds for specific categories to reduce false positives
+            # Strict thresholds to minimize false positives
+            # Higher for food and people (80%) to avoid misclassification
             category_thresholds = {
-                "messaging": 0.60,  # Extremely strict - only when absolutely sure
-                "social-media": 0.55,  # Extremely strict - needs clear social UI elements
-                "Document Screenshot": 0.25,  # Moderate - distinguish from general screenshots
+                "food": 0.80,
+                "document": 0.70,
+                "animals": 0.70,
+                "people": 0.80,
+                "scenery": 0.70,
             }
             
             # Get top matching categories
             results = []
+            all_scores = []  # For debugging
             for idx, prob in enumerate(probs):
                 tag_name = category_names[idx] if idx < len(category_names) else "other"
                 
@@ -121,11 +100,21 @@ class CLIPPhotoClassifier:
                 if tag_name == "other":
                     continue
                 
+                all_scores.append((tag_name, float(prob)))
+                
                 # Apply category-specific threshold
                 required_threshold = category_thresholds.get(tag_name, confidence_threshold)
                 
                 if prob >= required_threshold:
                     results.append((tag_name, float(prob)))
+            
+            # If no categories matched, tag as 'unknown' and log why
+            if not results:
+                # Log top 3 scores to help diagnose why nothing matched
+                all_scores.sort(key=lambda x: x[1], reverse=True)
+                top_3 = all_scores[:3]
+                logger.warning(f"No categories matched for {image_path}. Top scores: {top_3}")
+                results.append(("unknown", 0.0))
             
             # Sort by confidence and limit
             results.sort(key=lambda x: x[1], reverse=True)
@@ -184,15 +173,17 @@ class CLIPPhotoClassifier:
             # Map category indices to clean names
             category_names = [
                 "people", "animals", "food", "scenery",
-                "gaming", "social-media", "messaging", 
-                "Document Screenshot", "screenshots", "other"
+                "document"
             ]
             
-            # Stricter thresholds for specific categories
+            # Strict thresholds to minimize false positives
+            # Higher for food and people (80%) to avoid misclassification
             category_thresholds = {
-                "messaging": 0.60,  # Extremely strict
-                "social-media": 0.55,  # Extremely strict
-                "Document Screenshot": 0.25,  # Moderate
+                "food": 0.80,
+                "document": 0.70,
+                "animals": 0.70,
+                "people": 0.80,
+                "scenery": 0.70,
             }
             
             # Process results for each image
@@ -211,6 +202,10 @@ class CLIPPhotoClassifier:
                     
                     if prob >= required_threshold:
                         results.append((tag_name, float(prob)))
+                
+                # If no categories matched, tag as 'unknown'
+                if not results:
+                    results.append(("unknown", 0.0))
                 
                 results.sort(key=lambda x: x[1], reverse=True)
                 results = results[:max_tags]

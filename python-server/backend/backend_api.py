@@ -34,7 +34,7 @@ from .clip_model import get_clip_model, classify_image
 from .ocr_enhancement import enhance_screenshot_tag, is_ocr_available
 from . import tags_db as _tags_db
 from pydantic import BaseModel
-from .config import TEMP_FOLDER, TARGET_FOLDER, CONFIDENCE_THRESHOLD
+from .config import TEMP_FOLDER, TARGET_FOLDER, CONFIDENCE_THRESHOLD, CLIP_CONFIDENCE_THRESHOLD
 from .model import load_model  # kept for legacy usage elsewhere
 import time
 import json
@@ -192,7 +192,11 @@ async def detect_tags(file: "UploadFile" = File(...), photoID: str = Form(...), 
         # Use CLIP for better quality tagging
         from .config import AUTO_TAG_MAX
         max_tags = AUTO_TAG_MAX if AUTO_TAG_MAX is not None else 5
-        tags = classify_image(temp_path, confidence_threshold=CONFIDENCE_THRESHOLD, max_tags=max_tags)
+        # Use a CLIP-specific threshold for image-level classification so
+        # categories like `food` are less likely to be filtered out by a
+        # box-based confidence threshold (YOLO uses CONFIDENCE_THRESHOLD).
+        clip_threshold = CLIP_CONFIDENCE_THRESHOLD if 'CLIP_CONFIDENCE_THRESHOLD' in globals() else CONFIDENCE_THRESHOLD
+        tags = classify_image(temp_path, confidence_threshold=clip_threshold, max_tags=max_tags)
         t1 = time.time()
         logging.info(f"CLIP classification for {file.filename} took {round((t1 - t0) * 1000)}ms")
         logging.info(f"Detected tags for {file.filename}: {tags}")
@@ -274,17 +278,8 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
             temp_path = os.path.join(TEMP_FOLDER, file.filename)
             data = await file.read()
             
-            # Strip EXIF if possible
-            try:
-                if Image is not None and BytesIO is not None:
-                    img_buf = BytesIO(data)
-                    img = Image.open(img_buf)
-                    out = BytesIO()
-                    img.save(out, format=img.format or "PNG")
-                    data = out.getvalue()
-            except Exception:
-                pass
-                
+            # Write directly without EXIF processing for speed
+            # (EXIF data doesn't affect CLIP classification)
             with open(temp_path, "wb") as f:
                 f.write(data)
             
@@ -296,17 +291,46 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
     if not temp_paths:
         raise HTTPException(status_code=400, detail="No valid images uploaded")
     
-    # Batch classify with CLIP (much faster than sequential)
+    # Batch classify with YOLO+CLIP hybrid or CLIP-only based on config
     try:
-        logging.info(f"Starting batch CLIP classification for {len(temp_paths)} images")
-        t0 = time.time()
-        from .config import AUTO_TAG_MAX
-        from .clip_model import classify_batch
-        max_tags = AUTO_TAG_MAX if AUTO_TAG_MAX is not None else 5
+        from .config import AUTO_TAG_MAX, USE_HYBRID_CLASSIFICATION
+        from .clip_model import classify_batch as clip_classify_batch
         
-        batch_tags = classify_batch(temp_paths, confidence_threshold=CONFIDENCE_THRESHOLD, max_tags=max_tags)
-        t1 = time.time()
-        logging.info(f"Batch classification took {round((t1 - t0) * 1000)}ms for {len(temp_paths)} images ({round((t1-t0)*1000/len(temp_paths))}ms per image)")
+        max_tags = AUTO_TAG_MAX if AUTO_TAG_MAX is not None else 5
+        # Use CLIP-specific threshold for batch classification as well
+        clip_threshold = CLIP_CONFIDENCE_THRESHOLD if 'CLIP_CONFIDENCE_THRESHOLD' in globals() else CONFIDENCE_THRESHOLD
+        
+        if USE_HYBRID_CLASSIFICATION:
+            # Use hybrid approach: YOLO first (fast), CLIP fallback (slow but accurate)
+            logging.info(f"Starting hybrid YOLO+CLIP classification for {len(temp_paths)} images")
+            from .yolo_clip_hybrid import classify_batch_hybrid
+            
+            t0 = time.time()
+            batch_tags, stats = classify_batch_hybrid(
+                temp_paths,
+                yolo_model=None,  # Will auto-load fast nano model
+                clip_batch_func=clip_classify_batch,
+                yolo_confidence=0.60,  # Lower for nano model
+                clip_threshold=clip_threshold,
+                max_tags=max_tags
+            )
+            t1 = time.time()
+            
+            total_ms = round((t1 - t0) * 1000)
+            avg_ms = round(total_ms / len(temp_paths), 1)
+            yolo_pct = round(100 * stats["yolo_success"] / stats["total_images"], 1)
+            
+            logging.info(f"Hybrid batch completed: {total_ms}ms total, {avg_ms}ms/image")
+            logging.info(f"  YOLO: {stats['yolo_success']}/{stats['total_images']} images ({yolo_pct}%) in {stats['yolo_time_ms']}ms")
+            logging.info(f"  CLIP: {stats['clip_fallback']} images in {stats['clip_time_ms']}ms")
+        else:
+            # Use CLIP-only (slower but more accurate on CPU)
+            logging.info(f"Starting CLIP-only classification for {len(temp_paths)} images")
+            t0 = time.time()
+            batch_tags = clip_classify_batch(temp_paths, confidence_threshold=clip_threshold, max_tags=max_tags)
+            t1 = time.time()
+            logging.info(f"CLIP batch took {round((t1 - t0) * 1000)}ms for {len(temp_paths)} images ({round((t1-t0)*1000/len(temp_paths))}ms per image)")
+        
     except Exception as e:
         # Cleanup on error
         for temp_path in temp_paths:

@@ -29,6 +29,17 @@ CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.5"))
 MIN_BOX_PERCENT = 0.2       # 30% for objects
 MIN_PERSON_PERCENT = 0.1    # 10% for persons
 
+# CLIP model uses a lower default threshold than box-based detectors.
+# Keep this separate so CLIP classification (image-level) can be more
+# permissive while preserving the stricter YOLO `CONFIDENCE_THRESHOLD`.
+CLIP_CONFIDENCE_THRESHOLD = float(os.getenv("CLIP_CONFIDENCE_THRESHOLD", "0.15"))
+
+# Enable YOLO+CLIP hybrid mode for faster classification
+# When True: Uses fast YOLO (nano model) as first pass, CLIP as fallback
+# When False: Uses CLIP-only (more accurate but slower on CPU)
+# Hybrid mode is faster when YOLO runs quickly (GPU or nano model on CPU)
+USE_HYBRID_CLASSIFICATION = os.getenv("USE_HYBRID_CLASSIFICATION", "True").lower() in ("1", "true", "yes")
+
 # How many tags to return per image. Set to None for no limit (return all tags above
 # confidence threshold). Useful to avoid noisy long tag lists.
 AUTO_TAG_MAX = 10
