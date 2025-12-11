@@ -172,180 +172,173 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       extendBody: true,
+      extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            _screens[_selectedIndex],
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: widget.isDarkMode
-                          ? Colors.black.withValues(alpha: 0.7)
-                          : Colors.white.withValues(alpha: 0.85),
-                      border: Border(
-                        top: BorderSide(
-                          color: widget.isDarkMode
-                              ? Colors.white.withValues(alpha: 0.1)
-                              : Colors.black.withValues(alpha: 0.1),
-                          width: 0.5,
-                        ),
-                      ),
-                    ),
-                    child: SafeArea(top: false, child: SizedBox(height: 48)),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 18, left: 6, right: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildNavItem(0, Icons.folder_outlined, 'Gallery'),
-                    _buildNavItem(1, Icons.photo_album_outlined, 'Albums'),
-                  ],
-                ),
-              ),
-            ),
-            // Floating + button (add more filters) - shows when filters are active
-            if (_selectedIndex == 0 &&
-                (_galleryKey.currentState?.searchQuery ?? '').isNotEmpty)
-              Positioned(
-                right: 24,
-                bottom: 176,
+      body: Stack(
+        children: [
+          _screens[_selectedIndex],
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                 child: Container(
-                  width: 40,
-                  height: 40,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.lightBlue.shade300,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
+                    color: widget.isDarkMode
+                        ? Colors.black.withValues(alpha: 0.3)
+                        : Colors.white.withValues(alpha: 0.3),
+                    border: Border(
+                      top: BorderSide(
+                        color: widget.isDarkMode
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black.withValues(alpha: 0.1),
+                        width: 0.5,
                       ),
-                    ],
-                  ),
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: () {
-                      // Get actual current tags from loaded photos
-                      final currentTags =
-                          _galleryKey.currentState?.getAllCurrentTags() ??
-                          <String>{};
-                      final availableTags = currentTags.toList()..sort();
-
-                      // Debug: log what tags we're passing
-                      developer.log(
-                        'Available tags for search: $availableTags',
-                      );
-
-                      // Get current search terms to exclude already selected tags
-                      final currentSearch =
-                          _galleryKey.currentState?.searchQuery ?? '';
-                      final existingTags = currentSearch
-                          .split(' ')
-                          .where((t) => t.isNotEmpty)
-                          .toSet();
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => SearchScreen(
-                            recommendedTags: availableTags,
-                            excludeTags: existingTags,
-                            onTagSelected: (tag) {
-                              // Append to existing search
-                              if (_selectedIndex == 0) {
-                                final newSearch = currentSearch.isEmpty
-                                    ? tag
-                                    : '$currentSearch $tag';
-                                _galleryKey.currentState?.searchByTag(
-                                  newSearch,
-                                );
-                              }
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                    icon: Icon(
-                      Icons.add,
-                      color: widget.isDarkMode
-                          ? Colors.grey.shade900
-                          : Colors.white,
-                      size: 24,
                     ),
                   ),
+                  child: SafeArea(top: false, child: SizedBox(height: 48)),
                 ),
               ),
-            // Floating search button
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 1, left: 6, right: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildNavItem(0, Icons.folder_outlined, 'Gallery'),
+                  _buildNavItem(1, Icons.photo_album_outlined, 'Albums'),
+                ],
+              ),
+            ),
+          ),
+          // Floating + button (add more filters) - shows when filters are active
+          if (_selectedIndex == 0 &&
+              (_galleryKey.currentState?.searchQuery ?? '').isNotEmpty)
             Positioned(
-              right: 16,
-              bottom: 110,
+              right: 24,
+              bottom: 176,
               child: Container(
-                width: 56,
-                height: 56,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: widget.isDarkMode
-                      ? Colors.grey.shade900
-                      : Colors.white,
+                  color: Colors.lightBlue.shade300,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
                 child: IconButton(
-                  icon: Icon(
-                    Icons.search,
-                    color: widget.isDarkMode
-                        ? Colors.lightBlue.shade300
-                        : Colors.blue.shade700,
-                    size: 28,
-                  ),
+                  padding: EdgeInsets.zero,
                   onPressed: () {
-                    // Get actual tags from photos
+                    // Get actual current tags from loaded photos
                     final currentTags =
                         _galleryKey.currentState?.getAllCurrentTags() ??
                         <String>{};
                     final availableTags = currentTags.toList()..sort();
 
-                    // Open search screen with actual photo tags
+                    // Debug: log what tags we're passing
+                    developer.log('Available tags for search: $availableTags');
+
+                    // Get current search terms to exclude already selected tags
+                    final currentSearch =
+                        _galleryKey.currentState?.searchQuery ?? '';
+                    final existingTags = currentSearch
+                        .split(' ')
+                        .where((t) => t.isNotEmpty)
+                        .toSet();
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => SearchScreen(
                           recommendedTags: availableTags,
+                          excludeTags: existingTags,
                           onTagSelected: (tag) {
-                            // Apply search filter in gallery
+                            // Append to existing search
                             if (_selectedIndex == 0) {
-                              _galleryKey.currentState?.searchByTag(tag);
+                              final newSearch = currentSearch.isEmpty
+                                  ? tag
+                                  : '$currentSearch $tag';
+                              _galleryKey.currentState?.searchByTag(newSearch);
                             }
                           },
                         ),
                       ),
                     );
                   },
+                  icon: Icon(
+                    Icons.add,
+                    color: widget.isDarkMode
+                        ? Colors.grey.shade900
+                        : Colors.white,
+                    size: 24,
+                  ),
                 ),
               ),
             ),
-          ],
-        ),
+          // Floating search button
+          Positioned(
+            right: 16,
+            bottom: 110,
+            child: Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: widget.isDarkMode ? Colors.grey.shade900 : Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: Icon(
+                  Icons.search,
+                  color: widget.isDarkMode
+                      ? Colors.lightBlue.shade300
+                      : Colors.blue.shade700,
+                  size: 28,
+                ),
+                onPressed: () {
+                  // Get actual tags from photos
+                  final currentTags =
+                      _galleryKey.currentState?.getAllCurrentTags() ??
+                      <String>{};
+                  final availableTags = currentTags.toList()..sort();
+
+                  // Open search screen with actual photo tags
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SearchScreen(
+                        recommendedTags: availableTags,
+                        onTagSelected: (tag) {
+                          // Apply search filter in gallery
+                          if (_selectedIndex == 0) {
+                            _galleryKey.currentState?.searchByTag(tag);
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

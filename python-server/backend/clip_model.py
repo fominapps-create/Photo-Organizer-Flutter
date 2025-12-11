@@ -41,7 +41,8 @@ class CLIPPhotoClassifier:
         self.model.to(self.device)
         logger.info(f"CLIP model loaded on {self.device}")
     
-    def classify_image(self, image_path: str, confidence_threshold: float = 0.15, max_tags: int = 5):
+    def classify_image(self, image_path: str, confidence_threshold: float = 0.15, max_tags: int = 5, 
+                      expected_tags: list = None):
         """
         Classify image and return relevant tags.
         
@@ -49,6 +50,7 @@ class CLIPPhotoClassifier:
             image_path: Path to image file
             confidence_threshold: Minimum confidence score (0-1) to include tag
             max_tags: Maximum number of tags to return
+            expected_tags: If provided, will try progressively lower thresholds to find these tags
             
         Returns:
             List of tuples: [(tag, confidence), ...]
@@ -80,8 +82,32 @@ class CLIPPhotoClassifier:
                 "document"
             ]
             
-            # Strict thresholds to minimize false positives
-            # Higher for food and people (80%) to avoid misclassification
+            # Build all scores for dynamic threshold adjustment
+            all_scores = []
+            for idx, prob in enumerate(probs):
+                tag_name = category_names[idx] if idx < len(category_names) else "other"
+                if tag_name != "other":
+                    all_scores.append((tag_name, float(prob)))
+            
+            # Sort by confidence
+            all_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            # If expected_tags provided, try to find them with dynamic thresholds
+            if expected_tags:
+                # Try progressively lower thresholds: 0.80 -> 0.70 -> 0.60 -> 0.50 -> 0.40 -> 0.30 -> 0.20
+                for threshold_attempt in [0.80, 0.70, 0.60, 0.50, 0.40, 0.30, 0.20]:
+                    found_tags = [
+                        (tag, score) for tag, score in all_scores 
+                        if score >= threshold_attempt and tag in expected_tags
+                    ]
+                    if found_tags:
+                        logger.info(f"Found expected tags {expected_tags} at threshold {threshold_attempt}: {found_tags}")
+                        return found_tags[:max_tags]
+                
+                # If expected tags not found even at 0.20, log it and continue with normal logic
+                logger.warning(f"Expected tags {expected_tags} not found even at threshold 0.20. Top scores: {all_scores[:3]}")
+            
+            # Normal classification with category-specific thresholds
             category_thresholds = {
                 "food": 0.80,
                 "document": 0.70,
@@ -90,30 +116,15 @@ class CLIPPhotoClassifier:
                 "scenery": 0.70,
             }
             
-            # Get top matching categories
             results = []
-            all_scores = []  # For debugging
-            for idx, prob in enumerate(probs):
-                tag_name = category_names[idx] if idx < len(category_names) else "other"
-                
-                # Skip 'other' entirely - it means we don't know
-                if tag_name == "other":
-                    continue
-                
-                all_scores.append((tag_name, float(prob)))
-                
-                # Apply category-specific threshold
+            for tag_name, prob in all_scores:
                 required_threshold = category_thresholds.get(tag_name, confidence_threshold)
-                
                 if prob >= required_threshold:
-                    results.append((tag_name, float(prob)))
+                    results.append((tag_name, prob))
             
             # If no categories matched, tag as 'unknown' and log why
             if not results:
-                # Log top 3 scores to help diagnose why nothing matched
-                all_scores.sort(key=lambda x: x[1], reverse=True)
-                top_3 = all_scores[:3]
-                logger.warning(f"No categories matched for {image_path}. Top scores: {top_3}")
+                logger.warning(f"No categories matched for {image_path}. Top scores: {all_scores[:3]}")
                 results.append(("unknown", 0.0))
             
             # Sort by confidence and limit
@@ -243,18 +254,26 @@ def get_clip_model():
     return _clip_classifier
 
 
-def classify_image(image_path: str, confidence_threshold: float = 0.15, max_tags: int = 1):
+def classify_image(image_path: str, confidence_threshold: float = 0.15, max_tags: int = 1, 
+                   expected_tags: list = None):
     """
     Convenience function to classify a single image.
     Returns only the most confident category.
     Lower default threshold (0.15) to reduce None results, but strict categories
     like messaging (0.35) and social-media (0.30) still require high confidence.
     
+    Args:
+        image_path: Path to image
+        confidence_threshold: Minimum confidence (ignored if expected_tags provided)
+        max_tags: Maximum number of tags
+        expected_tags: If provided, will try progressively lower thresholds to find these
+    
     Returns:
         List of tag strings (typically just 1 tag)
     """
     classifier = get_clip_model()
-    tags = classifier.get_tags_only(image_path, confidence_threshold, max_tags)
+    results = classifier.classify_image(image_path, confidence_threshold, max_tags, expected_tags)
+    tags = [tag for tag, _ in results]
     # Filter out "other" unless it's the only option
     if len(tags) > 1 and "other" in tags:
         tags = [t for t in tags if t != "other"]

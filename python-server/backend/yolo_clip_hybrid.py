@@ -347,3 +347,170 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
     logger.info(f"  CLIP: {stats['clip_fallback']} fallback in {stats['clip_time_ms']}ms")
     
     return results, stats
+
+
+def validate_yolo_with_clip(image_path: str, yolo_tags: List[str], 
+                            clip_classifier_func, clip_threshold: float = 0.70,
+                            confidence_diff_threshold: float = 0.20) -> dict:
+    """
+    Validate YOLO classification by running CLIP and comparing results.
+    
+    This helps identify cases where:
+    - YOLO correctly detected objects but missed semantic context
+    - YOLO confidence was borderline and CLIP has higher confidence in different category
+    - YOLO false positives
+    
+    Args:
+        image_path: Path to image file
+        yolo_tags: Tags returned by YOLO
+        clip_classifier_func: Function to call CLIP (signature: func(image_path, threshold) -> List[str])
+        clip_threshold: Base threshold for CLIP (we'll use a lower threshold for validation)
+        confidence_diff_threshold: Minimum confidence difference to override YOLO (default 20%)
+        
+    Returns:
+        Dict with validation results:
+        {
+            "agreement": bool,  # Do YOLO and CLIP agree?
+            "clip_tags": List[str],  # Tags from CLIP
+            "should_override": bool,  # Should we override YOLO with CLIP?
+            "override_tags": List[str],  # Recommended tags if override
+            "clip_time_ms": float,
+            "reason": str  # Explanation of decision
+        }
+    """
+    t0 = time.time()
+    
+    result = {
+        "agreement": False,
+        "clip_tags": [],
+        "should_override": False,
+        "override_tags": [],
+        "clip_time_ms": 0,
+        "reason": ""
+    }
+    
+    try:
+        # Run CLIP with LOWER threshold for validation (more permissive to catch disagreements)
+        validation_threshold = max(0.40, clip_threshold - 0.20)  # 20% lower, but minimum 40%
+        clip_tags = clip_classifier_func(image_path, validation_threshold)
+        
+        t1 = time.time()
+        result["clip_time_ms"] = round((t1 - t0) * 1000, 1)
+        result["clip_tags"] = clip_tags
+        
+        # Check for agreement
+        yolo_set = set(yolo_tags)
+        clip_set = set(clip_tags)
+        
+        if yolo_set == clip_set:
+            result["agreement"] = True
+            result["reason"] = "Perfect agreement"
+            return result
+        
+        # Check for overlap
+        overlap = yolo_set & clip_set
+        if overlap and len(overlap) >= len(yolo_set) * 0.5:
+            result["agreement"] = True
+            result["reason"] = f"Partial agreement: {overlap}"
+            return result
+        
+        # Disagreement detected
+        result["agreement"] = False
+        
+        # YOLO is better at object detection (people, animals, food)
+        # CLIP is better at scene/context classification (scenery, document)
+        # NEVER let CLIP remove YOLO's object detections
+        # CLIP can only ADD complementary tags
+        
+        yolo_object_categories = {'people', 'animals', 'food'}
+        has_yolo_objects = yolo_set & yolo_object_categories
+        
+        if clip_tags:
+            # Re-run CLIP with NORMAL threshold to check if it's confident
+            # Pass yolo_tags as expected_tags to enable dynamic threshold search
+            clip_confident_tags = clip_classifier_func(image_path, clip_threshold, expected_tags=yolo_tags)
+            
+            logger.info(f"🔍 Validation check: YOLO={yolo_tags}, CLIP_low={clip_tags}, CLIP_high={clip_confident_tags}")
+            
+            # CRITICAL: Never override with empty or None
+            if not clip_confident_tags or len(clip_confident_tags) == 0:
+                # CLIP couldn't find anything confident - keep YOLO's detection
+                result["should_override"] = False
+                result["override_tags"] = []
+                result["reason"] = f"CLIP found nothing confident. Keeping YOLO tags: {yolo_tags}"
+                logger.info(f"✅ Keeping YOLO tags (CLIP empty): {yolo_tags}")
+            elif has_yolo_objects:
+                # YOLO detected objects (people/animals/food)
+                # NEVER remove these - YOLO is authoritative for objects
+                # CLIP can only add scene/context tags (NOT unknown)
+                clip_set_confident = set(clip_confident_tags)
+                clip_scene_tags = clip_set_confident - yolo_object_categories
+                
+                # Remove "unknown" from scene tags - if YOLO detected something, it's not unknown
+                clip_scene_tags.discard('unknown')
+                
+                if clip_scene_tags:
+                    # CLIP found complementary scene tags - COMBINE with YOLO
+                    combined_tags = list(yolo_set | clip_scene_tags)
+                    result["should_override"] = True
+                    result["override_tags"] = combined_tags
+                    result["reason"] = f"Adding CLIP scene tags to YOLO objects: {yolo_tags} + {list(clip_scene_tags)}"
+                    logger.info(f"➕ Validation enhancement: {yolo_tags} + {list(clip_scene_tags)} = {combined_tags}")
+                else:
+                    # CLIP only found object tags - trust YOLO for objects
+                    result["should_override"] = False
+                    result["override_tags"] = []
+                    result["reason"] = f"YOLO objects are authoritative. Keeping: {yolo_tags}"
+                    logger.info(f"✅ Keeping YOLO objects (authoritative): {yolo_tags}")
+            else:
+                # No YOLO objects detected - CLIP can replace freely
+                result["should_override"] = True
+                result["override_tags"] = clip_confident_tags
+                result["reason"] = f"No YOLO objects. Using CLIP: {clip_confident_tags}"
+                logger.info(f"🔄 Validation override (no YOLO objects): {yolo_tags} -> {clip_confident_tags}")
+        else:
+            # CLIP found nothing even at low threshold
+            # Keep YOLO tags - YOLO is better at object detection
+            result["should_override"] = False
+            result["override_tags"] = []  # Explicitly empty
+            result["reason"] = f"CLIP found nothing, keeping YOLO tags: {yolo_tags}"
+            logger.info(f"✅ Keeping YOLO tags (CLIP found nothing): {yolo_tags}")
+        
+        return result
+        
+    except Exception as e:
+        t1 = time.time()
+        result["clip_time_ms"] = round((t1 - t0) * 1000, 1)
+        result["reason"] = f"Validation error: {e}"
+        logger.error(f"Validation error for {image_path}: {e}")
+        return result
+
+
+def validate_batch_with_clip(image_paths: List[str], yolo_tags_list: List[List[str]],
+                             clip_batch_func, clip_threshold: float = 0.70) -> List[dict]:
+    """
+    Validate a batch of YOLO classifications with CLIP.
+    
+    Args:
+        image_paths: List of image paths
+        yolo_tags_list: List of YOLO tags for each image (parallel to image_paths)
+        clip_batch_func: Function to batch process with CLIP
+        clip_threshold: Confidence threshold for CLIP
+        
+    Returns:
+        List of validation results (one per image)
+    """
+    # For now, validate sequentially (could optimize with true batching later)
+    from .clip_model import classify_image as clip_classify_single
+    
+    results = []
+    for image_path, yolo_tags in zip(image_paths, yolo_tags_list):
+        validation = validate_yolo_with_clip(
+            image_path, 
+            yolo_tags,
+            clip_classify_single,
+            clip_threshold
+        )
+        results.append(validation)
+    
+    return results

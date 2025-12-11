@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
@@ -6,6 +7,20 @@ import 'services/api_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Set system UI overlay style (status bar and navigation bar)
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent, // Transparent status bar
+      statusBarIconBrightness: Brightness.dark, // Dark icons for light mode
+      statusBarBrightness: Brightness.light, // For iOS
+      systemNavigationBarColor: Color(0xFFF2F0EF), // Light mode navigation bar
+      systemNavigationBarIconBrightness: Brightness.dark, // Dark icons
+    ),
+  );
+
+  // Enable edge-to-edge display
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   // Allow overriding the API base URL at runtime (useful for running on a real device)
   const dartApiBaseUrl = String.fromEnvironment(
@@ -54,15 +69,46 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
 
   Future<void> _loadThemePreference() async {
     final prefs = await SharedPreferences.getInstance();
+    final isDark = prefs.getBool('isDarkMode') ?? false;
     setState(() {
-      _isDarkMode = prefs.getBool('isDarkMode') ?? false;
+      _isDarkMode = isDark;
     });
+
+    // Update system UI colors on app start
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: isDark
+            ? const Color(0xFF121212)
+            : const Color(0xFFF2F0EF),
+        systemNavigationBarIconBrightness: isDark
+            ? Brightness.light
+            : Brightness.dark,
+      ),
+    );
   }
 
   void _updateTheme(bool isDark) {
     setState(() {
       _isDarkMode = isDark;
     });
+
+    // Update system UI colors based on theme
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: isDark
+            ? const Color(0xFF121212)
+            : const Color(0xFFF2F0EF),
+        systemNavigationBarIconBrightness: isDark
+            ? Brightness.light
+            : Brightness.dark,
+      ),
+    );
   }
 
   @override
