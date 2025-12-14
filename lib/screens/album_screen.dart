@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
-import '../services/tag_store.dart';
 import '../services/photo_id.dart';
 
 class AlbumScreen extends StatefulWidget {

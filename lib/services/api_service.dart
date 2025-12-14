@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'dart:developer' as developer;
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 // Conditional import: use real platform detection on native builds, stub on web.
 import 'platform_stub.dart' if (dart.library.io) 'platform_io.dart';
@@ -246,6 +248,185 @@ class ApiService {
     }
 
     throw lastError ?? Exception('Upload failed after $retries attempts');
+  }
+
+  /// Upload multiple files using batch endpoint for faster processing.
+  /// Each item must be a Map with keys: `file` (File or Uint8List) and `photoID`.
+  static Future<http.Response> uploadImagesBatch(
+    List<Map<String, dynamic>> items, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    if (items.isEmpty) {
+      throw Exception('No files to upload');
+    }
+
+    final uri = _endpointUri('/process-images-batch/');
+    var request = http.MultipartRequest('POST', uri);
+
+    if (_uploadToken != null && _uploadToken!.isNotEmpty) {
+      request.headers['X-Upload-Token'] = _uploadToken!;
+    }
+
+    // Collect photoIDs in order
+    final photoIDs = <String>[];
+
+    // Separate items by type for parallel processing
+    final fileItems = <Map<String, dynamic>>[];
+    final bytesItems = <Map<String, dynamic>>[];
+
+    for (var item in items) {
+      if (!item.containsKey('file') || !item.containsKey('photoID')) {
+        throw Exception(
+          'uploadImagesBatch requires items with "file" and "photoID" keys',
+        );
+      }
+
+      final file = item['file'];
+      final photoID = item['photoID'] as String;
+      photoIDs.add(photoID);
+
+      if (file is Uint8List) {
+        bytesItems.add(item);
+      } else if (file is File) {
+        fileItems.add(item);
+      } else {
+        throw Exception('File must be Uint8List or File');
+      }
+    }
+
+    // Add Uint8List items immediately (no async needed)
+    for (var item in bytesItems) {
+      final file = item['file'] as Uint8List;
+      final photoID = item['photoID'] as String;
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'files',
+          file,
+          filename: 'photo_$photoID.jpg',
+        ),
+      );
+    }
+
+    // Load all File items in PARALLEL (major performance boost!)
+    if (fileItems.isNotEmpty) {
+      final loadStartTime = DateTime.now();
+      final multipartFutures = fileItems.map((item) {
+        final file = item['file'] as File;
+        return http.MultipartFile.fromPath(
+          'files',
+          file.path,
+          filename: p.basename(file.path),
+        );
+      }).toList();
+
+      final multipartFiles = await Future.wait(multipartFutures);
+      request.files.addAll(multipartFiles);
+      final loadEndTime = DateTime.now();
+      developer.log(
+        '📁 MultipartFile.fromPath took ${loadEndTime.difference(loadStartTime).inMilliseconds}ms for ${fileItems.length} files',
+      );
+    }
+
+    // Add photoIDs as JSON array
+    request.fields['photoIDs'] = json.encode(photoIDs);
+
+    final sendStartTime = DateTime.now();
+    final streamed = await request.send().timeout(timeout);
+    final sendEndTime = DateTime.now();
+    developer.log(
+      '🌐 Network send took ${sendEndTime.difference(sendStartTime).inMilliseconds}ms',
+    );
+
+    final streamStartTime = DateTime.now();
+    final response = await http.Response.fromStream(streamed);
+    final streamEndTime = DateTime.now();
+    developer.log(
+      '📥 Response stream read took ${streamEndTime.difference(streamStartTime).inMilliseconds}ms',
+    );
+
+    return response;
+  }
+
+  /// Validate YOLO classifications by running CLIP on the same images
+  static Future<http.Response> validateYoloClassifications(
+    List<Map<String, dynamic>> items,
+    List<List<String>> yoloTagsList, {
+    Duration timeout = const Duration(
+      seconds: 120,
+    ), // Longer timeout for validation
+  }) async {
+    if (items.isEmpty) {
+      throw Exception('No files to validate');
+    }
+
+    if (items.length != yoloTagsList.length) {
+      throw Exception(
+        'Items and yoloTagsList must have the same length (${items.length} vs ${yoloTagsList.length})',
+      );
+    }
+
+    final uri = _endpointUri('/validate-yolo-classifications/');
+    var request = http.MultipartRequest('POST', uri);
+
+    if (_uploadToken != null && _uploadToken!.isNotEmpty) {
+      request.headers['X-Upload-Token'] = _uploadToken!;
+    }
+
+    // Separate items by type for parallel processing
+    final fileItems = <Map<String, dynamic>>[];
+    final bytesItems = <Map<String, dynamic>>[];
+
+    for (var item in items) {
+      if (!item.containsKey('file')) {
+        throw Exception(
+          'validateYoloClassifications requires items with "file" key',
+        );
+      }
+
+      final file = item['file'];
+
+      if (file is Uint8List) {
+        bytesItems.add(item);
+      } else if (file is File) {
+        fileItems.add(item);
+      } else {
+        throw Exception('File must be Uint8List or File');
+      }
+    }
+
+    // Add Uint8List items immediately
+    for (var i = 0; i < bytesItems.length; i++) {
+      final item = bytesItems[i];
+      final file = item['file'] as Uint8List;
+      final filename = item['filename'] as String? ?? 'photo_$i.jpg';
+      request.files.add(
+        http.MultipartFile.fromBytes('files', file, filename: filename),
+      );
+    }
+
+    // Load all File items in parallel
+    if (fileItems.isNotEmpty) {
+      final multipartFutures = fileItems.map((item) {
+        final file = item['file'] as File;
+        final filename = item['filename'] as String? ?? p.basename(file.path);
+        return http.MultipartFile.fromPath(
+          'files',
+          file.path,
+          filename: filename,
+        );
+      }).toList();
+
+      final multipartFiles = await Future.wait(multipartFutures);
+      request.files.addAll(multipartFiles);
+    }
+
+    // Add yolo_tags as JSON array
+    request.fields['yolo_tags'] = json.encode(yoloTagsList);
+
+    final streamed = await request.send().timeout(timeout);
+    final response = await http.Response.fromStream(streamed);
+
+    return response;
   }
 
   /// Upload multiple files. Each item must be a Map with keys: `file` and `photoID`.

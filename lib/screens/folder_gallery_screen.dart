@@ -6,6 +6,7 @@
 
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -249,8 +250,7 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
           if (itemsAll.isNotEmpty) {
             discovered[allPath.name.isNotEmpty ? allPath.name : 'All Photos'] =
                 itemsAll;
-            // ignore: avoid_print
-            print(
+            developer.log(
               'DBG: album=${allPath.name} total=$totalAll loaded=${itemsAll.length} (all)',
             );
           }
@@ -259,12 +259,10 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
       for (final p in paths) {
         final total = await p.assetCountAsync;
         // Debug log helpful during testing
-        // ignore: avoid_print
-        print('DBG: album=${p.name} total=$total');
+        developer.log('DBG: album=${p.name} total=$total');
         final end = total > 50 ? 50 : total;
         final list = await p.getAssetListRange(start: 0, end: end);
-        // ignore: avoid_print
-        print('DBG: album=${p.name} loaded=${list.length}');
+        developer.log('DBG: album=${p.name} loaded=${list.length}');
         if (list.isNotEmpty) {
           discovered[p.name] = list;
         }

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
 
 class SearchScreen extends StatefulWidget {
   final List<String>

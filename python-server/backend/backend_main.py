@@ -2,7 +2,10 @@
 import os
 import time
 import cv2
+import logging
 from .model import load_model
+
+logger = logging.getLogger(__name__)
 from .handlers import person, animals, documents, junk, utils
 from . import tags_db
 from .config import SOURCE_FOLDER, CONFIDENCE_THRESHOLD, AUTO_TAG_MAX, PERSIST_UPLOADS
@@ -37,7 +40,7 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
     filename = os.path.basename(img_path)
     img = cv2.imread(img_path)
     if img is None:
-        print(f"Skipping '{filename}' — cannot read image")
+        logger.warning(f"Skipping '{filename}' — cannot read image")
         return "skipped"
 
     try:
@@ -45,7 +48,7 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
         if results is None:
             results = get_model()(img_path)[0]
     except Exception as e:
-        print(f"Skipping '{filename}' (YOLO error): {e}")
+        logger.error(f"Skipping '{filename}' (YOLO error): {e}")
         return "skipped"
 
     # Extract main detected object name (highest confidence)
@@ -82,7 +85,7 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
 
     # If moving/organizing is disabled in config, skip physical organization.
     if getattr(_cfg, 'ENABLE_MOVING', False) is False:
-        print(f"Skipping file move (ENABLE_MOVING=False). Computed tags: {computed_tags}")
+        logger.info(f"Skipping file move (ENABLE_MOVING=False). Computed tags: {computed_tags}")
         # Do not persist tags here — API layer should persist tags by photoID when available.
         return "skipped"
 
@@ -90,7 +93,7 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
     final_dst = utils.move_to_folder(img_path, dest, main_object)
     if final_dst:
         final_name = os.path.basename(final_dst)
-        print(f"Moved '{filename}' → {final_name}")
+        logger.info(f"Moved '{filename}' → {final_name}")
         # If tags were provided, persist them under the final filename
         try:
             if computed_tags is not None:
@@ -99,7 +102,7 @@ def process_single_image(img_path: str, results=None, tags=None) -> str:
             pass
         return final_dst
     else:
-        print(f"Failed to move '{filename}'")
+        logger.warning(f"Failed to move '{filename}'")
         return "skipped"
 
 
@@ -114,13 +117,13 @@ def run_backend(folder: str = SOURCE_FOLDER):
     ]
 
     if not image_files:
-        print(f"No images found in source folder: {folder}")
+        logger.warning(f"No images found in source folder: {folder}")
         return
 
     for idx, img_path in enumerate(image_files, 1):
         dest = process_single_image(img_path)
-        print(f"{idx}/{len(image_files)} → {os.path.basename(dest)}")
+        logger.info(f"{idx}/{len(image_files)} → {os.path.basename(dest)}")
 
     end_time = time.time()
     minutes, seconds = divmod(end_time - start_time, 60)
-    print(f"\n✅ Processing completed in {int(minutes)} min {int(seconds)} sec")
+    logger.info(f"\n✅ Processing completed in {int(minutes)} min {int(seconds)} sec")

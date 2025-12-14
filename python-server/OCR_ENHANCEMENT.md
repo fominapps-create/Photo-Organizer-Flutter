@@ -1,4 +1,4 @@
-# OCR Enhancement for Screenshot Detection
+n# OCR Enhancement for Screenshot Detection
 
 ## Overview
 The OCR enhancement module (`ocr_enhancement.py`) adds game-specific and app-specific detection to screenshot classifications. When a screenshot is detected by CLIP, OCR can identify the exact game or app from text visible in the image.

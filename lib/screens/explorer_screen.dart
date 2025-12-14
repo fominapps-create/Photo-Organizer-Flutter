@@ -14,7 +14,6 @@ import '../services/tag_store.dart';
 import '../services/photo_id.dart';
 import '../services/network_utils.dart';
 import '../services/settings_utils.dart';
-import 'package:path/path.dart' as p;
 import '../services/api_service.dart'; // adjust path if needed
 import 'custom_image_picker.dart';
 
@@ -128,7 +127,7 @@ class ExplorerScreenState extends State<ExplorerScreen>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               color: Theme.of(
                 context,
-              ).colorScheme.surfaceContainerHighest.withAlpha(20),
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 20 / 255),
               child: Row(
                 children: [
                   Text(
@@ -173,8 +172,9 @@ class ExplorerScreenState extends State<ExplorerScreen>
         children: [
           if (uploading || paused)
             Container(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest
-                  .withAlpha((0.6 * 255).round()),
+              color: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -191,7 +191,7 @@ class ExplorerScreenState extends State<ExplorerScreen>
                         decoration: BoxDecoration(
                           color: Theme.of(
                             context,
-                          ).colorScheme.surface.withAlpha((0.14 * 255).round()),
+                          ).colorScheme.surface.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Stack(
@@ -235,9 +235,15 @@ class ExplorerScreenState extends State<ExplorerScreen>
                                           decoration: BoxDecoration(
                                             gradient: LinearGradient(
                                               colors: [
-                                                Colors.white.withAlpha(0),
-                                                Colors.white.withAlpha(120),
-                                                Colors.white.withAlpha(0),
+                                                Colors.white.withValues(
+                                                  alpha: 0.0,
+                                                ),
+                                                Colors.white.withValues(
+                                                  alpha: 120 / 255,
+                                                ),
+                                                Colors.white.withValues(
+                                                  alpha: 0.0,
+                                                ),
                                               ],
                                               stops: const [0.0, 0.5, 1.0],
                                               begin: Alignment.centerLeft,
@@ -408,7 +414,9 @@ class ExplorerScreenState extends State<ExplorerScreen>
                                       shape: BoxShape.circle,
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withAlpha(77),
+                                          color: Colors.black.withValues(
+                                            alpha: 77 / 255,
+                                          ),
                                           blurRadius: 4,
                                           offset: const Offset(0, 1),
                                         ),

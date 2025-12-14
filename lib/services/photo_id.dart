@@ -20,7 +20,9 @@ class PhotoId {
           return Uri.file(path).toString();
         } catch (_) {
           var raw = s.substring('file:'.length);
-          while (raw.startsWith('//')) raw = raw.substring(1);
+          while (raw.startsWith('//')) {
+            raw = raw.substring(1);
+          }
           return Uri.file(raw).toString();
         }
       }

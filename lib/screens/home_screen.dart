@@ -206,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: 45,
             child: Padding(
               padding: const EdgeInsets.only(bottom: 1, left: 6, right: 6),
               child: Row(
@@ -223,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
               (_galleryKey.currentState?.searchQuery ?? '').isNotEmpty)
             Positioned(
               right: 24,
-              bottom: 176,
+              bottom: 176 + MediaQuery.of(context).padding.bottom,
               child: Container(
                 width: 40,
                 height: 40,
@@ -289,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // Floating search button
           Positioned(
             right: 16,
-            bottom: 110,
+            bottom: 135,
             child: Container(
               width: 56,
               height: 56,

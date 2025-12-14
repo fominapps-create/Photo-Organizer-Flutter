@@ -26,7 +26,6 @@ linter:
 
 analyzer:
   exclude:
-    - lib/screens/gallery_screen.dart
     - lib/screens/archive/**
     - lib/screens/gallery_screen_corrupted*.dart
     - lib/screens/*gallery*_old.dart

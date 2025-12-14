@@ -142,7 +142,7 @@ class _PricingScreenState extends State<PricingScreen> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: color.withAlpha((0.12 * 255).round()),
+                    color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(

@@ -1,6 +1,9 @@
 import os
 import shutil
+import logging
 from ultralytics import YOLO
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIG ---
 SOURCE_FOLDER = r"C:\Users\MIKE\Pictures\Screenshots"  # your main folder
@@ -35,7 +38,7 @@ for root, _, files in os.walk(SOURCE_FOLDER):
         try:
             results = model(img_path)[0]  # first result for image
         except Exception as e:
-            print(f"Skipping '{filename}' (error): {e}")
+            logger.error(f"Skipping '{filename}' (error): {e}")
             continue
 
         folder_name = "Junk"
@@ -59,4 +62,4 @@ for root, _, files in os.walk(SOURCE_FOLDER):
             dest_folder = JUNK_FOLDER
 
         shutil.move(img_path, os.path.join(dest_folder, filename))
-        print(f"Moved '{filename}' → '{folder_name}'")
+        logger.info(f"Moved '{filename}' → '{folder_name}'")

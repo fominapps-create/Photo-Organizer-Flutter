@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 import 'pricing_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,12 +21,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   late bool _scanOnWifi;
   late bool _autoscanAutoStart;
+  bool _serverOnline = false;
+  bool _checkingServer = false;
+  String _serverUrl = '';
 
   @override
   void initState() {
     super.initState();
     _isDarkMode = widget.isDarkMode;
     _loadSettings();
+    _checkServerStatus();
   }
 
   Future<void> _loadSettings() async {
@@ -44,6 +49,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveAutoscanAutoStart(bool val) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('autoscan_auto_start', val);
+  }
+
+  Future<void> _checkServerStatus() async {
+    if (!mounted) return;
+    setState(() {
+      _checkingServer = true;
+      _serverUrl = ApiService.baseUrl.isNotEmpty
+          ? ApiService.baseUrl
+          : 'Not configured';
+    });
+
+    final online = await ApiService.pingServer(
+      timeout: const Duration(seconds: 3),
+      retries: 1,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _serverOnline = online;
+      _checkingServer = false;
+      _serverUrl = ApiService.baseUrl.isNotEmpty
+          ? ApiService.baseUrl
+          : 'Not configured';
+    });
   }
 
   Future<void> _toggleTheme(bool value) async {
@@ -94,6 +123,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 fontWeight: FontWeight.w600,
                 color: Colors.grey,
               ),
+            ),
+          ),
+          // Server Status Indicator
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _serverOnline
+                  ? Colors.green.withValues(alpha: 0.1)
+                  : Colors.red.withValues(alpha: 0.1),
+              border: Border.all(
+                color: _serverOnline ? Colors.green : Colors.red,
+                width: 1.5,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _checkingServer
+                          ? Icons.sync
+                          : (_serverOnline ? Icons.check_circle : Icons.error),
+                      color: _checkingServer
+                          ? Colors.orange
+                          : (_serverOnline ? Colors.green : Colors.red),
+                      size: 24,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _checkingServer
+                                ? 'Checking server...'
+                                : (_serverOnline
+                                      ? 'Server Online'
+                                      : 'Server Offline'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _serverUrl,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _checkingServer ? null : _checkServerStatus,
+                      tooltip: 'Test connection',
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
           SwitchListTile(

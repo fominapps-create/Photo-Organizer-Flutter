@@ -1,8 +1,11 @@
 import shutil
 import os
 import cv2
+import logging
 from categories import ANIMAL_CLASSES, DOCUMENT_CLASSES
 from config import CONFIDENCE_THRESHOLD, PERSON_FOLDER, ANIMALS_FOLDER, JUNK_FOLDER, DOCUMENTS_FOLDER
+
+logger = logging.getLogger(__name__)
 
 MIN_BOX_PERCENT = 0.3  # 30% of image area
 
@@ -74,10 +77,10 @@ def move_to_folder(img_path, dest_folder):
     Prints messages if the destination folder is empty or missing.
     """
     if not os.path.exists(dest_folder):
-        print(f"Destination folder '{dest_folder}' does not exist. Skipping '{os.path.basename(img_path)}'.")
+        logger.warning(f"Destination folder '{dest_folder}' does not exist. Skipping '{os.path.basename(img_path)}'.")
         return
 
     if len(os.listdir(dest_folder)) == 0:
-        print(f"Destination folder '{os.path.basename(dest_folder)}' is empty, moving '{os.path.basename(img_path)}'.")
+        logger.info(f"Destination folder '{os.path.basename(dest_folder)}' is empty, moving '{os.path.basename(img_path)}'.")
 
     shutil.move(img_path, dest_folder)

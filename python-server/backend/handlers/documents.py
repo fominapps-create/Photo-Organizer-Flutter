@@ -2,6 +2,9 @@ from ..config import DOCUMENTS_FOLDER
 import os
 import cv2
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 def select(results, img=None):
     """
@@ -94,7 +97,7 @@ def select(results, img=None):
             return DOCUMENTS_FOLDER
                 
         except Exception as e:
-            print(f"Document detection error: {e}")
+            logger.error(f"Document detection error: {e}")
             pass
 
     return None

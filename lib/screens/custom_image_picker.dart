@@ -260,7 +260,9 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
                         },
                       ),
                       if (isSelected)
-                        Container(color: Colors.blue.withAlpha(77)),
+                        Container(
+                          color: Colors.blue.withValues(alpha: 77 / 255),
+                        ),
                       // Checkbox overlay in top-left corner
                       Positioned(
                         top: 4,
@@ -279,7 +281,7 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withAlpha(77),
+                                color: Colors.black.withValues(alpha: 77 / 255),
                                 blurRadius: 4,
                                 offset: const Offset(0, 1),
                               ),
@@ -304,7 +306,9 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
                             decoration: BoxDecoration(
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withAlpha(102),
+                                  color: Colors.black.withValues(
+                                    alpha: 102 / 255,
+                                  ),
                                   blurRadius: 4,
                                   offset: const Offset(0, 1),
                                 ),
@@ -330,7 +334,7 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
                 color: Colors.white,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withAlpha(26),
+                    color: Colors.black.withValues(alpha: 26 / 255),
                     blurRadius: 8,
                     offset: const Offset(0, -2),
                   ),

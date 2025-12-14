@@ -48,9 +48,12 @@ class GalleryScreenState extends State<GalleryScreen> {
   final Map<String, double> _textWidthCache = {};
   // Auto-scan state
   bool _scanning = false;
+  bool _scanProgressMinimized = false;
   double _scanProgress = 0.0; // 0.0-1.0
   int _scanTotal = 0;
   bool _scanPaused = false;
+  final ScrollController _scrollController = ScrollController();
+  bool _showScrollToTop = false;
   int _scanProcessed = 0;
   int _currentUnscannedCount = 0;
   double _lastScale = 1.0; // Track last scale for incremental pinch zoom
@@ -237,6 +240,7 @@ class GalleryScreenState extends State<GalleryScreen> {
   void initState() {
     super.initState();
     _updateSystemUI();
+    _scrollController.addListener(_scrollListener);
     _searchController = TextEditingController(text: searchQuery);
     _searchFocusNode = FocusNode();
     _searchController.addListener(() {
@@ -284,12 +288,9 @@ class GalleryScreenState extends State<GalleryScreen> {
     await _loadTags();
     developer.log('Total photos in gallery: ${imageUrls.length}');
     setState(() => loading = false);
-    // Start automatic scan of local images when appropriate
-    developer.log('About to call _updateUnscannedCount()...');
-    await _updateUnscannedCount();
-    developer.log(
-      'After _updateUnscannedCount(), _currentUnscannedCount = $_currentUnscannedCount',
-    );
+    // Defer unscanned count to avoid blocking UI
+    developer.log('Deferring _updateUnscannedCount() to microtask...');
+    Future.microtask(() => _updateUnscannedCount());
     _startAutoScanIfNeeded();
   }
 
@@ -402,10 +403,11 @@ class GalleryScreenState extends State<GalleryScreen> {
 
     // Scan all photos that need scanning
     final toScan = missing;
-    _scanTotal = toScan.length;
     developer.log('🚀 Starting scan of ${toScan.length} photos...');
     setState(() {
       _scanning = true;
+      _scanTotal = toScan.length;
+      developer.log('📊 SET _scanTotal = $_scanTotal');
       // Don't reset _scanPaused - let user control pause/resume
       _scanProcessed = 0;
       _scanProgress = 0.0;
@@ -471,9 +473,10 @@ class GalleryScreenState extends State<GalleryScreen> {
       return;
     }
 
-    _scanTotal = toScan.length;
     setState(() {
       _scanning = true;
+      _scanTotal = toScan.length;
+      developer.log('📊 SET _scanTotal = $_scanTotal');
       // Don't reset _scanPaused - let user control pause/resume
       _scanProcessed = 0;
       _scanProgress = 0.0;
@@ -679,12 +682,18 @@ class GalleryScreenState extends State<GalleryScreen> {
       batchStart < urls.length;
       batchStart += batchSize
     ) {
+      // Check if scan was stopped
+      if (!_scanning) {
+        developer.log('⏹️ Scan stopped by user');
+        return;
+      }
+
       final batchEnd = (batchStart + batchSize).clamp(0, urls.length);
       final batch = urls.sublist(batchStart, batchEnd);
 
       // Check for pause BEFORE any processing or logging
       while (_scanPaused) {
-        if (!mounted) return;
+        if (!mounted || !_scanning) return;
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
@@ -945,13 +954,18 @@ class GalleryScreenState extends State<GalleryScreen> {
 
       // Update progress and performance stats
       // Always update UI for smooth progress feedback
-      if (mounted) {
+      if (mounted && _scanning) {
         final elapsedSeconds = DateTime.now()
             .difference(scanStartTime)
             .inSeconds;
         setState(() {
-          _scanProcessed = totalProcessed;
-          _scanProgress = totalProcessed / (_scanTotal == 0 ? 1 : _scanTotal);
+          _scanProcessed = totalProcessed.clamp(0, _scanTotal);
+          _scanProgress = (_scanTotal == 0)
+              ? 0.0
+              : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
+          developer.log(
+            '📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal (unscanned count: $_currentUnscannedCount)',
+          );
           _avgBatchTimeMs = batchDuration;
           _imagesPerSecond = elapsedSeconds > 0
               ? totalProcessed / elapsedSeconds.toDouble()
@@ -978,7 +992,7 @@ class GalleryScreenState extends State<GalleryScreen> {
           consecutiveFastBatches = 0;
 
           if (consecutiveSlowBatches >= 2) {
-            batchSize = (batchSize * 0.7).ceil().clamp(2, 30);
+            batchSize = (batchSize * 0.7).ceil().clamp(2, 50);
             developer.log(
               '⚡ Reducing batch size to $batchSize (performance optimization)',
             );
@@ -990,7 +1004,7 @@ class GalleryScreenState extends State<GalleryScreen> {
           consecutiveSlowBatches = 0;
 
           if (consecutiveFastBatches >= 2) {
-            batchSize = (batchSize * 1.4).ceil().clamp(2, 30);
+            batchSize = (batchSize * 1.4).ceil().clamp(2, 50);
             developer.log(
               '⚡ Increasing batch size to $batchSize (device can handle more)',
             );
@@ -1887,17 +1901,17 @@ class GalleryScreenState extends State<GalleryScreen> {
       int batchSize;
 
       if (ramGB <= 3 || cpuCores <= 4) {
-        // Low-end device: 3 images per batch
-        batchSize = 3;
-      } else if (ramGB <= 6 || cpuCores <= 6) {
-        // Mid-range device: 6 images per batch
+        // Low-end device: 6 images per batch
         batchSize = 6;
+      } else if (ramGB <= 6 || cpuCores <= 6) {
+        // Mid-range device: 12 images per batch
+        batchSize = 12;
       } else if (ramGB <= 8 || cpuCores <= 8) {
-        // Mid-high device: 10 images per batch
-        batchSize = 10;
+        // Mid-high device: 20 images per batch
+        batchSize = 20;
       } else {
-        // High-end device: 15 images per batch (8+ cores or 8+ GB RAM)
-        batchSize = 15;
+        // High-end device: 30 images per batch (8+ cores or 8+ GB RAM)
+        batchSize = 30;
       }
 
       developer.log('⚙️ Initial batch size: $batchSize (adaptive)');
@@ -2461,16 +2475,28 @@ class GalleryScreenState extends State<GalleryScreen> {
   }
 
   Future<void> _loadTags() async {
+    // Batch load all tags at once for better performance
+    final photoIDs = imageUrls
+        .where((url) {
+          final key = p.basename(url);
+          // Skip if already have tags from server
+          return !(photoTags.containsKey(key) &&
+              (photoTags[key]?.isNotEmpty ?? false));
+        })
+        .map((url) => PhotoId.canonicalId(url))
+        .toList();
+
+    if (photoIDs.isEmpty) return;
+
+    // Load all tags in a single batch operation
+    final tagsMap = await TagStore.loadAllTagsMap(photoIDs);
+
+    // Map back to basename keys
     for (final url in imageUrls) {
       final key = p.basename(url);
-      if (photoTags.containsKey(key) && (photoTags[key]?.isNotEmpty ?? false)) {
-        continue; // prefer server
-      }
-      // Load from canonical photoID key
       final photoID = PhotoId.canonicalId(url);
-      final tags = await TagStore.loadLocalTags(photoID);
-      if (tags != null) {
-        photoTags[key] = tags;
+      if (tagsMap.containsKey(photoID)) {
+        photoTags[key] = tagsMap[photoID]!;
       }
     }
   }
@@ -2903,9 +2929,26 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _scrollListener() {
+    if (_scrollController.offset >= 200 && !_showScrollToTop) {
+      setState(() => _showScrollToTop = true);
+    } else if (_scrollController.offset < 200 && _showScrollToTop) {
+      setState(() => _showScrollToTop = false);
+    }
+  }
+
+  void _scrollToTop() {
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
@@ -3032,6 +3075,186 @@ class GalleryScreenState extends State<GalleryScreen> {
                               ),
                             ),
                           ),
+                          // Minimized scanning indicator (next to menu)
+                          if (_scanning && _scanProgressMinimized)
+                            Positioned(
+                              left: 35,
+                              top: 0,
+                              child: GestureDetector(
+                                onTap: () => setState(
+                                  () => _scanProgressMinimized = false,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.grey.shade900
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 40,
+                                        height: 40,
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          children: [
+                                            if (!_scanPaused)
+                                              SizedBox(
+                                                width: 40,
+                                                height: 40,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2.5,
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                        Color
+                                                      >(
+                                                        Colors
+                                                            .lightBlue
+                                                            .shade300,
+                                                      ),
+                                                ),
+                                              ),
+                                            Text(
+                                              '${(_scanProgress * 100).round()}%',
+                                              style: TextStyle(
+                                                color:
+                                                    Theme.of(
+                                                          context,
+                                                        ).brightness ==
+                                                        Brightness.dark
+                                                    ? Colors.white
+                                                    : Colors.black87,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      // Pause/Play button
+                                      InkWell(
+                                        onTap: () => setState(
+                                          () => _scanPaused = !_scanPaused,
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(4),
+                                          child: Icon(
+                                            _scanPaused
+                                                ? Icons.play_arrow
+                                                : Icons.pause,
+                                            color:
+                                                Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      // Stop button
+                                      InkWell(
+                                        onTap: () => setState(() {
+                                          _scanning = false;
+                                          _scanPaused = false;
+                                          _scanProgressMinimized = false;
+                                          _scanTotal = 0;
+                                          _scanProcessed = 0;
+                                          _scanProgress = 0.0;
+                                        }),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(4),
+                                          child: Icon(
+                                            Icons.stop,
+                                            color:
+                                                Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                            size: 22,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                          // Scan start button (when not scanning)
+                          if (!_scanning)
+                            Positioned(
+                              left: 35,
+                              top: 0,
+                              child: InkWell(
+                                onTap: () => _manualScan(),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 8,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.grey.shade900
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(22),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.play_arrow,
+                                        color: Colors.lightBlue.shade300,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Scan',
+                                        style: TextStyle(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+
                           // Unscanned button on the right (if any unscanned)
                           if (_currentUnscannedCount > 0)
                             Positioned(
@@ -3494,6 +3717,7 @@ class GalleryScreenState extends State<GalleryScreen> {
                                   // Photo Grid
                                   Expanded(
                                     child: GridView.builder(
+                                      controller: _scrollController,
                                       padding: const EdgeInsets.fromLTRB(
                                         12,
                                         12,
@@ -3943,64 +4167,140 @@ class GalleryScreenState extends State<GalleryScreen> {
                         ),
 
                         // Floating glassmorphic scanning progress overlay
-                        if (_scanning)
+                        if (_scanning && !_scanProgressMinimized)
                           Positioned(
                             left: 16,
                             right: 100,
                             bottom: 100,
-                            child: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.grey.shade900
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.1),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 10),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.lightBlue.shade300,
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.grey.shade900
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.1,
                                         ),
-                                        child: Icon(
-                                          _scanPaused
-                                              ? Icons.pause_circle_filled
-                                              : Icons.sync,
-                                          color:
-                                              Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? Colors.grey.shade900
-                                              : Colors.white,
-                                          size: 24,
-                                        ),
+                                        blurRadius: 20,
+                                        offset: const Offset(0, 10),
                                       ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
+                                    ],
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(5),
+                                            decoration: BoxDecoration(
+                                              color: Colors.lightBlue.shade300,
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Icon(
+                                              _scanPaused
+                                                  ? Icons.pause_circle_filled
+                                                  : Icons.sync,
+                                              color:
+                                                  Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.grey.shade900
+                                                  : Colors.white,
+                                              size: 24,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
+                                                Row(
+                                                  children: [
+                                                    Text(
+                                                      '${(_scanProgress * 100).round()}%',
+                                                      style: TextStyle(
+                                                        color:
+                                                            Theme.of(
+                                                                  context,
+                                                                ).brightness ==
+                                                                Brightness.dark
+                                                            ? Colors.white
+                                                            : Colors.black87,
+                                                        fontSize: 20,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Flexible(
+                                                      child: Text(
+                                                        'Scanning...',
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: TextStyle(
+                                                          color:
+                                                              (Theme.of(context)
+                                                                              .brightness ==
+                                                                          Brightness
+                                                                              .dark
+                                                                      ? Colors
+                                                                            .white
+                                                                      : Colors
+                                                                            .black87)
+                                                                  .withValues(
+                                                                    alpha: 0.9,
+                                                                  ),
+                                                          fontSize: 15,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 2),
                                                 Text(
-                                                  '${(_scanProgress * 100).round()}%',
+                                                  '$_scanProcessed / $_scanTotal tagged',
                                                   style: TextStyle(
+                                                    color:
+                                                        (Theme.of(
+                                                                      context,
+                                                                    ).brightness ==
+                                                                    Brightness
+                                                                        .dark
+                                                                ? Colors.white
+                                                                : Colors
+                                                                      .black87)
+                                                            .withValues(
+                                                              alpha: 0.8,
+                                                            ),
+                                                    fontSize: 14,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            flex: 0,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                IconButton(
+                                                  icon: Icon(
+                                                    _showPerformanceMonitor
+                                                        ? Icons.speed
+                                                        : Icons.speed_outlined,
                                                     color:
                                                         Theme.of(
                                                               context,
@@ -4008,121 +4308,138 @@ class GalleryScreenState extends State<GalleryScreen> {
                                                             Brightness.dark
                                                         ? Colors.white
                                                         : Colors.black87,
-                                                    fontSize: 20,
-                                                    fontWeight: FontWeight.bold,
+                                                    size: 28,
+                                                  ),
+                                                  tooltip:
+                                                      'Performance Monitor',
+                                                  onPressed: () => setState(
+                                                    () => _showPerformanceMonitor =
+                                                        !_showPerformanceMonitor,
                                                   ),
                                                 ),
-                                                const SizedBox(width: 6),
-                                                Flexible(
-                                                  child: Text(
-                                                    'Scanning images',
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      color:
-                                                          (Theme.of(
-                                                                        context,
-                                                                      ).brightness ==
-                                                                      Brightness
-                                                                          .dark
-                                                                  ? Colors.white
-                                                                  : Colors
-                                                                        .black87)
-                                                              .withValues(
-                                                                alpha: 0.9,
-                                                              ),
-                                                      fontSize: 15,
-                                                    ),
+                                                IconButton(
+                                                  icon: Icon(
+                                                    _scanPaused
+                                                        ? Icons
+                                                              .play_circle_filled
+                                                        : Icons
+                                                              .pause_circle_filled,
+                                                    color:
+                                                        Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Colors.black87,
+                                                    size: 32,
+                                                  ),
+                                                  tooltip: _scanPaused
+                                                      ? 'Resume scan'
+                                                      : 'Pause scan',
+                                                  onPressed: () => setState(
+                                                    () => _scanPaused =
+                                                        !_scanPaused,
                                                   ),
                                                 ),
                                               ],
                                             ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              '$_scanProcessed / $_scanTotal processed',
-                                              style: TextStyle(
-                                                color:
-                                                    (Theme.of(
-                                                                  context,
-                                                                ).brightness ==
-                                                                Brightness.dark
-                                                            ? Colors.white
-                                                            : Colors.black87)
-                                                        .withValues(alpha: 0.8),
-                                                fontSize: 14,
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: LinearProgressIndicator(
+                                          value: _scanTotal > 0
+                                              ? _scanProgress
+                                              : null,
+                                          minHeight: 5,
+                                          backgroundColor:
+                                              (Theme.of(context).brightness ==
+                                                          Brightness.dark
+                                                      ? Colors.white
+                                                      : Colors.black87)
+                                                  .withValues(alpha: 0.3),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                Theme.of(context).brightness ==
+                                                        Brightness.dark
+                                                    ? Colors.white
+                                                    : Colors.blue.shade700,
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Flexible(
-                                        flex: 0,
-                                        child: IconButton(
-                                          icon: Icon(
-                                            _showPerformanceMonitor
-                                                ? Icons.speed
-                                                : Icons.speed_outlined,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 28,
-                                          ),
-                                          tooltip: 'Performance Monitor',
-                                          onPressed: () => setState(
-                                            () => _showPerformanceMonitor =
-                                                !_showPerformanceMonitor,
-                                          ),
-                                        ),
-                                      ),
-                                      Flexible(
-                                        flex: 0,
-                                        child: IconButton(
-                                          icon: Icon(
-                                            _scanPaused
-                                                ? Icons.play_circle_filled
-                                                : Icons.pause_circle_filled,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 32,
-                                          ),
-                                          tooltip: _scanPaused
-                                              ? 'Resume scan'
-                                              : 'Pause scan',
-                                          onPressed: () => setState(
-                                            () => _scanPaused = !_scanPaused,
-                                          ),
                                         ),
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 6),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: LinearProgressIndicator(
-                                      value: _scanTotal > 0
-                                          ? _scanProgress
-                                          : null,
-                                      minHeight: 5,
-                                      backgroundColor:
-                                          (Theme.of(context).brightness ==
-                                                      Brightness.dark
-                                                  ? Colors.white
-                                                  : Colors.black87)
-                                              .withValues(alpha: 0.3),
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        Theme.of(context).brightness ==
-                                                Brightness.dark
-                                            ? Colors.white
-                                            : Colors.blue.shade700,
+                                ),
+                                // Minimize button floating on left side
+                                Positioned(
+                                  top: -14,
+                                  left: -12,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => setState(
+                                        () => _scanProgressMinimized = true,
+                                      ),
+                                      borderRadius: BorderRadius.circular(5),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.lightBlue.shade300,
+                                          borderRadius: BorderRadius.circular(
+                                            5,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          Icons.remove,
+                                          color: Colors.white,
+                                          size: 16,
+                                          weight: 700,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                        // Scroll to top button
+                        if (_showScrollToTop)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 105,
+                            child: Center(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: _scrollToTop,
+                                  borderRadius: BorderRadius.circular(28),
+                                  child: Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: Colors.lightBlue.shade300,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      Icons.arrow_upward,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),

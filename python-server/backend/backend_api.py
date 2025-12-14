@@ -376,6 +376,153 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
     return {"results": results, "count": len(results)}
 
 
+@app.post("/validate-yolo-classifications/")
+async def validate_yolo_classifications(
+    files: List["UploadFile"] = File(...), 
+    yolo_tags: str = Form(...),  # JSON array of tag lists
+    x_upload_token: str | None = Header(None)
+):
+    """
+    Validate YOLO classifications by running CLIP on the same images.
+    
+    This is designed to be called AFTER the main batch processing to verify
+    YOLO results without blocking the main scan flow.
+    
+    Args:
+        files: Images to validate (same as original batch)
+        yolo_tags: JSON array of tag lists from YOLO (parallel to files)
+        
+    Returns:
+        {
+            "validations": [
+                {
+                    "filename": str,
+                    "yolo_tags": List[str],
+                    "clip_tags": List[str],
+                    "agreement": bool,
+                    "should_override": bool,
+                    "override_tags": List[str],
+                    "reason": str
+                },
+                ...
+            ],
+            "summary": {
+                "total": int,
+                "agreements": int,
+                "disagreements": int,
+                "overrides": int,
+                "avg_clip_time_ms": float
+            }
+        }
+    """
+    _require_token(x_upload_token)
+    
+    # Parse yolo_tags JSON
+    try:
+        import json as _json
+        yolo_tags_list = _json.loads(yolo_tags)
+        if not isinstance(yolo_tags_list, list):
+            raise ValueError('yolo_tags must be a JSON array')
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid yolo_tags: {e}")
+    
+    # Save uploaded files to temp
+    temp_paths = []
+    filenames = []
+    
+    for file in files:
+        if not file.filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            continue
+            
+        try:
+            temp_path = os.path.join(TEMP_FOLDER, f"validate_{file.filename}")
+            data = await file.read()
+            with open(temp_path, "wb") as f:
+                f.write(data)
+            
+            temp_paths.append(temp_path)
+            filenames.append(file.filename)
+        except Exception as e:
+            logging.warning(f"Failed to save {file.filename} for validation: {e}")
+    
+    if len(temp_paths) != len(yolo_tags_list):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Mismatch: {len(temp_paths)} files but {len(yolo_tags_list)} tag lists"
+        )
+    
+    # Run validation
+    try:
+        from .yolo_clip_hybrid import validate_batch_with_clip
+        from .clip_model import classify_batch as clip_classify_batch
+        from .config import CLIP_CONFIDENCE_THRESHOLD
+        
+        clip_threshold = CLIP_CONFIDENCE_THRESHOLD if 'CLIP_CONFIDENCE_THRESHOLD' in globals() else CONFIDENCE_THRESHOLD
+        
+        logging.info(f"Starting CLIP validation for {len(temp_paths)} YOLO-classified images")
+        validations = validate_batch_with_clip(
+            temp_paths,
+            yolo_tags_list,
+            clip_classify_batch,
+            clip_threshold
+        )
+        
+        # Build response
+        results = []
+        summary = {
+            "total": len(validations),
+            "agreements": 0,
+            "disagreements": 0,
+            "overrides": 0,
+            "avg_clip_time_ms": 0
+        }
+        
+        total_clip_time = 0
+        for filename, yolo_tags, validation in zip(filenames, yolo_tags_list, validations):
+            results.append({
+                "filename": filename,
+                "yolo_tags": yolo_tags,
+                "clip_tags": validation["clip_tags"],
+                "agreement": validation["agreement"],
+                "should_override": validation["should_override"],
+                "override_tags": validation["override_tags"],
+                "reason": validation["reason"]
+            })
+            
+            if validation["agreement"]:
+                summary["agreements"] += 1
+            else:
+                summary["disagreements"] += 1
+            
+            if validation["should_override"]:
+                summary["overrides"] += 1
+            
+            total_clip_time += validation["clip_time_ms"]
+        
+        summary["avg_clip_time_ms"] = round(total_clip_time / len(validations), 1) if validations else 0
+        
+        logging.info(f"Validation complete: {summary['agreements']} agreements, "
+                    f"{summary['disagreements']} disagreements, "
+                    f"{summary['overrides']} overrides recommended")
+        
+        # Cleanup temp files
+        for temp_path in temp_paths:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
+        
+        return {"validations": results, "summary": summary}
+        
+    except Exception as e:
+        # Cleanup on error
+        for temp_path in temp_paths:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        raise HTTPException(status_code=500, detail=f"Validation error: {e}")
+
+
 @app.get("/")
 def root():
     return {"status": "Photo Organizer API running (CLIP-powered)"}
