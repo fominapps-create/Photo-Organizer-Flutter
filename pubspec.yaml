@@ -1,5 +1,5 @@
 name: photo_organizer_flutter
-description: "A new Flutter project."
+description: "Filtored - AI-powered photo organization app."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -79,6 +79,8 @@ flutter:
     - assets/Icon3.png
     - assets/Icon4.png
     - assets/T Creadit Icon.png
+    - assets/Transparent fox log.png
+    - assets/Filtored fox mascot.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -110,6 +112,6 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/Icon4.png"
-  adaptive_icon_background: "#4A90E2"
-  adaptive_icon_foreground: "assets/Icon4.png"
+  image_path: "assets/Transparent fox log.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/Transparent fox log.png"

@@ -5,7 +5,7 @@
     <!-- Permissions for accessing photos on Android 12 and below -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <application
-        android:label="Pixly"
+        android:label="Filtored"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
