@@ -81,6 +81,8 @@ flutter:
     - assets/T Creadit Icon.png
     - assets/Transparent fox log.png
     - assets/Filtored fox mascot.png
+    - assets/Fox face abstract 1024x1024.png
+    - assets/Fox face abstract 1024x1024 padded.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -112,6 +114,6 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/Transparent fox log.png"
+  image_path: "assets/Fox face abstract 1024x1024.png"
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/Transparent fox log.png"
+  adaptive_icon_foreground: "assets/Fox face abstract 1024x1024 padded.png"
