@@ -3,6 +3,7 @@
 // the code straightforward for the current UX changes.
 // ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:ui';
 import 'dart:developer' as developer;
 import 'gallery_screen.dart';
@@ -77,13 +78,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final isSelected = _selectedIndex == index;
     return InkWell(
       onTap: () => _onItemTapped(index),
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
         width: 80,
-        height: 48,
+        height: 40,
         decoration: BoxDecoration(
           shape: BoxShape.rectangle,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(20),
           gradient: isSelected
               ? LinearGradient(
                   colors: [
@@ -104,7 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -168,7 +169,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // (explorer state is accessible from the screens when needed)
+    // Update system UI colors on every build to maintain correct appearance
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: widget.isDarkMode
+            ? Brightness.light
+            : Brightness.dark,
+        statusBarBrightness: widget.isDarkMode
+            ? Brightness.dark
+            : Brightness.light,
+        systemNavigationBarColor: widget.isDarkMode
+            ? Colors.black.withValues(alpha: 0.85)
+            : Colors.white.withValues(alpha: 0.85),
+        systemNavigationBarIconBrightness: widget.isDarkMode
+            ? Brightness.light
+            : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      ),
+    );
 
     return Scaffold(
       extendBody: true,
@@ -176,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          _screens[_selectedIndex],
+          IndexedStack(index: _selectedIndex, children: _screens),
           Positioned(
             left: 0,
             right: 0,
@@ -187,8 +206,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: widget.isDarkMode
-                        ? Colors.black.withValues(alpha: 0.3)
-                        : Colors.white.withValues(alpha: 0.3),
+                        ? Colors.black.withValues(alpha: 0.85)
+                        : Colors.white.withValues(alpha: 0.85),
                     border: Border(
                       top: BorderSide(
                         color: widget.isDarkMode
@@ -198,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-                  child: SafeArea(top: false, child: SizedBox(height: 48)),
+                  child: SafeArea(top: false, child: Container(height: 48)),
                 ),
               ),
             ),
@@ -206,7 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 45,
+            bottom: 48,
             child: Padding(
               padding: const EdgeInsets.only(bottom: 1, left: 6, right: 6),
               child: Row(

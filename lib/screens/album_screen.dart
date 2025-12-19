@@ -12,7 +12,11 @@ class AlbumScreen extends StatefulWidget {
   State<AlbumScreen> createState() => AlbumScreenState();
 }
 
-class AlbumScreenState extends State<AlbumScreen> {
+class AlbumScreenState extends State<AlbumScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   Map<String, List<String>> albums = {};
   Map<String, List<String>> photoTags = {};
   bool loading = true;
@@ -179,6 +183,7 @@ class AlbumScreenState extends State<AlbumScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     return Scaffold(
       appBar: AppBar(
         title: const Text('Albums'),

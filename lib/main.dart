@@ -10,12 +10,15 @@ void main() async {
 
   // Set system UI overlay style (status bar and navigation bar)
   SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
+    SystemUiOverlayStyle(
       statusBarColor: Colors.transparent, // Transparent status bar
       statusBarIconBrightness: Brightness.dark, // Dark icons for light mode
       statusBarBrightness: Brightness.light, // For iOS
-      systemNavigationBarColor: Color(0xFFF2F0EF), // Light mode navigation bar
+      systemNavigationBarColor: Colors.white.withValues(
+        alpha: 0.85,
+      ), // Light mode navigation bar (85% opacity)
       systemNavigationBarIconBrightness: Brightness.dark, // Dark icons
+      systemNavigationBarContrastEnforced: false, // Allow transparency
     ),
   );
 
@@ -81,11 +84,12 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
         systemNavigationBarColor: isDark
-            ? const Color(0xFF121212)
-            : const Color(0xFFF2F0EF),
+            ? Colors.black.withValues(alpha: 0.85)
+            : Colors.white.withValues(alpha: 0.95),
         systemNavigationBarIconBrightness: isDark
             ? Brightness.light
             : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
       ),
     );
   }
@@ -102,11 +106,12 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
         systemNavigationBarColor: isDark
-            ? const Color(0xFF121212)
-            : const Color(0xFFF2F0EF),
+            ? Colors.black.withValues(alpha: 0.85)
+            : Colors.white.withValues(alpha: 0.85),
         systemNavigationBarIconBrightness: isDark
             ? Brightness.light
             : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
       ),
     );
   }

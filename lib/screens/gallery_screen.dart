@@ -28,7 +28,11 @@ class GalleryScreen extends StatefulWidget {
   GalleryScreenState createState() => GalleryScreenState();
 }
 
-class GalleryScreenState extends State<GalleryScreen> {
+class GalleryScreenState extends State<GalleryScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
   bool loading = true;
@@ -40,6 +44,7 @@ class GalleryScreenState extends State<GalleryScreen> {
   bool showDebug = false;
   bool _showSearchBar = true;
   bool _sortNewestFirst = true; // true = newest first, false = oldest first
+  bool _showTags = true; // Toggle to show/hide photo tags
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
   int _crossAxisCount = 4;
@@ -126,12 +131,22 @@ class GalleryScreenState extends State<GalleryScreen> {
     List<String> fullTags,
     double maxWidth,
   ) {
-    const double horizontalPadding =
-        6 * 2; // EdgeInsets.symmetric(horizontal: 6)
+    const double horizontalPadding = 6 * 2;
     const double chipSpacing = 4.0;
-    final TextStyle style = const TextStyle(
+    const double maxChipWidth = 80.0; // Maximum width for a single chip
+    const double minFontSize = 9.0;
+    const double defaultFontSize = 12.0;
+
+    final baseStyle = TextStyle(
       color: Colors.white,
       fontWeight: FontWeight.bold,
+      shadows: [
+        Shadow(
+          color: Colors.black.withValues(alpha: 0.8),
+          offset: const Offset(0, 1),
+          blurRadius: 3,
+        ),
+      ],
     );
 
     double used = 0.0;
@@ -139,23 +154,55 @@ class GalleryScreenState extends State<GalleryScreen> {
     final List<double> chipWidths = [];
 
     for (var t in visibleTags) {
-      final textWidth = _measureTextWidth(t, style);
-      final w = textWidth + horizontalPadding;
-      final nextUsed = chips.isEmpty ? used + w : used + chipSpacing + w;
+      // Calculate text width at default size
+      final defaultStyle = baseStyle.copyWith(fontSize: defaultFontSize);
+      final textWidth = _measureTextWidth(t, defaultStyle);
+      double chipWidth = textWidth + horizontalPadding;
+      double fontSize = defaultFontSize;
+
+      // If text is too wide, scale down font size to fit max chip width
+      if (chipWidth > maxChipWidth) {
+        fontSize = (defaultFontSize * maxChipWidth / chipWidth).clamp(
+          minFontSize,
+          defaultFontSize,
+        );
+        chipWidth = maxChipWidth;
+      }
+
+      final finalStyle = baseStyle.copyWith(fontSize: fontSize);
+      final nextUsed = chips.isEmpty
+          ? used + chipWidth
+          : used + chipSpacing + chipWidth;
+
       if (nextUsed <= maxWidth) {
         // add this chip
         used = nextUsed;
-        chipWidths.add(w);
+        chipWidths.add(chipWidth);
         chips.add(
           GestureDetector(
             onTap: () => _showTagMenu(t),
             child: Container(
+              constraints: BoxConstraints(maxWidth: maxChipWidth),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: _colorForTag(t),
+                color: Colors.transparent,
+                border: Border.all(color: Colors.white, width: 1.5),
                 borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    offset: const Offset(0, 0.5),
+                    blurRadius: 1,
+                    spreadRadius: 0,
+                  ),
+                ],
               ),
-              child: Text(t, style: style),
+              child: Text(
+                t,
+                style: finalStyle,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
             ),
           ),
         );
@@ -168,7 +215,12 @@ class GalleryScreenState extends State<GalleryScreen> {
     final hiddenCount = fullTags.length - chips.length;
     if (hiddenCount > 0) {
       final plusStr = '+$hiddenCount';
-      final plusWidth = _measureTextWidth(plusStr, style) + horizontalPadding;
+      final plusWidth =
+          _measureTextWidth(
+            plusStr,
+            baseStyle.copyWith(fontSize: defaultFontSize),
+          ) +
+          horizontalPadding;
       final nextUsed = chips.isEmpty
           ? used + plusWidth
           : used + chipSpacing + plusWidth;
@@ -180,10 +232,22 @@ class GalleryScreenState extends State<GalleryScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: Colors.transparent,
+                border: Border.all(color: Colors.white, width: 1.5),
                 borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    offset: const Offset(0, 0.5),
+                    blurRadius: 1,
+                    spreadRadius: 0,
+                  ),
+                ],
               ),
-              child: Text(plusStr, style: style),
+              child: Text(
+                plusStr,
+                style: baseStyle.copyWith(fontSize: defaultFontSize),
+              ),
             ),
           ),
         );
@@ -205,10 +269,22 @@ class GalleryScreenState extends State<GalleryScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.black54,
+                  color: Colors.transparent,
+                  border: Border.all(color: Colors.white, width: 1.5),
                   borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      offset: const Offset(0, 0.5),
+                      blurRadius: 1,
+                      spreadRadius: 0,
+                    ),
+                  ],
                 ),
-                child: Text(plusStr, style: style),
+                child: Text(
+                  plusStr,
+                  style: baseStyle.copyWith(fontSize: defaultFontSize),
+                ),
               ),
             ),
           );
@@ -224,10 +300,22 @@ class GalleryScreenState extends State<GalleryScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: Colors.grey,
+              color: Colors.transparent,
+              border: Border.all(color: Colors.white, width: 1.5),
               borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  offset: const Offset(0, 0.5),
+                  blurRadius: 1,
+                  spreadRadius: 0,
+                ),
+              ],
             ),
-            child: Text('None', style: style),
+            child: Text(
+              'None',
+              style: baseStyle.copyWith(fontSize: defaultFontSize),
+            ),
           ),
         ),
       );
@@ -2953,6 +3041,7 @@ class GalleryScreenState extends State<GalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -3005,6 +3094,27 @@ class GalleryScreenState extends State<GalleryScreen> {
                                 size: 28,
                               ),
                               onPressed: widget.onSettingsTap,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ),
+                          // Tag toggle button
+                          Positioned(
+                            right: 120,
+                            top: -3,
+                            child: IconButton(
+                              icon: Icon(
+                                _showTags ? Icons.label_off : Icons.label,
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : Colors.black,
+                                size: 22,
+                              ),
+                              tooltip: _showTags ? 'Hide tags' : 'Show tags',
+                              onPressed: () =>
+                                  setState(() => _showTags = !_showTags),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                             ),
@@ -3945,27 +4055,31 @@ class GalleryScreenState extends State<GalleryScreen> {
                                                       ),
                                                     ),
                                                   ),
-                                                Positioned(
-                                                  left: 8,
-                                                  right: 8,
-                                                  bottom: 8,
-                                                  child: LayoutBuilder(
-                                                    builder:
-                                                        (context, constraints) {
-                                                          final chips =
-                                                              _buildTagChipsForWidth(
-                                                                visibleTags,
-                                                                fullTags,
-                                                                constraints
-                                                                    .maxWidth,
-                                                              );
-                                                          return Wrap(
-                                                            spacing: 4,
-                                                            children: chips,
-                                                          );
-                                                        },
+                                                if (_showTags)
+                                                  Positioned(
+                                                    left: 8,
+                                                    right: 8,
+                                                    bottom: 8,
+                                                    child: LayoutBuilder(
+                                                      builder:
+                                                          (
+                                                            context,
+                                                            constraints,
+                                                          ) {
+                                                            final chips =
+                                                                _buildTagChipsForWidth(
+                                                                  visibleTags,
+                                                                  fullTags,
+                                                                  constraints
+                                                                      .maxWidth,
+                                                                );
+                                                            return Wrap(
+                                                              spacing: 4,
+                                                              children: chips,
+                                                            );
+                                                          },
+                                                    ),
                                                   ),
-                                                ),
                                               ],
                                             ),
                                           ),
