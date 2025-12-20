@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:async';
+import 'package:lottie/lottie.dart';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:ui';
@@ -35,6 +37,8 @@ class GalleryScreenState extends State<GalleryScreen>
 
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
+  Map<String, List<String>> photoAllDetections =
+      {}; // All detections including small objects
   bool loading = true;
   // Device-local asset storage and thumbnail cache for local view
   final Map<String, AssetEntity> _localAssets = {};
@@ -54,11 +58,14 @@ class GalleryScreenState extends State<GalleryScreen>
   // Auto-scan state
   bool _scanning = false;
   bool _scanProgressMinimized = false;
+  final ValueNotifier<double> _scanProgressNotifier = ValueNotifier<double>(
+    0.0,
+  ); // Use notifier to avoid rebuilding whole tree
   double _scanProgress = 0.0; // 0.0-1.0
   int _scanTotal = 0;
   bool _scanPaused = false;
   final ScrollController _scrollController = ScrollController();
-  bool _showScrollToTop = false;
+  final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
   int _scanProcessed = 0;
   int _currentUnscannedCount = 0;
   double _lastScale = 1.0; // Track last scale for incremental pinch zoom
@@ -754,227 +761,286 @@ class GalleryScreenState extends State<GalleryScreen>
 
     // Adaptive batch sizing based on device capabilities
     int batchSize = await _determineOptimalBatchSize();
-    int totalProcessed = 0;
-
-    // Performance monitoring for dynamic adjustment
-    final batchTimings = <int>[];
-    int consecutiveSlowBatches = 0;
-    int consecutiveFastBatches = 0;
     final scanStartTime = DateTime.now();
 
     // Track YOLO-classified images for background validation
     final yoloClassifiedImages = <Map<String, dynamic>>[]; // {file, url, tags}
 
-    for (
-      var batchStart = 0;
-      batchStart < urls.length;
-      batchStart += batchSize
-    ) {
+    // Pipeline approach: process multiple batches concurrently for better throughput
+    // Use Completer to properly track batch completion
+    const int maxConcurrentBatches =
+        3; // Increased from 2 to 3 for better pipeline
+    final activeBatches = <Completer<void>>[];
+    int batchStart = 0;
+
+    while (batchStart < urls.length) {
+      developer.log(
+        '🔄 DEBUG: Loop iteration, batchStart=$batchStart, activeBatches.length=${activeBatches.length}',
+      );
+
       // Check if scan was stopped
       if (!_scanning) {
         developer.log('⏹️ Scan stopped by user');
+        await Future.wait(activeBatches.map((c) => c.future));
         return;
+      }
+
+      // Check for pause
+      while (_scanPaused) {
+        if (!mounted || !_scanning) {
+          await Future.wait(activeBatches.map((c) => c.future));
+          return;
+        }
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // If at max capacity, wait for ANY batch to complete
+      if (activeBatches.length >= maxConcurrentBatches) {
+        developer.log(
+          '⏸️  DEBUG: At max capacity, waiting for ANY batch to complete...',
+        );
+        await Future.any(activeBatches.map((c) => c.future));
+        developer.log(
+          '✅ DEBUG: A batch completed! Removing completed batches...',
+        );
+        // Remove completed batches
+        activeBatches.removeWhere((c) => c.isCompleted);
+        developer.log(
+          '📊 DEBUG: After cleanup, activeBatches.length=${activeBatches.length}',
+        );
       }
 
       final batchEnd = (batchStart + batchSize).clamp(0, urls.length);
       final batch = urls.sublist(batchStart, batchEnd);
 
-      // Check for pause BEFORE any processing or logging
-      while (_scanPaused) {
-        if (!mounted || !_scanning) return;
-        await Future.delayed(const Duration(milliseconds: 200));
+      // Create completer for this batch
+      final completer = Completer<void>();
+      activeBatches.add(completer);
+      developer.log(
+        '🚀 DEBUG: Starting batch ${(batchStart ~/ batchSize) + 1}, activeBatches.length now=${activeBatches.length}',
+      );
+
+      // Start batch processing (don't await - let it run concurrently)
+      _processBatchConcurrent(
+            batch,
+            batchStart,
+            batchSize,
+            urls.length,
+            yoloClassifiedImages,
+            scanStartTime,
+          )
+          .then((_) {
+            completer.complete();
+          })
+          .catchError((e) {
+            developer.log('Batch error: $e');
+            completer.complete(); // Complete even on error
+          });
+
+      batchStart += batchSize;
+    }
+
+    // Wait for all remaining batches to complete
+    await Future.wait(activeBatches.map((c) => c.future));
+
+    // After all batches complete, run background validation if we have YOLO-classified images
+    if (yoloClassifiedImages.isNotEmpty && mounted) {
+      _runBackgroundValidation(yoloClassifiedImages);
+    }
+  }
+
+  /// Process a single batch concurrently (for pipeline processing)
+  Future<void> _processBatchConcurrent(
+    List<String> batch,
+    int batchStart,
+    int batchSize,
+    int totalUrls,
+    List<Map<String, dynamic>> yoloClassifiedImages,
+    DateTime scanStartTime,
+  ) async {
+    final batchEnd = (batchStart + batchSize).clamp(0, totalUrls);
+    final batchNumber = (batchStart ~/ batchSize) + 1;
+    final totalBatches = (totalUrls / batchSize).ceil();
+
+    developer.log('\n════════════════════════════════════════════════════════');
+    developer.log(
+      '⏳ BATCH $batchNumber/$totalBatches - Processing photos ${batchStart + 1}-$batchEnd [CONCURRENT START]',
+    );
+    developer.log('════════════════════════════════════════════════════════');
+
+    final batchStartTime = DateTime.now();
+
+    // Update batch size and periodically check RAM/CPU (every 5 batches)
+    if (mounted) {
+      _currentBatchSize = batchSize;
+      if (batchNumber % 5 == 0) {
+        _currentRamUsageMB = await _getCurrentRamUsage();
+        _peakRamUsageMB = _currentRamUsageMB > _peakRamUsageMB
+            ? _currentRamUsageMB
+            : _peakRamUsageMB;
+      }
+    }
+
+    // Prepare batch of files
+    final batchItems = <Map<String, dynamic>>[];
+    final batchUrls = <String>[];
+
+    try {
+      final assetLoadStartTime = DateTime.now();
+      // Load files in parallel for maximum speed
+      final fileLoadFutures = batch.map((u) async {
+        File? file;
+        if (u.startsWith('local:')) {
+          final id = u.substring('local:'.length);
+          final asset = _localAssets[id];
+          if (asset != null) {
+            file = await asset.file;
+          }
+        } else if (u.startsWith('file:')) {
+          final path = u.substring('file:'.length);
+          file = File(path);
+        }
+
+        if (file != null) {
+          final photoID = PhotoId.canonicalId(u);
+          return {'file': file, 'photoID': photoID, 'url': u};
+        }
+        return null;
+      }).toList();
+
+      // Wait for all files to load concurrently
+      final loadedFiles = await Future.wait(fileLoadFutures);
+      final assetLoadEndTime = DateTime.now();
+      final assetLoadDuration = assetLoadEndTime
+          .difference(assetLoadStartTime)
+          .inMilliseconds;
+      developer.log('⏱️  Step 1: Asset loading took ${assetLoadDuration}ms');
+
+      // Filter out nulls and build batch items
+      final filterStartTime = DateTime.now();
+      for (final item in loadedFiles) {
+        if (item != null) {
+          batchItems.add({'file': item['file'], 'photoID': item['photoID']});
+          batchUrls.add(item['url'] as String);
+        }
+      }
+      final filterEndTime = DateTime.now();
+      developer.log(
+        '⏱️  Step 2: Filtering/building items took ${filterEndTime.difference(filterStartTime).inMilliseconds}ms',
+      );
+
+      if (batchItems.isEmpty) {
+        return;
       }
 
+      final prepEndTime = DateTime.now();
+      final prepDuration = prepEndTime
+          .difference(batchStartTime)
+          .inMilliseconds;
       developer.log(
-        '\n════════════════════════════════════════════════════════',
+        '📦 TOTAL file prep: ${prepDuration}ms for ${batchItems.length} files',
       );
+
+      // Upload batch
+      final uploadStartTime = DateTime.now();
       developer.log(
-        '⏳ BATCH ${(batchStart ~/ batchSize) + 1}/${(urls.length / batchSize).ceil()} - Processing photos ${batchStart + 1}-$batchEnd',
+        '📤 BATCH $batchNumber: Starting upload/server processing...',
       );
-      developer.log('════════════════════════════════════════════════════════');
 
-      final batchStartTime = DateTime.now();
+      final res = await ApiService.uploadImagesBatch(batchItems);
 
-      // Update batch size and periodically check RAM/CPU (every 5 batches)
-      if (mounted) {
-        _currentBatchSize = batchSize;
-        if ((batchStart ~/ batchSize) % 5 == 0) {
-          _currentRamUsageMB = await _getCurrentRamUsage();
-          _peakRamUsageMB = _currentRamUsageMB > _peakRamUsageMB
-              ? _currentRamUsageMB
-              : _peakRamUsageMB;
-        }
-      }
+      final uploadEndTime = DateTime.now();
+      final uploadDuration = uploadEndTime
+          .difference(uploadStartTime)
+          .inMilliseconds;
+      developer.log(
+        '📤 BATCH $batchNumber: Upload + server processing took ${uploadDuration}ms',
+      );
 
-      // Prepare batch of files (declare outside try block for catch access)
-      final batchItems = <Map<String, dynamic>>[];
-      final batchUrls = <String>[];
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        try {
+          final parseStartTime = DateTime.now();
+          final body = json.decode(res.body);
+          final parseEndTime = DateTime.now();
+          developer.log(
+            '🔍 JSON parse took ${parseEndTime.difference(parseStartTime).inMilliseconds}ms',
+          );
 
-      try {
-        final assetLoadStartTime = DateTime.now();
-        // Load files in parallel for maximum speed
-        final fileLoadFutures = batch.map((u) async {
-          File? file;
-          if (u.startsWith('local:')) {
-            final id = u.substring('local:'.length);
-            final asset = _localAssets[id];
-            if (asset != null) {
-              file = await asset.file;
-            }
-          } else if (u.startsWith('file:')) {
-            final path = u.substring('file:'.length);
-            file = File(path);
-          }
+          // Response format: {"results": [{"photoID": "...", "tags": [...]}, ...]}
+          if (body is Map && body['results'] is List) {
+            final results = body['results'] as List;
+            final batchTagsToSave = <String, List<String>>{};
 
-          if (file != null) {
-            final photoID = PhotoId.canonicalId(u);
-            return {'file': file, 'photoID': photoID, 'url': u};
-          }
-          return null;
-        }).toList();
+            final processingStartTime = DateTime.now();
+            for (var i = 0; i < results.length && i < batchUrls.length; i++) {
+              final result = results[i];
+              final url = batchUrls[i];
+              final basename = p.basename(url);
+              final photoID = PhotoId.canonicalId(url);
 
-        // Wait for all files to load concurrently
-        final loadedFiles = await Future.wait(fileLoadFutures);
-        final assetLoadEndTime = DateTime.now();
-        final assetLoadDuration = assetLoadEndTime
-            .difference(assetLoadStartTime)
-            .inMilliseconds;
-        developer.log('⏱️  Step 1: Asset loading took ${assetLoadDuration}ms');
+              List<String> tags = [];
+              List<String> allDetections = [];
+              if (result is Map && result['tags'] is List) {
+                tags = (result['tags'] as List).cast<String>();
+              }
+              // Store all detections if available (includes small objects)
+              if (result is Map && result['all_detections'] is List) {
+                allDetections = (result['all_detections'] as List)
+                    .cast<String>();
+              } else {
+                // Fallback: if no separate all_detections, use tags
+                allDetections = List.from(tags);
+              }
 
-        // Filter out nulls and build batch items
-        final filterStartTime = DateTime.now();
-        for (final item in loadedFiles) {
-          if (item != null) {
-            batchItems.add({'file': item['file'], 'photoID': item['photoID']});
-            batchUrls.add(item['url'] as String);
-          }
-        }
-        final filterEndTime = DateTime.now();
-        developer.log(
-          '⏱️  Step 2: Filtering/building items took ${filterEndTime.difference(filterStartTime).inMilliseconds}ms',
-        );
+              // Update in-memory tags and detections
+              photoTags[basename] = tags;
+              photoAllDetections[basename] = allDetections;
+              batchTagsToSave[photoID] = tags;
 
-        if (batchItems.isEmpty) {
-          totalProcessed += batch.length;
-          continue;
-        }
+              if (tags.isNotEmpty) {
+                developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
 
-        final prepEndTime = DateTime.now();
-        final prepDuration = prepEndTime
-            .difference(batchStartTime)
-            .inMilliseconds;
-        developer.log(
-          '📦 TOTAL file prep: ${prepDuration}ms for ${batchItems.length} files',
-        );
-
-        // Upload batch
-        final uploadStartTime = DateTime.now();
-        final res = await ApiService.uploadImagesBatch(batchItems);
-        final uploadEndTime = DateTime.now();
-        final uploadDuration = uploadEndTime
-            .difference(uploadStartTime)
-            .inMilliseconds;
-        developer.log('📤 Upload + server processing took ${uploadDuration}ms');
-
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            final parseStartTime = DateTime.now();
-            final body = json.decode(res.body);
-            final parseEndTime = DateTime.now();
-            developer.log(
-              '🔍 JSON parse took ${parseEndTime.difference(parseStartTime).inMilliseconds}ms',
-            );
-
-            // Response format: {"results": [{"photoID": "...", "tags": [...]}, ...]}
-            if (body is Map && body['results'] is List) {
-              final results = body['results'] as List;
-              final batchTagsToSave = <String, List<String>>{};
-
-              final processingStartTime = DateTime.now();
-              for (var i = 0; i < results.length && i < batchUrls.length; i++) {
-                final result = results[i];
-                final url = batchUrls[i];
-                final basename = p.basename(url);
-                final photoID = PhotoId.canonicalId(url);
-
-                List<String> tags = [];
-                if (result is Map && result['tags'] is List) {
-                  tags = (result['tags'] as List).cast<String>();
-                }
-
-                // Update in-memory tags
-                photoTags[basename] = tags;
-                batchTagsToSave[photoID] = tags;
-
-                if (tags.isNotEmpty) {
-                  developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
-
-                  // Track for background validation (only non-empty tags)
-                  if (i < batchItems.length) {
-                    yoloClassifiedImages.add({
-                      'file': batchItems[i]['file'],
-                      'url': url,
-                      'tags': tags,
-                      'photoID': photoID,
-                    });
-                  }
+                // Track for background validation (only non-empty tags)
+                if (i < batchItems.length) {
+                  yoloClassifiedImages.add({
+                    'file': batchItems[i]['file'],
+                    'url': url,
+                    'tags': tags,
+                    'photoID': photoID,
+                  });
                 }
               }
-              final processingEndTime = DateTime.now();
-              developer.log(
-                '🔄 Tag processing took ${processingEndTime.difference(processingStartTime).inMilliseconds}ms',
-              );
+            }
+            final processingEndTime = DateTime.now();
+            developer.log(
+              '🔄 Tag processing took ${processingEndTime.difference(processingStartTime).inMilliseconds}ms',
+            );
 
-              // Save all tags in one batch operation (much faster)
-              final saveStartTime = DateTime.now();
-              await TagStore.saveLocalTagsBatch(batchTagsToSave);
-              final saveEndTime = DateTime.now();
-              developer.log(
-                '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
-              );
-            }
-
-            // Decrement unscanned count by the number of successfully processed photos
-            if (mounted && _currentUnscannedCount > 0) {
-              final oldCount = _currentUnscannedCount;
-              final newCount = (_currentUnscannedCount - batchUrls.length)
-                  .clamp(0, _currentUnscannedCount)
-                  .toInt();
-              developer.log(
-                '🔄 Updating unscanned count: $oldCount -> $newCount (processed ${batchUrls.length} photos)',
-              );
-              setState(() {
-                _currentUnscannedCount = newCount;
-              });
-            }
-          } catch (e) {
-            developer.log('Failed parsing batch response: $e');
-            // Mark all as scanned with empty tags
-            final batchTagsToSave = <String, List<String>>{};
-            for (final url in batchUrls) {
-              final photoID = PhotoId.canonicalId(url);
-              photoTags[p.basename(url)] = [];
-              batchTagsToSave[photoID] = [];
-            }
+            // Save all tags in one batch operation (much faster)
+            final saveStartTime = DateTime.now();
             await TagStore.saveLocalTagsBatch(batchTagsToSave);
-
-            // Decrement unscanned count for this batch
-            if (mounted && _currentUnscannedCount > 0) {
-              final oldCount = _currentUnscannedCount;
-              final newCount = (_currentUnscannedCount - batchUrls.length)
-                  .clamp(0, _currentUnscannedCount)
-                  .toInt();
-              developer.log(
-                '🔄 Updating unscanned count (error path): $oldCount -> $newCount',
-              );
-              setState(() {
-                _currentUnscannedCount = newCount;
-              });
-            }
+            final saveEndTime = DateTime.now();
+            developer.log(
+              '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
+            );
           }
-        } else {
-          developer.log('Batch scan failed: status=${res.statusCode}');
-          // Mark all as scanned with empty tags on failure
+
+          // Decrement unscanned count by the number of successfully processed photos
+          if (mounted && _currentUnscannedCount > 0) {
+            final oldCount = _currentUnscannedCount;
+            final newCount = (_currentUnscannedCount - batchUrls.length)
+                .clamp(0, _currentUnscannedCount)
+                .toInt();
+            developer.log(
+              '🔄 Updating unscanned count: $oldCount -> $newCount (processed ${batchUrls.length} photos)',
+            );
+            setState(() {
+              _currentUnscannedCount = newCount;
+            });
+          }
+        } catch (e) {
+          developer.log('Failed parsing batch response: $e');
+          // Mark all as scanned with empty tags
           final batchTagsToSave = <String, List<String>>{};
           for (final url in batchUrls) {
             final photoID = PhotoId.canonicalId(url);
@@ -983,23 +1049,23 @@ class GalleryScreenState extends State<GalleryScreen>
           }
           await TagStore.saveLocalTagsBatch(batchTagsToSave);
 
-          // Update unscanned count for failed batch
+          // Decrement unscanned count for this batch
           if (mounted && _currentUnscannedCount > 0) {
             final oldCount = _currentUnscannedCount;
             final newCount = (_currentUnscannedCount - batchUrls.length)
                 .clamp(0, _currentUnscannedCount)
                 .toInt();
             developer.log(
-              '🔄 Updating unscanned count (failure): $oldCount -> $newCount',
+              '🔄 Updating unscanned count (error path): $oldCount -> $newCount',
             );
             setState(() {
               _currentUnscannedCount = newCount;
             });
           }
         }
-      } catch (e) {
-        developer.log('Batch scan error: $e');
-        // Mark all as scanned with empty tags on exception
+      } else {
+        developer.log('Batch scan failed: status=${res.statusCode}');
+        // Mark all as scanned with empty tags on failure
         final batchTagsToSave = <String, List<String>>{};
         for (final url in batchUrls) {
           final photoID = PhotoId.canonicalId(url);
@@ -1008,110 +1074,76 @@ class GalleryScreenState extends State<GalleryScreen>
         }
         await TagStore.saveLocalTagsBatch(batchTagsToSave);
 
-        // Update unscanned count for exception case
+        // Update unscanned count for failed batch
         if (mounted && _currentUnscannedCount > 0) {
           final oldCount = _currentUnscannedCount;
           final newCount = (_currentUnscannedCount - batchUrls.length)
               .clamp(0, _currentUnscannedCount)
               .toInt();
           developer.log(
-            '🔄 Updating unscanned count (exception): $oldCount -> $newCount',
+            '🔄 Updating unscanned count (failure): $oldCount -> $newCount',
           );
           setState(() {
             _currentUnscannedCount = newCount;
           });
         }
       }
+    } catch (e) {
+      developer.log('Batch scan error: $e');
+      // Mark all as scanned with empty tags on exception
+      final batchTagsToSave = <String, List<String>>{};
+      for (final url in batchUrls) {
+        final photoID = PhotoId.canonicalId(url);
+        photoTags[p.basename(url)] = [];
+        batchTagsToSave[photoID] = [];
+      }
+      await TagStore.saveLocalTagsBatch(batchTagsToSave);
 
-      // Only count files that were actually processed
-      totalProcessed += batchUrls.length;
-
-      // Calculate batch timing
-      final batchEndTime = DateTime.now();
-      final batchDuration = batchEndTime
-          .difference(batchStartTime)
-          .inMilliseconds;
-
-      developer.log('════════════════════════════════════════════════════════');
-      developer.log(
-        '✅ BATCH COMPLETE: ${batchDuration}ms total (${(batchDuration / batchUrls.length).toStringAsFixed(1)}ms per photo)',
-      );
-      developer.log(
-        '════════════════════════════════════════════════════════\n',
-      );
-
-      // Update progress and performance stats
-      // Always update UI for smooth progress feedback
-      if (mounted && _scanning) {
-        final elapsedSeconds = DateTime.now()
-            .difference(scanStartTime)
-            .inSeconds;
+      // Update unscanned count for exception case
+      if (mounted && _currentUnscannedCount > 0) {
+        final oldCount = _currentUnscannedCount;
+        final newCount = (_currentUnscannedCount - batchUrls.length)
+            .clamp(0, _currentUnscannedCount)
+            .toInt();
+        developer.log(
+          '🔄 Updating unscanned count (exception): $oldCount -> $newCount',
+        );
         setState(() {
-          _scanProcessed = totalProcessed.clamp(0, _scanTotal);
-          _scanProgress = (_scanTotal == 0)
-              ? 0.0
-              : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
-          developer.log(
-            '📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal (unscanned count: $_currentUnscannedCount)',
-          );
-          _avgBatchTimeMs = batchDuration;
-          _imagesPerSecond = elapsedSeconds > 0
-              ? totalProcessed / elapsedSeconds.toDouble()
-              : 0;
+          _currentUnscannedCount = newCount;
         });
       }
-
-      // Performance-based batch size adjustment
-      final batchEndTimeMs = batchEndTime.millisecondsSinceEpoch;
-      batchTimings.add(batchEndTimeMs);
-
-      // Keep only last 5 timings for rolling average
-      if (batchTimings.length > 5) batchTimings.removeAt(0);
-
-      // Adaptive tuning: adjust batch size based on performance
-      // Target: 2-5 seconds per batch (optimized for CPU-based CLIP at 170ms/image)
-      // Start small (10-15 images) and dynamically adjust based on actual performance
-      if (batchTimings.length >= 3) {
-        final avgTime = batchDuration; // Use current batch time
-
-        if (avgTime > 6000 && batchSize > 2) {
-          // Too slow (>6s) - reduce batch size
-          consecutiveSlowBatches++;
-          consecutiveFastBatches = 0;
-
-          if (consecutiveSlowBatches >= 2) {
-            batchSize = (batchSize * 0.7).ceil().clamp(2, 50);
-            developer.log(
-              '⚡ Reducing batch size to $batchSize (performance optimization)',
-            );
-            consecutiveSlowBatches = 0;
-          }
-        } else if (avgTime < 3000 && batchSize < 30) {
-          // Fast enough (<3s) - can increase batch size
-          consecutiveFastBatches++;
-          consecutiveSlowBatches = 0;
-
-          if (consecutiveFastBatches >= 2) {
-            batchSize = (batchSize * 1.4).ceil().clamp(2, 50);
-            developer.log(
-              '⚡ Increasing batch size to $batchSize (device can handle more)',
-            );
-            consecutiveFastBatches = 0;
-          }
-        } else {
-          // Sweet spot (3-6s per batch) - reset counters
-          consecutiveSlowBatches = 0;
-          consecutiveFastBatches = 0;
-        }
-      }
-
-      // No delay between batches for maximum speed
-      // Device can handle it with adaptive batch sizing
     }
 
-    // After all batches complete, run background validation if we have YOLO-classified images
-    if (yoloClassifiedImages.isNotEmpty && mounted) {
-      _runBackgroundValidation(yoloClassifiedImages);
+    // Calculate batch timing
+    final batchEndTime = DateTime.now();
+    final batchDuration = batchEndTime
+        .difference(batchStartTime)
+        .inMilliseconds;
+
+    developer.log('════════════════════════════════════════════════════════');
+    developer.log(
+      '✅ BATCH $batchNumber COMPLETE: ${batchDuration}ms total (${batchUrls.isEmpty ? 0 : (batchDuration / batchUrls.length).toStringAsFixed(1)}ms per photo)',
+    );
+    developer.log('════════════════════════════════════════════════════════\n');
+
+    // Update progress and performance stats
+    if (mounted && _scanning) {
+      final elapsedSeconds = DateTime.now().difference(scanStartTime).inSeconds;
+      setState(() {
+        // Set actual progress (may have been smoothly estimated during batch)
+        _scanProcessed = (batchStart + batchUrls.length).clamp(0, _scanTotal);
+        _scanProgress = (_scanTotal == 0)
+            ? 0.0
+            : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
+        _scanProgressNotifier.value = _scanProgress;
+        developer.log(
+          '📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal (unscanned count: $_currentUnscannedCount)',
+        );
+        _avgBatchTimeMs = batchDuration;
+        _imagesPerSecond = elapsedSeconds > 0
+            ? _scanProcessed / elapsedSeconds.toDouble()
+            : 0;
+      });
     }
   }
 
@@ -1156,6 +1188,53 @@ class GalleryScreenState extends State<GalleryScreen>
         while (_validationPaused && !_validationCancelled) {
           await Future.delayed(const Duration(milliseconds: 500));
           if (!mounted) return;
+        }
+
+        // Check for new unscanned photos every 50 images (5 batches)
+        if (batchStart > 0 && batchStart % 50 == 0) {
+          developer.log(
+            '🔍 Checking for new unscanned photos during validation...',
+          );
+          await _updateUnscannedCount();
+
+          if (_currentUnscannedCount > 0) {
+            developer.log(
+              '📸 Found $_currentUnscannedCount new unscanned photos - pausing validation to scan them',
+            );
+
+            // Get list of unscanned photos
+            final localUrls = imageUrls
+                .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+                .toList();
+            final toScan = <String>[];
+            for (final u in localUrls) {
+              final photoID = PhotoId.canonicalId(u);
+              final tags = await TagStore.loadLocalTags(photoID);
+              if (tags == null) toScan.add(u);
+            }
+
+            if (toScan.isNotEmpty) {
+              // Pause validation and scan new photos
+              setState(() {
+                _validationPaused = true;
+              });
+
+              developer.log(
+                '🚀 Scanning ${toScan.length} new photos before resuming validation',
+              );
+              await _scanImages(toScan);
+
+              // Resume validation
+              if (mounted) {
+                setState(() {
+                  _validationPaused = false;
+                });
+                developer.log(
+                  '▶️ Resuming validation after scanning new photos',
+                );
+              }
+            }
+          }
         }
 
         final batchEnd = (batchStart + validationBatchSize).clamp(
@@ -1984,25 +2063,25 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log('📱 Device: $cpuCores CPU cores, ~${ramGB}GB RAM');
 
       // Calculate batch size based on device capabilities
-      // Formula: Start small and let adaptive tuning increase it
-      // Small batches = faster feedback, less network overhead, better responsiveness
+      // Aggressive sizing for maximum throughput while maintaining stability
+      // Server can handle 6-10 img/sec with batching, so larger batches = better
       int batchSize;
 
       if (ramGB <= 3 || cpuCores <= 4) {
-        // Low-end device: 6 images per batch
-        batchSize = 6;
+        // Low-end device: 15 images per batch
+        batchSize = 15;
       } else if (ramGB <= 6 || cpuCores <= 6) {
-        // Mid-range device: 12 images per batch
-        batchSize = 12;
-      } else if (ramGB <= 8 || cpuCores <= 8) {
-        // Mid-high device: 20 images per batch
-        batchSize = 20;
-      } else {
-        // High-end device: 30 images per batch (8+ cores or 8+ GB RAM)
+        // Mid-range device: 30 images per batch
         batchSize = 30;
+      } else if (ramGB <= 8 || cpuCores <= 8) {
+        // Mid-high device: 50 images per batch
+        batchSize = 50;
+      } else {
+        // High-end device: 75 images per batch (8+ cores or 8+ GB RAM)
+        batchSize = 75;
       }
 
-      developer.log('⚙️ Initial batch size: $batchSize (adaptive)');
+      developer.log('⚙️ Initial batch size: $batchSize (aggressive adaptive)');
       return batchSize;
     } catch (e) {
       developer.log('Failed to detect device specs: $e');
@@ -2589,14 +2668,6 @@ class GalleryScreenState extends State<GalleryScreen>
     }
   }
 
-  Color _colorForTag(String tag) {
-    final t = tag.toLowerCase();
-    if (t == 'person') return Colors.blueAccent;
-    if (t == 'cat' || t == 'dog') return Colors.greenAccent;
-    if (t == 'car') return Colors.redAccent;
-    return Colors.pinkAccent;
-  }
-
   Future<void> _createAlbumFromSelection() async {
     if (_selectedKeys.isEmpty) return;
     final selectedUrls = imageUrls
@@ -3017,17 +3088,19 @@ class GalleryScreenState extends State<GalleryScreen>
 
   @override
   void dispose() {
+    _scanProgressNotifier.dispose();
     _scrollController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _showScrollToTop.dispose();
     super.dispose();
   }
 
   void _scrollListener() {
-    if (_scrollController.offset >= 200 && !_showScrollToTop) {
-      setState(() => _showScrollToTop = true);
-    } else if (_scrollController.offset < 200 && _showScrollToTop) {
-      setState(() => _showScrollToTop = false);
+    if (_scrollController.offset >= 200 && !_showScrollToTop.value) {
+      _showScrollToTop.value = true;
+    } else if (_scrollController.offset < 200 && _showScrollToTop.value) {
+      _showScrollToTop.value = false;
     }
   }
 
@@ -3057,8 +3130,36 @@ class GalleryScreenState extends State<GalleryScreen>
           ),
         ),
         child: loading
-            ? const Center(
-                child: CircularProgressIndicator(color: Colors.white),
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 250,
+                      height: 250,
+                      child: Lottie.asset(
+                        'assets/animations/fox-loading.json',
+                        fit: BoxFit.contain,
+                        repeat: true,
+                        animate: true,
+                        onLoaded: (composition) {
+                          developer.log(
+                            '✅ Lottie loaded: ${composition.duration}',
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Loading your photos...',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
               )
             : imageUrls.isEmpty
             ? const Center(
@@ -3657,7 +3758,10 @@ class GalleryScreenState extends State<GalleryScreen>
                           child: Builder(
                             builder: (context) {
                               var filtered = imageUrls.where((u) {
-                                final tags = photoTags[p.basename(u)] ?? [];
+                                final key = p.basename(u);
+                                final tags = photoTags[key] ?? [];
+                                final allDetections =
+                                    photoAllDetections[key] ?? [];
                                 if (searchQuery.isEmpty) return true;
 
                                 // Special case: "None" searches for untagged photos
@@ -3673,11 +3777,19 @@ class GalleryScreenState extends State<GalleryScreen>
                                     .map((term) => term.toLowerCase())
                                     .toList();
 
-                                // Check if any photo tag contains any of the search terms
+                                // Check if any tag or detection contains search terms
                                 return searchTerms.any(
-                                  (searchTerm) => tags.any(
-                                    (t) => t.toLowerCase().contains(searchTerm),
-                                  ),
+                                  (searchTerm) =>
+                                      tags.any(
+                                        (t) => t.toLowerCase().contains(
+                                          searchTerm,
+                                        ),
+                                      ) ||
+                                      allDetections.any(
+                                        (d) => d.toLowerCase().contains(
+                                          searchTerm,
+                                        ),
+                                      ),
                                 );
                               }).toList();
 
@@ -3798,6 +3910,22 @@ class GalleryScreenState extends State<GalleryScreen>
                                           ),
                                         ],
                                         const Spacer(),
+                                        // Refresh button
+                                        IconButton(
+                                          icon: Icon(
+                                            Icons.refresh,
+                                            color:
+                                                Theme.of(context).brightness ==
+                                                    Brightness.dark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                            size: 24,
+                                          ),
+                                          onPressed: () async {
+                                            await _loadAllImages();
+                                          },
+                                          tooltip: 'Refresh gallery',
+                                        ),
                                         // Sort button on the right
                                         IconButton(
                                           icon: Icon(
@@ -3826,265 +3954,279 @@ class GalleryScreenState extends State<GalleryScreen>
                                   ),
                                   // Photo Grid
                                   Expanded(
-                                    child: GridView.builder(
-                                      controller: _scrollController,
-                                      padding: const EdgeInsets.fromLTRB(
-                                        12,
-                                        12,
-                                        12,
-                                        12,
-                                      ),
-                                      gridDelegate:
-                                          SliverGridDelegateWithFixedCrossAxisCount(
-                                            crossAxisCount: _crossAxisCount,
-                                            mainAxisSpacing: spacing,
-                                            crossAxisSpacing: spacing,
-                                            childAspectRatio: 1.0,
-                                          ),
-                                      itemCount: filtered.length,
-                                      itemBuilder: (context, index) {
-                                        final url = filtered[index];
-                                        final key = p.basename(url);
-                                        final fullTags = photoTags[key] ?? [];
-                                        // Only show tags <= 8 characters in the grid
-                                        final shortTags = fullTags
-                                            .where((t) => t.length <= 8)
-                                            .toList();
-                                        final visibleTags = shortTags
-                                            .take(3)
-                                            .toList();
-
-                                        final isSelected = _selectedKeys
-                                            .contains(key);
-                                        return GestureDetector(
-                                          onTap: () async {
-                                            if (_isSelectMode) {
-                                              setState(() {
-                                                if (isSelected) {
-                                                  _selectedKeys.remove(key);
-                                                } else {
-                                                  _selectedKeys.add(key);
-                                                }
-                                              });
-                                              return;
-                                            }
-
-                                            // Open full-screen viewer. For local assets, load the file first.
-                                            if (url.startsWith('local:')) {
-                                              final id = url.substring(
-                                                'local:'.length,
-                                              );
-                                              final asset = _localAssets[id];
-                                              if (asset != null) {
-                                                final file = await asset.file;
-                                                if (file != null && mounted) {
-                                                  final nav = Navigator.of(
-                                                    // ignore: use_build_context_synchronously
-                                                    context,
-                                                  );
-                                                  nav.push(
-                                                    MaterialPageRoute(
-                                                      builder: (_) =>
-                                                          PhotoViewer(
-                                                            filePath: file.path,
-                                                            heroTag: key,
-                                                          ),
-                                                    ),
-                                                  );
-                                                }
-                                              }
-                                            } else if (url.startsWith(
-                                              'file:',
-                                            )) {
-                                              final path = url.substring(
-                                                'file:'.length,
-                                              );
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => PhotoViewer(
-                                                    filePath: path,
-                                                    heroTag: key,
-                                                  ),
-                                                ),
-                                              );
-                                            } else {
-                                              final resolved =
-                                                  ApiService.resolveImageUrl(
-                                                    url,
-                                                  );
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => PhotoViewer(
-                                                    networkUrl: resolved,
-                                                    heroTag: key,
-                                                  ),
-                                                ),
-                                              );
-                                            }
-                                          },
-                                          onLongPress: () {
-                                            setState(() {
-                                              _isSelectMode = true;
-                                              _selectedKeys.add(key);
-                                            });
-                                          },
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              6,
+                                    child: RefreshIndicator(
+                                      onRefresh: () async {
+                                        developer.log(
+                                          '🔄 Pull-to-refresh triggered',
+                                        );
+                                        await _loadAllImages();
+                                        developer.log('✅ Refresh complete');
+                                      },
+                                      child: GridView.builder(
+                                        controller: _scrollController,
+                                        padding: const EdgeInsets.fromLTRB(
+                                          12,
+                                          12,
+                                          12,
+                                          12,
+                                        ),
+                                        gridDelegate:
+                                            SliverGridDelegateWithFixedCrossAxisCount(
+                                              crossAxisCount: _crossAxisCount,
+                                              mainAxisSpacing: spacing,
+                                              crossAxisSpacing: spacing,
+                                              childAspectRatio: 1.0,
                                             ),
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
-                                                Hero(
-                                                  tag: key,
-                                                  child:
-                                                      url.startsWith('local:')
-                                                      ? FutureBuilder<
-                                                          Uint8List?
-                                                        >(
-                                                          future:
-                                                              _getThumbForAsset(
-                                                                url.substring(
-                                                                  6,
+                                        itemCount: filtered.length,
+                                        itemBuilder: (context, index) {
+                                          final url = filtered[index];
+                                          final key = p.basename(url);
+                                          final fullTags = photoTags[key] ?? [];
+                                          // Only show tags <= 8 characters in the grid
+                                          final shortTags = fullTags
+                                              .where((t) => t.length <= 8)
+                                              .toList();
+                                          final visibleTags = shortTags
+                                              .take(3)
+                                              .toList();
+
+                                          final isSelected = _selectedKeys
+                                              .contains(key);
+                                          return GestureDetector(
+                                            onTap: () async {
+                                              if (_isSelectMode) {
+                                                setState(() {
+                                                  if (isSelected) {
+                                                    _selectedKeys.remove(key);
+                                                  } else {
+                                                    _selectedKeys.add(key);
+                                                  }
+                                                });
+                                                return;
+                                              }
+
+                                              // Open full-screen viewer. For local assets, load the file first.
+                                              if (url.startsWith('local:')) {
+                                                final id = url.substring(
+                                                  'local:'.length,
+                                                );
+                                                final asset = _localAssets[id];
+                                                if (asset != null) {
+                                                  final file = await asset.file;
+                                                  if (file != null && mounted) {
+                                                    final nav = Navigator.of(
+                                                      // ignore: use_build_context_synchronously
+                                                      context,
+                                                    );
+                                                    nav.push(
+                                                      MaterialPageRoute(
+                                                        builder: (_) =>
+                                                            PhotoViewer(
+                                                              filePath:
+                                                                  file.path,
+                                                              heroTag: key,
+                                                            ),
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              } else if (url.startsWith(
+                                                'file:',
+                                              )) {
+                                                final path = url.substring(
+                                                  'file:'.length,
+                                                );
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => PhotoViewer(
+                                                      filePath: path,
+                                                      heroTag: key,
+                                                    ),
+                                                  ),
+                                                );
+                                              } else {
+                                                final resolved =
+                                                    ApiService.resolveImageUrl(
+                                                      url,
+                                                    );
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => PhotoViewer(
+                                                      networkUrl: resolved,
+                                                      heroTag: key,
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            onLongPress: () {
+                                              setState(() {
+                                                _isSelectMode = true;
+                                                _selectedKeys.add(key);
+                                              });
+                                            },
+                                            child: ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              child: Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
+                                                  Hero(
+                                                    tag: key,
+                                                    child:
+                                                        url.startsWith('local:')
+                                                        ? FutureBuilder<
+                                                            Uint8List?
+                                                          >(
+                                                            future:
+                                                                _getThumbForAsset(
+                                                                  url.substring(
+                                                                    6,
+                                                                  ),
                                                                 ),
-                                                              ),
-                                                          builder: (context, snap) {
-                                                            if (snap.hasData &&
-                                                                snap.data !=
-                                                                    null) {
-                                                              return Image.memory(
-                                                                snap.data!,
-                                                                fit: BoxFit
-                                                                    .cover,
-                                                              );
-                                                            }
-                                                            if (snap.connectionState ==
-                                                                ConnectionState
-                                                                    .waiting) {
+                                                            builder: (context, snap) {
+                                                              if (snap.hasData &&
+                                                                  snap.data !=
+                                                                      null) {
+                                                                return Image.memory(
+                                                                  snap.data!,
+                                                                  fit: BoxFit
+                                                                      .cover,
+                                                                );
+                                                              }
+                                                              if (snap.connectionState ==
+                                                                  ConnectionState
+                                                                      .waiting) {
+                                                                return Container(
+                                                                  color: Colors
+                                                                      .black26,
+                                                                );
+                                                              }
                                                               return Container(
                                                                 color: Colors
                                                                     .black26,
-                                                              );
-                                                            }
-                                                            return Container(
-                                                              color: Colors
-                                                                  .black26,
-                                                              child: const Icon(
-                                                                Icons
-                                                                    .broken_image,
-                                                                color: Colors
-                                                                    .white54,
-                                                              ),
-                                                            );
-                                                          },
-                                                        )
-                                                      : (url.startsWith('file:')
-                                                            ? (() {
-                                                                final path = url
-                                                                    .substring(
-                                                                      'file:'
-                                                                          .length,
-                                                                    );
-                                                                return ClipRRect(
-                                                                  borderRadius:
-                                                                      BorderRadius.circular(
-                                                                        6,
-                                                                      ),
-                                                                  child: Image.file(
-                                                                    File(path),
-                                                                    fit: BoxFit
-                                                                        .cover,
-                                                                  ),
-                                                                );
-                                                              })()
-                                                            : Image.network(
-                                                                ApiService.resolveImageUrl(
-                                                                  url,
+                                                                child: const Icon(
+                                                                  Icons
+                                                                      .broken_image,
+                                                                  color: Colors
+                                                                      .white54,
                                                                 ),
-                                                                fit: BoxFit
-                                                                    .cover,
-                                                                // Show a neutral placeholder instead of the
-                                                                // engine's red X when the server returns 404
-                                                                // or other network errors.
-                                                                errorBuilder:
-                                                                    (
-                                                                      context,
-                                                                      error,
-                                                                      stackTrace,
-                                                                    ) {
-                                                                      return Container(
-                                                                        color: Colors
-                                                                            .black26,
-                                                                        child: const Center(
-                                                                          child: Icon(
-                                                                            Icons.broken_image,
-                                                                            color:
-                                                                                Colors.white54,
-                                                                            size:
-                                                                                36,
-                                                                          ),
-                                                                        ),
+                                                              );
+                                                            },
+                                                          )
+                                                        : (url.startsWith(
+                                                                'file:',
+                                                              )
+                                                              ? (() {
+                                                                  final path = url
+                                                                      .substring(
+                                                                        'file:'
+                                                                            .length,
                                                                       );
-                                                                    },
-                                                              )),
-                                                ),
-                                                if (_isSelectMode)
-                                                  Positioned(
-                                                    top: 8,
-                                                    left: 8,
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        shape: BoxShape.circle,
-                                                        color: isSelected
-                                                            ? Colors.blueAccent
-                                                            : Colors.black54,
-                                                      ),
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            6,
-                                                          ),
-                                                      child: Icon(
-                                                        isSelected
-                                                            ? Icons.check_box
-                                                            : Icons.crop_square,
-                                                        color: Colors.white,
-                                                        size: 18,
+                                                                  return ClipRRect(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          6,
+                                                                        ),
+                                                                    child: Image.file(
+                                                                      File(
+                                                                        path,
+                                                                      ),
+                                                                      fit: BoxFit
+                                                                          .cover,
+                                                                    ),
+                                                                  );
+                                                                })()
+                                                              : Image.network(
+                                                                  ApiService.resolveImageUrl(
+                                                                    url,
+                                                                  ),
+                                                                  fit: BoxFit
+                                                                      .cover,
+                                                                  // Show a neutral placeholder instead of the
+                                                                  // engine's red X when the server returns 404
+                                                                  // or other network errors.
+                                                                  errorBuilder:
+                                                                      (
+                                                                        context,
+                                                                        error,
+                                                                        stackTrace,
+                                                                      ) {
+                                                                        return Container(
+                                                                          color:
+                                                                              Colors.black26,
+                                                                          child: const Center(
+                                                                            child: Icon(
+                                                                              Icons.broken_image,
+                                                                              color: Colors.white54,
+                                                                              size: 36,
+                                                                            ),
+                                                                          ),
+                                                                        );
+                                                                      },
+                                                                )),
+                                                  ),
+                                                  if (_isSelectMode)
+                                                    Positioned(
+                                                      top: 8,
+                                                      left: 8,
+                                                      child: Container(
+                                                        decoration: BoxDecoration(
+                                                          shape:
+                                                              BoxShape.circle,
+                                                          color: isSelected
+                                                              ? Colors
+                                                                    .blueAccent
+                                                              : Colors.black54,
+                                                        ),
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              6,
+                                                            ),
+                                                        child: Icon(
+                                                          isSelected
+                                                              ? Icons.check_box
+                                                              : Icons
+                                                                    .crop_square,
+                                                          color: Colors.white,
+                                                          size: 18,
+                                                        ),
                                                       ),
                                                     ),
-                                                  ),
-                                                if (_showTags)
-                                                  Positioned(
-                                                    left: 8,
-                                                    right: 8,
-                                                    bottom: 8,
-                                                    child: LayoutBuilder(
-                                                      builder:
-                                                          (
-                                                            context,
-                                                            constraints,
-                                                          ) {
-                                                            final chips =
-                                                                _buildTagChipsForWidth(
-                                                                  visibleTags,
-                                                                  fullTags,
-                                                                  constraints
-                                                                      .maxWidth,
-                                                                );
-                                                            return Wrap(
-                                                              spacing: 4,
-                                                              children: chips,
-                                                            );
-                                                          },
+                                                  if (_showTags)
+                                                    Positioned(
+                                                      left: 8,
+                                                      right: 8,
+                                                      bottom: 8,
+                                                      child: LayoutBuilder(
+                                                        builder:
+                                                            (
+                                                              context,
+                                                              constraints,
+                                                            ) {
+                                                              final chips =
+                                                                  _buildTagChipsForWidth(
+                                                                    visibleTags,
+                                                                    fullTags,
+                                                                    constraints
+                                                                        .maxWidth,
+                                                                  );
+                                                              return Wrap(
+                                                                spacing: 4,
+                                                                children: chips,
+                                                              );
+                                                            },
+                                                      ),
                                                     ),
-                                                  ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                        );
-                                      },
+                                          );
+                                        },
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -4461,27 +4603,38 @@ class GalleryScreenState extends State<GalleryScreen>
                                         ],
                                       ),
                                       const SizedBox(height: 6),
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(4),
-                                        child: LinearProgressIndicator(
-                                          value: _scanTotal > 0
-                                              ? _scanProgress
-                                              : null,
-                                          minHeight: 5,
-                                          backgroundColor:
-                                              (Theme.of(context).brightness ==
-                                                          Brightness.dark
-                                                      ? Colors.white
-                                                      : Colors.black87)
-                                                  .withValues(alpha: 0.3),
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Theme.of(context).brightness ==
-                                                        Brightness.dark
-                                                    ? Colors.white
-                                                    : Colors.blue.shade700,
-                                              ),
-                                        ),
+                                      ValueListenableBuilder<double>(
+                                        valueListenable: _scanProgressNotifier,
+                                        builder: (context, progress, child) {
+                                          return ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                            child: LinearProgressIndicator(
+                                              value: _scanTotal > 0
+                                                  ? progress
+                                                  : null,
+                                              minHeight: 5,
+                                              backgroundColor:
+                                                  (Theme.of(
+                                                                context,
+                                                              ).brightness ==
+                                                              Brightness.dark
+                                                          ? Colors.white
+                                                          : Colors.black87)
+                                                      .withValues(alpha: 0.3),
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white
+                                                        : Colors.blue.shade700,
+                                                  ),
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ],
                                   ),
@@ -4520,43 +4673,61 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
 
                         // Scroll to top button
-                        if (_showScrollToTop)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 105,
-                            child: Center(
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: _scrollToTop,
-                                  borderRadius: BorderRadius.circular(28),
-                                  child: Container(
-                                    width: 56,
-                                    height: 56,
-                                    decoration: BoxDecoration(
-                                      color: Colors.lightBlue.shade300,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.2,
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 105,
+                          child: Center(
+                            child: ValueListenableBuilder<bool>(
+                              valueListenable: _showScrollToTop,
+                              builder: (context, show, child) {
+                                return AnimatedScale(
+                                  scale: show ? 1.0 : 0.0,
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: show ? 1.0 : 0.0,
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeInOut,
+                                    child: IgnorePointer(
+                                      ignoring: !show,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: _scrollToTop,
+                                          borderRadius: BorderRadius.circular(
+                                            28,
                                           ),
-                                          blurRadius: 8,
-                                          offset: const Offset(0, 4),
+                                          child: Container(
+                                            width: 56,
+                                            height: 56,
+                                            decoration: BoxDecoration(
+                                              color: Colors.lightBlue.shade300,
+                                              shape: BoxShape.circle,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.2),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 4),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Icon(
+                                              Icons.arrow_upward,
+                                              color: Colors.white,
+                                              size: 28,
+                                            ),
+                                          ),
                                         ),
-                                      ],
-                                    ),
-                                    child: Icon(
-                                      Icons.arrow_upward,
-                                      color: Colors.white,
-                                      size: 28,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ),
+                        ),
 
                         // Background validation indicator (compact, non-intrusive)
                         if (_validating || _validationSuggestions.isNotEmpty)

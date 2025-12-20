@@ -28,6 +28,7 @@ import logging
 import time
 from typing import List, Tuple, Set
 from ultralytics import YOLO
+from .config import MIN_BOX_PERCENT, MIN_PERSON_PERCENT
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ YOLO_MIN_CONFIDENCE = 0.60  # Default for most categories
 
 # Category-specific confidence thresholds
 ANIMAL_MIN_CONFIDENCE = 0.45  # Lower for animals (cats/dogs often have lower confidence)
-FOOD_RELATED_MIN_CONFIDENCE = 0.55  # Slightly lower for common items
+FOOD_RELATED_MIN_CONFIDENCE = 0.75  # Higher to reduce false positives (e.g., fox mascots tagged as food!)
 PEOPLE_MIN_CONFIDENCE = 0.50  # Moderate for people detection
 
 
@@ -114,9 +115,11 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
         - debug_info: Dict with detection details for logging
     """
     categories = set()
+    all_objects = set()  # All detected objects regardless of size
     debug_info = {
         "detections": [],
         "mapped_categories": [],
+        "all_objects": [],
         "max_confidence": 0.0,
     }
     
@@ -127,16 +130,28 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
     if len(boxes) == 0:
         return [], debug_info
     
+    # Get image dimensions for size filtering
+    img_height, img_width = yolo_results.orig_shape if hasattr(yolo_results, 'orig_shape') else (1, 1)
+    image_area = img_width * img_height
+    
     # Process each detection
     for box in boxes:
         class_id = int(box.cls[0])
         confidence = float(box.conf[0])
         class_name = yolo_results.names[class_id] if hasattr(yolo_results, 'names') else f"class_{class_id}"
         
+        # Calculate bounding box area to filter out tiny objects
+        xyxy = box.xyxy[0]  # [x1, y1, x2, y2]
+        box_width = float(xyxy[2] - xyxy[0])
+        box_height = float(xyxy[3] - xyxy[1])
+        box_area = box_width * box_height
+        box_percent = box_area / image_area if image_area > 0 else 0
+        
         debug_info["detections"].append({
             "class": class_name,
             "class_id": class_id,
-            "confidence": confidence
+            "confidence": confidence,
+            "box_percent": round(box_percent * 100, 1)
         })
         
         debug_info["max_confidence"] = max(debug_info["max_confidence"], confidence)
@@ -159,14 +174,26 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
                 min_conf = PEOPLE_MIN_CONFIDENCE
             
             if confidence >= min_conf:
+                # Store all objects for search (regardless of size)
+                all_objects.add(class_name.lower())
+                
+                # Filter out objects that are too small for main tags
+                min_size = MIN_PERSON_PERCENT if class_id == 0 else MIN_BOX_PERCENT
+                if box_percent < min_size:
+                    logger.debug(f"Including {class_name} in all_objects but not main tags - too small ({round(box_percent*100, 1)}% < {round(min_size*100, 1)}%)")
+                    debug_info["all_objects"].append(class_name.lower())
+                    continue
+                
                 categories.add(category)
                 debug_info["mapped_categories"].append({
                     "category": category,
                     "from_class": class_name,
                     "confidence": confidence
                 })
+                debug_info["all_objects"].append(class_name.lower())
     
     result = list(categories)
+    debug_info["all_objects_list"] = list(all_objects)
     return result, debug_info
 
 
@@ -247,7 +274,7 @@ def classify_image_hybrid(image_path: str, yolo_model, clip_classifier_func,
 def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_func=None,
                          yolo_confidence: float = YOLO_MIN_CONFIDENCE,
                          clip_threshold: float = 0.70,
-                         max_tags: int = 5) -> Tuple[List[List[str]], dict]:
+                         max_tags: int = 5) -> Tuple[List[List[str]], List[List[str]], dict]:
     """
     Classify a batch of images using YOLO+CLIP hybrid approach.
     
@@ -265,8 +292,9 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
         max_tags: Maximum tags per image
         
     Returns:
-        Tuple of (results_list, stats_dict)
+        Tuple of (results_list, all_detections_list, stats_dict)
         - results_list: List of tag lists (one per input image, in same order)
+        - all_detections_list: List of all object detections including small ones
         - stats: Performance statistics
     """
     t_start = time.time()
@@ -276,6 +304,7 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
         yolo_model = get_fast_yolo_model()
     
     results = [None] * len(image_paths)  # Preserve order
+    all_detections = [None] * len(image_paths)  # All detected objects
     clip_needed_indices = []  # Track which images need CLIP
     clip_needed_paths = []
     
@@ -299,14 +328,18 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
             if tags:
                 # YOLO succeeded
                 results[idx] = tags[:max_tags]
+                # Store all detections for search
+                all_detections[idx] = debug_info.get("all_objects_list", tags[:max_tags])
                 stats["yolo_success"] += 1
             else:
-                # Need CLIP fallback
+                # Need CLIP fallback but still store any all_objects detected
+                all_detections[idx] = debug_info.get("all_objects_list", [])
                 clip_needed_indices.append(idx)
                 clip_needed_paths.append(image_path)
                 
         except Exception as e:
             logger.warning(f"YOLO error for {image_path}: {e}")
+            all_detections[idx] = []
             clip_needed_indices.append(idx)
             clip_needed_paths.append(image_path)
     
@@ -322,6 +355,9 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
             # Map CLIP results back to original indices
             for clip_idx, original_idx in enumerate(clip_needed_indices):
                 results[original_idx] = clip_results[clip_idx]
+                # For CLIP-only results, all_detections same as tags (no object-level data)
+                if not all_detections[original_idx]:  # Only if YOLO didn't find anything
+                    all_detections[original_idx] = clip_results[clip_idx]
                 stats["clip_fallback"] += 1
                 
         except Exception as e:
@@ -330,9 +366,18 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
             for original_idx in clip_needed_indices:
                 if results[original_idx] is None:
                     results[original_idx] = []
+                if all_detections[original_idx] is None:
+                    all_detections[original_idx] = []
         
         t3 = time.time()
         stats["clip_time_ms"] = round((t3 - t2) * 1000, 1)
+    
+    # Ensure no None values in results
+    for idx in range(len(results)):
+        if results[idx] is None:
+            results[idx] = []
+        if all_detections[idx] is None:
+            all_detections[idx] = []
     
     # Calculate final stats
     t_end = time.time()
@@ -346,7 +391,7 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
     logger.info(f"  YOLO: {stats['yolo_success']} success ({yolo_pct}%) in {stats['yolo_time_ms']}ms")
     logger.info(f"  CLIP: {stats['clip_fallback']} fallback in {stats['clip_time_ms']}ms")
     
-    return results, stats
+    return results, all_detections, stats
 
 
 def validate_yolo_with_clip(image_path: str, yolo_tags: List[str], 

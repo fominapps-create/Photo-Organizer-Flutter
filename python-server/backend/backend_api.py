@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import aiofiles
 from . import config as srv_cfg
 from typing import Any, TYPE_CHECKING
 from fastapi import BackgroundTasks, Header
@@ -266,27 +268,37 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
     """
     _require_token(x_upload_token)
     
-    # Save all uploaded files
-    temp_paths = []
-    filenames = []
-    
-    for file in files:
+    # Save all uploaded files concurrently for maximum speed
+    async def save_file(file: "UploadFile") -> tuple:
+        """Save a single file and return (temp_path, filename) or None if invalid."""
         if not file.filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            continue
+            return None
             
         try:
             temp_path = os.path.join(TEMP_FOLDER, file.filename)
             data = await file.read()
             
             # Write directly without EXIF processing for speed
-            # (EXIF data doesn't affect CLIP classification)
-            with open(temp_path, "wb") as f:
-                f.write(data)
+            async with aiofiles.open(temp_path, "wb") as f:
+                await f.write(data)
             
-            temp_paths.append(temp_path)
-            filenames.append(file.filename)
+            return (temp_path, file.filename)
         except Exception as e:
             logging.warning(f"Failed to save {file.filename}: {e}")
+            return None
+    
+    # Save all files in parallel
+    save_tasks = [save_file(file) for file in files]
+    save_results = await asyncio.gather(*save_tasks)
+    
+    # Filter out failed uploads
+    temp_paths = []
+    filenames = []
+    for result in save_results:
+        if result is not None:
+            temp_path, filename = result
+            temp_paths.append(temp_path)
+            filenames.append(filename)
     
     if not temp_paths:
         raise HTTPException(status_code=400, detail="No valid images uploaded")
@@ -306,7 +318,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
             from .yolo_clip_hybrid import classify_batch_hybrid
             
             t0 = time.time()
-            batch_tags, stats = classify_batch_hybrid(
+            batch_tags, batch_all_detections, stats = classify_batch_hybrid(
                 temp_paths,
                 yolo_model=None,  # Will auto-load fast nano model
                 clip_batch_func=clip_classify_batch,
@@ -328,6 +340,8 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
             logging.info(f"Starting CLIP-only classification for {len(temp_paths)} images")
             t0 = time.time()
             batch_tags = clip_classify_batch(temp_paths, confidence_threshold=clip_threshold, max_tags=max_tags)
+            # For CLIP-only, all_detections same as tags (no object-level detection)
+            batch_all_detections = batch_tags
             t1 = time.time()
             logging.info(f"CLIP batch took {round((t1 - t0) * 1000)}ms for {len(temp_paths)} images ({round((t1-t0)*1000/len(temp_paths))}ms per image)")
         
@@ -350,7 +364,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
         raise HTTPException(status_code=400, detail=f"Invalid photoIDs: {e}")
 
     results = []
-    for idx, (filename, tags, temp_path) in enumerate(zip(filenames, batch_tags, temp_paths)):
+    for idx, (filename, tags, all_detections, temp_path) in enumerate(zip(filenames, batch_tags, batch_all_detections, temp_paths)):
         photo_id = None
         if ids_list and idx < len(ids_list):
             photo_id = ids_list[idx]
@@ -363,6 +377,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
             "filename": filename,
             "photoID": photo_id,
             "tags": tags,
+            "all_detections": all_detections,  # Include all detected objects for search
             "url": None  # Not organizing in batch mode for speed
         })
 

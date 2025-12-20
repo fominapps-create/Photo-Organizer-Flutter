@@ -45,6 +45,7 @@ dependencies:
   connectivity_plus: ^4.0.1
   url_launcher: ^6.1.11
   google_fonts: ^6.1.0
+  lottie: ^3.1.0
 
 dev_dependencies:
   flutter_test:
@@ -77,6 +78,8 @@ flutter:
   assets:
     - assets/Icon2.png
     - assets/Icon3.png
+    - assets/T Creadit Icon.png
+    - assets/animations/
     - assets/Icon4.png
     - assets/T Creadit Icon.png
     - assets/Transparent fox log.png
