@@ -214,9 +214,9 @@ class CLIPPhotoClassifier:
                     if prob >= required_threshold:
                         results.append((tag_name, float(prob)))
                 
-                # If no categories matched, tag as 'unknown'
+                # If no categories matched, tag as 'other'
                 if not results:
-                    results.append(("unknown", 0.0))
+                    results.append(("other", 0.0))
                 
                 results.sort(key=lambda x: x[1], reverse=True)
                 results = results[:max_tags]

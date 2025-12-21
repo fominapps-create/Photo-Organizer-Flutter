@@ -653,6 +653,21 @@ def dump_tags_db(x_upload_token: str | None = Header(None)):
     return db
 
 
+@app.delete('/tags-db/')
+def clear_tags_db(x_upload_token: str | None = Header(None)):
+    """Clear all tags from the server database."""
+    _require_token(x_upload_token)
+    try:
+        db = _load_tags_db()
+        count = len(db)
+        _save_tags_db({})  # Save empty database
+        logging.info(f"Cleared {count} entries from tags database")
+        return {"cleared": count, "status": "ok"}
+    except Exception as e:
+        logging.exception("Failed to clear tags database")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get('/all-tags/')
 def get_all_unique_tags():
     """

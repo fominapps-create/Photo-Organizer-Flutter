@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'dart:convert';
@@ -408,11 +409,27 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log(
       '✅ _loadOrganizedImages completed. Found ${imageUrls.length} photos',
     );
+
     await _loadTags();
     developer.log('Total photos in gallery: ${imageUrls.length}');
     setState(() => loading = false);
+
+    // Sync tags from server in background (non-blocking) if available
+    _syncTagsFromServerInBackground();
+
     _startAutoScanIfNeeded();
     _startAutoScanRetryTimer();
+  }
+
+  /// Sync tags from server in background without blocking UI
+  void _syncTagsFromServerInBackground() {
+    ApiService.pingServer(timeout: const Duration(seconds: 2)).then((online) {
+      if (online && mounted) {
+        _syncTagsFromServer().then((_) {
+          if (mounted) setState(() {});
+        });
+      }
+    });
   }
 
   /// Start a timer that periodically retries scanning if server was unavailable
@@ -761,6 +778,10 @@ class GalleryScreenState extends State<GalleryScreen>
     // Stop progress refresh timer
     _progressRefreshTimer?.cancel();
     _progressRefreshTimer = null;
+
+    // Sync tags from server to ensure local cache is up-to-date
+    developer.log('🔄 Syncing tags from server after scan completion');
+    await _syncTagsFromServer();
 
     // Reload all tags from storage to ensure UI reflects persisted data
     developer.log('🔄 Reloading tags from storage after scan completion');
@@ -1565,6 +1586,9 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log(
         '✅ Background validation complete: $_validationAgreements agreements, $_validationDisagreements disagreements, $_validationOverrides overrides',
       );
+
+      // Sync tags from server to ensure local cache has all override results
+      await _syncTagsFromServer();
     } catch (e) {
       developer.log('⚠️ Background validation error: $e');
     } finally {
@@ -2688,6 +2712,66 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log('📂 photoTags now has ${photoTags.length} entries');
   }
 
+  /// Sync all tags from server database to local storage
+  /// This ensures local cache matches server data
+  Future<void> _syncTagsFromServer() async {
+    developer.log('🔄 Starting tag sync from server...');
+    try {
+      final res = await http
+          .get(
+            Uri.parse('${ApiService.baseUrl}/tags-db/'),
+            headers: {'Content-Type': 'application/json'},
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (res.statusCode == 200) {
+        final Map<String, dynamic> serverTags = json.decode(res.body);
+        developer.log('📥 Downloaded ${serverTags.length} tags from server');
+
+        // Convert to Map<String, List<String>> and save to local storage
+        final tagsToSave = <String, List<String>>{};
+        for (final entry in serverTags.entries) {
+          final photoID = entry.key;
+          final tagData = entry.value;
+          if (tagData is Map && tagData['tags'] is List) {
+            final tags = (tagData['tags'] as List).cast<String>();
+            if (tags.isNotEmpty) {
+              tagsToSave[photoID] = tags;
+            }
+          } else if (tagData is List) {
+            final tags = tagData.cast<String>();
+            if (tags.isNotEmpty) {
+              tagsToSave[photoID] = tags;
+            }
+          }
+        }
+
+        // Save all tags to local storage
+        await TagStore.saveLocalTagsBatch(tagsToSave);
+        developer.log('💾 Saved ${tagsToSave.length} tags to local storage');
+
+        // Update in-memory photoTags
+        for (final url in imageUrls) {
+          final key = p.basename(url);
+          final photoID = PhotoId.canonicalId(url);
+          if (tagsToSave.containsKey(photoID)) {
+            photoTags[key] = tagsToSave[photoID]!;
+          }
+        }
+        developer.log('📂 Updated photoTags with ${photoTags.length} entries');
+
+        // Update scanned count
+        _scannedCountNotifier.value = photoTags.length;
+        _updateCachedFilteredList();
+        if (mounted) setState(() {});
+      } else {
+        developer.log('⚠️ Failed to sync tags: ${res.statusCode}');
+      }
+    } catch (e) {
+      developer.log('⚠️ Error syncing tags from server: $e');
+    }
+  }
+
   Future<void> _createAlbumFromSelection() async {
     if (_selectedKeys.isEmpty) return;
     final selectedUrls = imageUrls
@@ -3173,7 +3257,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                       _showBadgeTooltip(
                                         context,
                                         status,
-                                        _scanning
+                                        (_scanning || _validating)
                                             ? Colors.orange.shade700
                                             : Colors.grey.shade700,
                                       );
@@ -3181,7 +3265,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                     child: Container(
                                       padding: const EdgeInsets.all(6),
                                       decoration: BoxDecoration(
-                                        color: _scanning
+                                        color: (_scanning || _validating)
                                             ? Colors.orange.shade100.withValues(
                                                 alpha: 0.3,
                                               )
@@ -3190,7 +3274,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ),
                                         shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: _scanning
+                                          color: (_scanning || _validating)
                                               ? Colors.orange.shade600
                                               : Colors.grey.shade600,
                                           width: 2,
@@ -3207,7 +3291,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                       ),
                                       child: Icon(
                                         Icons.verified_outlined,
-                                        color: _scanning
+                                        color: (_scanning || _validating)
                                             ? Colors.orange.shade600
                                             : Colors.grey.shade600,
                                         size: 18,
@@ -3241,6 +3325,19 @@ class GalleryScreenState extends State<GalleryScreen>
                                             ),
                                           );
                                         },
+                                      ),
+                                    ),
+                                  // Show "Validating" text during validation
+                                  if (_validating && !_scanning)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        'Validating',
+                                        style: TextStyle(
+                                          fontSize: 8,
+                                          color: Colors.orange.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                 ],
@@ -4181,12 +4278,44 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   );
                                                   if (confirm != true) return;
                                                   try {
-                                                    // Clear all tags at once (much faster)
+                                                    // Clear server tags first
+                                                    try {
+                                                      await http
+                                                          .delete(
+                                                            Uri.parse(
+                                                              '${ApiService.baseUrl}/tags-db/',
+                                                            ),
+                                                            headers: {
+                                                              'Content-Type':
+                                                                  'application/json',
+                                                            },
+                                                          )
+                                                          .timeout(
+                                                            const Duration(
+                                                              seconds: 10,
+                                                            ),
+                                                          );
+                                                      developer.log(
+                                                        '🗑️ Cleared server tags database',
+                                                      );
+                                                    } catch (e) {
+                                                      developer.log(
+                                                        '⚠️ Failed to clear server tags: $e',
+                                                      );
+                                                    }
+
+                                                    // Clear all local tags at once (much faster)
                                                     final removed =
                                                         await TagStore.clearAllTags();
 
                                                     // Clear in-memory tags
                                                     photoTags.clear();
+
+                                                    // Reset validation state to allow re-scan
+                                                    _validationComplete = false;
+                                                    _scannedCountNotifier
+                                                            .value =
+                                                        0;
 
                                                     // Update UI
                                                     if (mounted) {
@@ -4200,7 +4329,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       ).showSnackBar(
                                                         SnackBar(
                                                           content: Text(
-                                                            'Removed $removed tags from storage',
+                                                            'Removed $removed local + server tags',
                                                           ),
                                                         ),
                                                       );

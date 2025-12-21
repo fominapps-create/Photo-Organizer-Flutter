@@ -97,7 +97,7 @@ YOLO_MIN_CONFIDENCE = 0.60  # Default for most categories
 
 # Category-specific confidence thresholds
 ANIMAL_MIN_CONFIDENCE = 0.45  # Lower for animals (cats/dogs often have lower confidence)
-FOOD_RELATED_MIN_CONFIDENCE = 0.75  # Higher to reduce false positives (e.g., fox mascots tagged as food!)
+FOOD_RELATED_MIN_CONFIDENCE = 0.80  # Higher to reduce false positives (e.g., fox mascots tagged as food!)
 PEOPLE_MIN_CONFIDENCE = 0.50  # Moderate for people detection
 
 
@@ -166,8 +166,8 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
             # Animals (cats, dogs, etc.) - lower threshold as they often have lower confidence
             if class_id in [14, 15, 16, 17, 18, 19, 20, 21, 22, 23]:  # Animal classes
                 min_conf = ANIMAL_MIN_CONFIDENCE
-            # Food-related items
-            elif class_id in [39, 40, 41, 42, 43, 44, 45]:  # Food-related items
+            # Food and food-related items (all food classes need higher threshold)
+            elif class_id in [39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55]:
                 min_conf = FOOD_RELATED_MIN_CONFIDENCE
             # People
             elif class_id == 0:  # Person
@@ -491,8 +491,8 @@ def validate_yolo_with_clip(image_path: str, yolo_tags: List[str],
                 clip_set_confident = set(clip_confident_tags)
                 clip_scene_tags = clip_set_confident - yolo_object_categories
                 
-                # Remove "unknown" from scene tags - if YOLO detected something, it's not unknown
-                clip_scene_tags.discard('unknown')
+                # Remove "other" from scene tags - if YOLO detected something, it's not other
+                clip_scene_tags.discard('other')
                 
                 if clip_scene_tags:
                     # CLIP found complementary scene tags - COMBINE with YOLO
