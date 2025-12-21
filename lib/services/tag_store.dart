@@ -74,6 +74,31 @@ class TagStore {
     return result;
   }
 
+  /// Check which photos have NON-EMPTY tags (excludes photos with empty [] tags)
+  /// Returns a Set of photoIDs that have actual tags
+  static Future<Set<String>> getPhotoIDsWithNonEmptyTags(
+    List<String> photoIDs,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final result = <String>{};
+
+    for (final photoID in photoIDs) {
+      final raw = prefs.getString(_keyFor(photoID));
+      if (raw != null) {
+        try {
+          final list = json.decode(raw) as List;
+          if (list.isNotEmpty) {
+            result.add(photoID);
+          }
+        } catch (_) {
+          // Invalid entry, don't include
+        }
+      }
+    }
+
+    return result;
+  }
+
   /// Get total number of stored tag entries (for diagnostics)
   static Future<int> getStoredTagCount() async {
     final prefs = await SharedPreferences.getInstance();
@@ -101,8 +126,37 @@ class TagStore {
     return removed;
   }
 
+  /// Remove all entries that have empty tag arrays
+  /// Returns number of empty entries removed
+  static Future<int> cleanEmptyTags() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    int removed = 0;
+
+    final tagKeys = keys.where((key) => key.startsWith('tags_')).toList();
+
+    for (final key in tagKeys) {
+      final raw = prefs.getString(key);
+      if (raw != null) {
+        try {
+          final list = json.decode(raw) as List;
+          if (list.isEmpty) {
+            await prefs.remove(key);
+            removed++;
+          }
+        } catch (_) {
+          // Remove invalid entries too
+          await prefs.remove(key);
+          removed++;
+        }
+      }
+    }
+
+    return removed;
+  }
+
   /// Load all tags at once for multiple photos (batch loading)
-  /// Returns a Map of photoID -> tags
+  /// Returns a Map of photoID -> tags (excludes empty tag arrays)
   /// Much faster than calling loadLocalTags() for each photo individually
   static Future<Map<String, List<String>>> loadAllTagsMap(
     List<String> photoIDs,
@@ -115,7 +169,10 @@ class TagStore {
       if (raw != null) {
         try {
           final list = json.decode(raw) as List;
-          result[photoID] = list.cast<String>();
+          // Only include non-empty tag lists
+          if (list.isNotEmpty) {
+            result[photoID] = list.cast<String>();
+          }
         } catch (_) {
           // Skip invalid entries
         }

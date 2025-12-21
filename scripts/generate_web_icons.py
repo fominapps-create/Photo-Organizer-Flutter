@@ -8,11 +8,39 @@ Writes to `web/favicon.png` and `web/icons/Icon-192.png`, `web/icons/Icon-512.pn
 """
 import os
 import sys
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
+
+
+def crop_center(img, crop_percent=10):
+    """Crop edges by a percentage to zoom in on the center."""
+    width, height = img.size
+    crop_pixels = int(min(width, height) * crop_percent / 100)
+    
+    return img.crop((
+        crop_pixels,
+        crop_pixels,
+        width - crop_pixels,
+        height - crop_pixels
+    ))
+
+
+def add_rounded_corners(img, radius):
+    """Add rounded corners to an image."""
+    # Create a mask for rounded corners
+    mask = Image.new('L', img.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle([(0, 0), img.size], radius=radius, fill=255)
+    
+    # Apply the mask to the image
+    output = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    output.paste(img, (0, 0))
+    output.putalpha(mask)
+    
+    return output
 
 
 def main():
@@ -43,7 +71,18 @@ def main():
 
     for name, size in sizes.items():
         out_path = os.path.join(icons_dir if 'Icon' in name or 'maskable' in name else web_root, name)
-        resized = img.resize(size, Image.LANCZOS)
+        
+        # Process favicon differently
+        if name == 'favicon.png':
+            # Crop 12% from edges to make fox face bigger
+            cropped = crop_center(img, crop_percent=12)
+            resized = cropped.resize(size, Image.LANCZOS)
+            # Use 20% radius for nice rounded corners
+            radius = int(min(size) * 0.20)
+            resized = add_rounded_corners(resized, radius)
+        else:
+            resized = img.resize(size, Image.LANCZOS)
+        
         resized.save(out_path)
         print(f"Wrote {out_path}")
 

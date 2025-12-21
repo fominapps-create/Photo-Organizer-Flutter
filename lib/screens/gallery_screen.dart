@@ -61,13 +61,15 @@ class GalleryScreenState extends State<GalleryScreen>
   final ValueNotifier<double> _scanProgressNotifier = ValueNotifier<double>(
     0.0,
   ); // Use notifier to avoid rebuilding whole tree
+  final ValueNotifier<int> _scannedCountNotifier = ValueNotifier<int>(
+    0,
+  ); // Track scanned photos count
   double _scanProgress = 0.0; // 0.0-1.0
   int _scanTotal = 0;
   bool _scanPaused = false;
   final ScrollController _scrollController = ScrollController();
   final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
   int _scanProcessed = 0;
-  int _currentUnscannedCount = 0;
   double _lastScale = 1.0; // Track last scale for incremental pinch zoom
 
   // Performance monitoring
@@ -87,12 +89,31 @@ class GalleryScreenState extends State<GalleryScreen>
   int _validationAgreements = 0;
   int _validationDisagreements = 0;
   int _validationOverrides = 0;
+  bool _validationComplete = false; // Track if full validation is done
 
   // Track changed images for detailed view
   final List<Map<String, dynamic>> _validationChanges = [];
-  // Track suggested changes (not yet applied)
-  final List<Map<String, dynamic>> _validationSuggestions = [];
-  // {url, photoID, oldTags, newTags, reason}
+  // Track recently updated photos for animation (photoID -> timestamp)
+  final Map<String, DateTime> _recentlyValidated = {};
+
+  // Dot animation state - use ValueNotifier to avoid full rebuilds
+  final ValueNotifier<int> _dotIndexNotifier = ValueNotifier<int>(0);
+  Timer? _dotAnimationTimer;
+  Timer? _autoScanRetryTimer;
+  Timer? _progressRefreshTimer; // Refresh progress display periodically
+
+  // Cached filtered list to avoid recomputing on every build
+  List<String> _cachedFilteredUrls = [];
+  String _lastSearchQuery = '';
+  int _lastImageUrlsLength = 0;
+  int _lastPhotoTagsLength = 0;
+  bool _sortNewestFirstCached = true;
+
+  // Cached local photo count
+  int _cachedLocalPhotoCount = 0;
+
+  // Thumbnail future cache to prevent recreating futures on rebuild
+  final Map<String, Future<Uint8List?>> _thumbFutureCache = {};
 
   double _measureTextWidth(String text, TextStyle style) {
     final key = text; // style is constant here, so text is fine as cache key
@@ -375,6 +396,13 @@ class GalleryScreenState extends State<GalleryScreen>
   Future<void> _loadAllImages() async {
     developer.log('🚀 START: _loadAllImages called');
     setState(() => loading = true);
+
+    // Clean up any empty tag entries from failed scans
+    final cleanedCount = await TagStore.cleanEmptyTags();
+    if (cleanedCount > 0) {
+      developer.log('🧹 Cleaned up $cleanedCount empty tag entries');
+    }
+
     developer.log('🔄 Calling _loadOrganizedImages...');
     await _loadOrganizedImages();
     developer.log(
@@ -383,32 +411,99 @@ class GalleryScreenState extends State<GalleryScreen>
     await _loadTags();
     developer.log('Total photos in gallery: ${imageUrls.length}');
     setState(() => loading = false);
-    // Defer unscanned count to avoid blocking UI
-    developer.log('Deferring _updateUnscannedCount() to microtask...');
-    Future.microtask(() => _updateUnscannedCount());
     _startAutoScanIfNeeded();
+    _startAutoScanRetryTimer();
   }
 
-  Future<void> _updateUnscannedCount() async {
-    try {
-      final localUrls = imageUrls
-          .where((u) => u.startsWith('local:') || u.startsWith('file:'))
-          .toList();
-      developer.log(
-        '📊 Checking unscanned count for ${localUrls.length} photos',
-      );
-      int unscanned = 0;
-      for (final u in localUrls) {
-        final photoID = PhotoId.canonicalId(u);
-        final tags = await TagStore.loadLocalTags(photoID);
-        if (tags == null) unscanned++;
+  /// Start a timer that periodically retries scanning if server was unavailable
+  void _startAutoScanRetryTimer() {
+    _autoScanRetryTimer?.cancel();
+    _autoScanRetryTimer = Timer.periodic(const Duration(seconds: 30), (
+      timer,
+    ) async {
+      // Only retry if not already scanning/validating and not complete
+      if (!_scanning && !_validating && !_validationComplete && mounted) {
+        developer.log(
+          '🔄 Auto-retry: Reloading photos and checking if scan is needed...',
+        );
+        // Reload photos first to pick up any new ones
+        await _loadAllImages();
+        await _startAutoScanIfNeeded();
       }
-      developer.log('📊 Unscanned count: $unscanned');
-      if (mounted) setState(() => _currentUnscannedCount = unscanned);
-    } catch (e) {
-      developer.log('❌ Error updating unscanned count: $e');
-      if (mounted) setState(() => _currentUnscannedCount = 0);
-    }
+      // Stop retrying once validation is complete
+      if (_validationComplete) {
+        developer.log(
+          '✅ Auto-retry: Validation complete, stopping retry timer',
+        );
+        timer.cancel();
+        _autoScanRetryTimer = null;
+      }
+    });
+  }
+
+  /// Start a timer that refreshes the progress display every 5 seconds during scanning
+  void _startProgressRefreshTimer() {
+    _progressRefreshTimer?.cancel();
+    _progressRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted && (_scanning || _validating)) {
+        setState(() {
+          // Just trigger a rebuild to update percentage display
+        });
+      } else {
+        timer.cancel();
+        _progressRefreshTimer = null;
+      }
+    });
+  }
+
+  /// Show a small tooltip-like popup near the badge
+  OverlayEntry? _badgeTooltipEntry;
+  void _showBadgeTooltip(BuildContext context, String message, Color color) {
+    _badgeTooltipEntry?.remove();
+    final overlay = Overlay.of(context);
+    _badgeTooltipEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 62,
+        right: 210,
+        child: FractionalTranslation(
+          translation: const Offset(
+            0.5,
+            0,
+          ), // Shift left by half width to center under badge
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(_badgeTooltipEntry!);
+    // Auto-dismiss after 1.5 seconds
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      _badgeTooltipEntry?.remove();
+      _badgeTooltipEntry = null;
+    });
   }
 
   void reload() => _loadAllImages();
@@ -447,6 +542,7 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   Future<void> _startAutoScanIfNeeded() async {
+    developer.log('🎯 _startAutoScanIfNeeded() ENTRY');
     // Only scan if there are local images and we aren't already scanning
     if (_scanning) {
       developer.log('⏸️ Scan already in progress');
@@ -456,22 +552,40 @@ class GalleryScreenState extends State<GalleryScreen>
         .where((u) => u.startsWith('local:') || u.startsWith('file:'))
         .toList();
     developer.log('📊 Total local photos: ${localUrls.length}');
-    if (localUrls.isEmpty) return;
+    if (localUrls.isEmpty) {
+      developer.log('⚠️ No local photos found, returning');
+      return;
+    }
 
     // Check server connectivity before scanning
+    developer.log(
+      '🔌 Checking server connectivity at ${ApiService.baseUrl}...',
+    );
     final serverAvailable = await ApiService.pingServer(
       timeout: const Duration(seconds: 3),
       retries: 1,
     );
     if (!serverAvailable) {
-      developer.log('⚠️ Server not available, skipping auto-scan');
+      developer.log(
+        '⚠️ Server not available at ${ApiService.baseUrl}, skipping auto-scan',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Server offline: ${ApiService.baseUrl}'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       return;
     }
+    developer.log('✅ Server available!');
 
-    // Only consider images that have no persisted scan entry.
+    // Only consider images that have no persisted scan entry OR have empty tags.
     // Check using canonical photoID keys from TagStore (bulk check for speed)
     final photoIDs = localUrls.map((u) => PhotoId.canonicalId(u)).toList();
-    final scannedIDs = await TagStore.getPhotoIDsWithTags(photoIDs);
+    final scannedIDs = await TagStore.getPhotoIDsWithNonEmptyTags(photoIDs);
 
     // Diagnostic: Check SharedPreferences size
     final storedTagCount = await TagStore.getStoredTagCount();
@@ -491,8 +605,57 @@ class GalleryScreenState extends State<GalleryScreen>
     }).toList();
 
     developer.log('🔍 Photos needing scan: ${missing.length}');
+
+    // If there are photos to scan, reset validation state
+    if (missing.isNotEmpty && _validationComplete) {
+      developer.log('🔄 Found unscanned photos, resetting validation state');
+      setState(() {
+        _validationComplete = false;
+      });
+    }
+
     if (missing.isEmpty) {
       developer.log('✅ All photos already scanned!');
+      developer.log('🔍 Now checking if validation is needed...');
+      // Check if validation is complete
+      // If all photos are scanned but validation isn't complete, trigger it
+      if (!_validationComplete && !_validating) {
+        developer.log(
+          '🚀 All scanned but not validated. Checking for YOLO-classified photos...',
+        );
+
+        // Quick check: do we have any YOLO-classified images?
+        bool hasYoloImages = false;
+        const yoloCategories = {'people', 'animals', 'food'};
+
+        for (final url in localUrls.take(10)) {
+          // Just check first 10 as sample
+          final photoID = PhotoId.canonicalId(url);
+          final tags = await TagStore.loadLocalTags(photoID);
+          if (tags != null && tags.any((tag) => yoloCategories.contains(tag))) {
+            hasYoloImages = true;
+            break;
+          }
+        }
+
+        if (hasYoloImages) {
+          developer.log(
+            '📸 Found YOLO-classified photos. Starting validation...',
+          );
+          _validateAllClassifications();
+        } else {
+          developer.log(
+            '✅ No YOLO-classified photos found. Marking validation as complete.',
+          );
+          setState(() {
+            _validationComplete = true;
+          });
+        }
+      } else {
+        developer.log(
+          '✅ Validation already complete or in progress. Nothing to do.',
+        );
+      }
       return;
     }
 
@@ -507,20 +670,32 @@ class GalleryScreenState extends State<GalleryScreen>
       _scanProcessed = 0;
       _scanProgress = 0.0;
     });
-
-    // Update unscanned count asynchronously without blocking
-    _updateUnscannedCount();
+    // Initialize scanned count notifier with current count
+    _scannedCountNotifier.value = photoTags.length;
+    // Start progress refresh timer (updates UI every 5 seconds)
+    _startProgressRefreshTimer();
 
     await _scanImages(toScan);
 
-    // Update unscanned count after scanning completes
-    await _updateUnscannedCount();
+    // Stop progress refresh timer
+    _progressRefreshTimer?.cancel();
+    _progressRefreshTimer = null;
 
     setState(() {
       _scanning = false;
       _scanProgress = 0.0;
       _scanTotal = 0;
     });
+
+    // Cancel dot animation if validation is also complete
+    if (!_validating) {
+      _dotAnimationTimer?.cancel();
+      _dotAnimationTimer = null;
+      // Show combined completion message if validation is already done
+      if (_validationComplete) {
+        _showGalleryReadyMessage();
+      }
+    }
   }
 
   // Manual scan helper restored: scans missing images by default,
@@ -576,18 +751,20 @@ class GalleryScreenState extends State<GalleryScreen>
       _scanProcessed = 0;
       _scanProgress = 0.0;
     });
-
-    // Update unscanned count asynchronously without blocking
-    _updateUnscannedCount();
+    // Initialize scanned count notifier with current count
+    _scannedCountNotifier.value = photoTags.length;
+    // Start progress refresh timer (updates UI every 5 seconds)
+    _startProgressRefreshTimer();
 
     await _scanImages(toScan);
+
+    // Stop progress refresh timer
+    _progressRefreshTimer?.cancel();
+    _progressRefreshTimer = null;
 
     // Reload all tags from storage to ensure UI reflects persisted data
     developer.log('🔄 Reloading tags from storage after scan completion');
     await _loadTags();
-
-    // Update unscanned count after scanning completes
-    await _updateUnscannedCount();
 
     setState(() {
       _scanning = false;
@@ -609,9 +786,12 @@ class GalleryScreenState extends State<GalleryScreen>
     // Show loading indicator immediately
     setState(() {
       _validating = true;
+      _validationComplete = false;
       _validationTotal = 0;
       _validationProcessed = 0;
     });
+
+    developer.log('🔍 VALIDATION STARTED - _validating set to true');
 
     developer.log('📡 Checking server connectivity...');
     // Check server connectivity first
@@ -638,6 +818,9 @@ class GalleryScreenState extends State<GalleryScreen>
 
     if (localUrls.isEmpty) {
       developer.log('⚠️ No local images found');
+      setState(() {
+        _validating = false;
+      });
       return;
     }
 
@@ -701,7 +884,14 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log('⚠️ No YOLO-classified images found');
       setState(() {
         _validating = false;
+        _validationComplete =
+            true; // Mark as complete since nothing to validate
       });
+      // Cancel dot animation if scanning is also complete
+      if (!_scanning) {
+        _dotAnimationTimer?.cancel();
+        _dotAnimationTimer = null;
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -714,39 +904,10 @@ class GalleryScreenState extends State<GalleryScreen>
       return;
     }
 
-    developer.log('💬 Showing confirmation dialog...');
-    // Show confirmation dialog with count
-    if (!mounted) return;
-    final confirm = await showDialog<bool>(
-      // ignore: use_build_context_synchronously
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Validate Classifications'),
-        content: Text(
-          'Re-check ${imagesToValidate.length} YOLO-classified images with CLIP?\n\n'
-          'This will verify YOLO detections for people/animals/food and may improve accuracy.\n\n'
-          'Only validates photos that YOLO classified. Unknown and CLIP-only photos (scenery/document) will be skipped.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Validate'),
-          ),
-        ],
-      ),
+    // Auto-start validation - no confirmation needed
+    developer.log(
+      '🚀 Auto-starting background validation for ${imagesToValidate.length} photos',
     );
-
-    if (confirm != true) {
-      developer.log('❌ User cancelled validation');
-      setState(() {
-        _validating = false;
-      });
-      return;
-    }
 
     developer.log(
       '🔍 Starting validation for ${imagesToValidate.length} YOLO-classified images',
@@ -765,6 +926,12 @@ class GalleryScreenState extends State<GalleryScreen>
 
     // Track YOLO-classified images for background validation
     final yoloClassifiedImages = <Map<String, dynamic>>[]; // {file, url, tags}
+
+    // Enable streaming validation: start validation as images are scanned
+    // This allows scan and validation to run in parallel without overwhelming the phone
+    const bool enableStreamingValidation = true;
+    const int validationStartThreshold =
+        20; // Start validation after 20 images scanned
 
     // Pipeline approach: process multiple batches concurrently for better throughput
     // Use Completer to properly track batch completion
@@ -831,6 +998,16 @@ class GalleryScreenState extends State<GalleryScreen>
           )
           .then((_) {
             completer.complete();
+
+            // Trigger streaming validation if enabled and threshold reached
+            if (enableStreamingValidation &&
+                !_validating &&
+                yoloClassifiedImages.length >= validationStartThreshold) {
+              developer.log(
+                '🔄 Streaming validation: Starting validation with ${yoloClassifiedImages.length} images (threshold: $validationStartThreshold)',
+              );
+              _startStreamingValidation(yoloClassifiedImages);
+            }
           })
           .catchError((e) {
             developer.log('Batch error: $e');
@@ -844,8 +1021,14 @@ class GalleryScreenState extends State<GalleryScreen>
     await Future.wait(activeBatches.map((c) => c.future));
 
     // After all batches complete, run background validation if we have YOLO-classified images
-    if (yoloClassifiedImages.isNotEmpty && mounted) {
+    // Note: With streaming validation enabled, validation may already be running
+    if (yoloClassifiedImages.isNotEmpty && mounted && !_validating) {
+      developer.log(
+        '🔍 Starting validation after scan complete (${yoloClassifiedImages.length} images)',
+      );
       _runBackgroundValidation(yoloClassifiedImages);
+    } else if (_validating) {
+      developer.log('✅ Validation already running in parallel - continuing...');
     }
   }
 
@@ -933,6 +1116,13 @@ class GalleryScreenState extends State<GalleryScreen>
         return;
       }
 
+      // Check for pause before uploading
+      while (_scanPaused && _scanning) {
+        developer.log('⏸️  Batch paused before upload...');
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (!mounted || !_scanning) return;
+      }
+
       final prepEndTime = DateTime.now();
       final prepDuration = prepEndTime
           .difference(batchStartTime)
@@ -971,6 +1161,13 @@ class GalleryScreenState extends State<GalleryScreen>
             final results = body['results'] as List;
             final batchTagsToSave = <String, List<String>>{};
 
+            // Check for pause before processing results
+            while (_scanPaused && _scanning) {
+              developer.log('⏸️  Batch paused before processing results...');
+              await Future.delayed(const Duration(milliseconds: 200));
+              if (!mounted || !_scanning) return;
+            }
+
             final processingStartTime = DateTime.now();
             for (var i = 0; i < results.length && i < batchUrls.length; i++) {
               final result = results[i];
@@ -996,6 +1193,8 @@ class GalleryScreenState extends State<GalleryScreen>
               photoTags[basename] = tags;
               photoAllDetections[basename] = allDetections;
               batchTagsToSave[photoID] = tags;
+              // Update scanned count notifier for live UI updates
+              _scannedCountNotifier.value = photoTags.length;
 
               if (tags.isNotEmpty) {
                 developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
@@ -1024,94 +1223,17 @@ class GalleryScreenState extends State<GalleryScreen>
               '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
             );
           }
-
-          // Decrement unscanned count by the number of successfully processed photos
-          if (mounted && _currentUnscannedCount > 0) {
-            final oldCount = _currentUnscannedCount;
-            final newCount = (_currentUnscannedCount - batchUrls.length)
-                .clamp(0, _currentUnscannedCount)
-                .toInt();
-            developer.log(
-              '🔄 Updating unscanned count: $oldCount -> $newCount (processed ${batchUrls.length} photos)',
-            );
-            setState(() {
-              _currentUnscannedCount = newCount;
-            });
-          }
         } catch (e) {
           developer.log('Failed parsing batch response: $e');
-          // Mark all as scanned with empty tags
-          final batchTagsToSave = <String, List<String>>{};
-          for (final url in batchUrls) {
-            final photoID = PhotoId.canonicalId(url);
-            photoTags[p.basename(url)] = [];
-            batchTagsToSave[photoID] = [];
-          }
-          await TagStore.saveLocalTagsBatch(batchTagsToSave);
-
-          // Decrement unscanned count for this batch
-          if (mounted && _currentUnscannedCount > 0) {
-            final oldCount = _currentUnscannedCount;
-            final newCount = (_currentUnscannedCount - batchUrls.length)
-                .clamp(0, _currentUnscannedCount)
-                .toInt();
-            developer.log(
-              '🔄 Updating unscanned count (error path): $oldCount -> $newCount',
-            );
-            setState(() {
-              _currentUnscannedCount = newCount;
-            });
-          }
+          // Don't save empty tags on failure - leave photos unscanned for retry
         }
       } else {
         developer.log('Batch scan failed: status=${res.statusCode}');
-        // Mark all as scanned with empty tags on failure
-        final batchTagsToSave = <String, List<String>>{};
-        for (final url in batchUrls) {
-          final photoID = PhotoId.canonicalId(url);
-          photoTags[p.basename(url)] = [];
-          batchTagsToSave[photoID] = [];
-        }
-        await TagStore.saveLocalTagsBatch(batchTagsToSave);
-
-        // Update unscanned count for failed batch
-        if (mounted && _currentUnscannedCount > 0) {
-          final oldCount = _currentUnscannedCount;
-          final newCount = (_currentUnscannedCount - batchUrls.length)
-              .clamp(0, _currentUnscannedCount)
-              .toInt();
-          developer.log(
-            '🔄 Updating unscanned count (failure): $oldCount -> $newCount',
-          );
-          setState(() {
-            _currentUnscannedCount = newCount;
-          });
-        }
+        // Don't save empty tags on failure - leave photos unscanned for retry
       }
     } catch (e) {
       developer.log('Batch scan error: $e');
-      // Mark all as scanned with empty tags on exception
-      final batchTagsToSave = <String, List<String>>{};
-      for (final url in batchUrls) {
-        final photoID = PhotoId.canonicalId(url);
-        photoTags[p.basename(url)] = [];
-        batchTagsToSave[photoID] = [];
-      }
-      await TagStore.saveLocalTagsBatch(batchTagsToSave);
-
-      // Update unscanned count for exception case
-      if (mounted && _currentUnscannedCount > 0) {
-        final oldCount = _currentUnscannedCount;
-        final newCount = (_currentUnscannedCount - batchUrls.length)
-            .clamp(0, _currentUnscannedCount)
-            .toInt();
-        developer.log(
-          '🔄 Updating unscanned count (exception): $oldCount -> $newCount',
-        );
-        setState(() {
-          _currentUnscannedCount = newCount;
-        });
-      }
+      // Don't save empty tags on error - leave photos unscanned for retry
     }
 
     // Calculate batch timing
@@ -1136,14 +1258,245 @@ class GalleryScreenState extends State<GalleryScreen>
             ? 0.0
             : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
         _scanProgressNotifier.value = _scanProgress;
-        developer.log(
-          '📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal (unscanned count: $_currentUnscannedCount)',
-        );
+        developer.log('📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal');
         _avgBatchTimeMs = batchDuration;
         _imagesPerSecond = elapsedSeconds > 0
             ? _scanProcessed / elapsedSeconds.toDouble()
             : 0;
       });
+    }
+  }
+
+  /// Start streaming validation - validates images as they're scanned (parallel processing)
+  /// This allows scan and validation to overlap without overwhelming the device
+  void _startStreamingValidation(List<Map<String, dynamic>> imageList) {
+    if (_validating) {
+      developer.log('⚠️ Validation already running, skipping streaming start');
+      return;
+    }
+
+    developer.log(
+      '🚀 Starting streaming validation with ${imageList.length} images',
+    );
+
+    // Run validation asynchronously (don't await - let it run in parallel)
+    _runStreamingValidation(imageList);
+  }
+
+  /// Run streaming validation that processes images as they become available
+  /// Throttles validation to avoid overloading the device during concurrent scan+validation
+  Future<void> _runStreamingValidation(
+    List<Map<String, dynamic>> imageList,
+  ) async {
+    if (!mounted) return;
+
+    developer.log(
+      '🔍 Starting streaming CLIP validation for ${imageList.length} images',
+    );
+
+    setState(() {
+      _validating = true;
+      _validationComplete = false;
+      _validationCancelled = false;
+      _validationPaused = false;
+      _validationTotal = imageList.length;
+      _validationProcessed = 0;
+      _validationAgreements = 0;
+      _validationDisagreements = 0;
+      _validationOverrides = 0;
+      _validationChanges.clear();
+      _recentlyValidated.clear();
+    });
+
+    try {
+      // Smaller batch size for streaming to minimize memory usage
+      const validationBatchSize = 5;
+
+      // Add delays between batches to avoid overwhelming phone during concurrent scan
+      const delayBetweenBatches = Duration(milliseconds: 500);
+
+      for (
+        var batchStart = 0;
+        batchStart < imageList.length;
+        batchStart += validationBatchSize
+      ) {
+        if (!mounted || _validationCancelled) {
+          developer.log('🛑 Streaming validation cancelled');
+          return;
+        }
+
+        // Wait if paused
+        while (_validationPaused && !_validationCancelled) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (!mounted) return;
+        }
+
+        // Check if more images were added to the list (scanning still in progress)
+        // Update total count dynamically as scan continues
+        if (imageList.length > _validationTotal) {
+          setState(() {
+            _validationTotal = imageList.length;
+          });
+          developer.log(
+            '📈 Updated validation total to $_validationTotal (scan added more images)',
+          );
+        }
+
+        final batchEnd = (batchStart + validationBatchSize).clamp(
+          0,
+          imageList.length,
+        );
+        final batch = imageList.sublist(batchStart, batchEnd);
+
+        developer.log(
+          '🔍 Streaming validation batch ${(batchStart ~/ validationBatchSize) + 1}/${(imageList.length / validationBatchSize).ceil()} (${batch.length} images)',
+        );
+
+        // Process validation batch (same logic as regular validation)
+        await _processValidationBatch(batch);
+
+        // Add delay between batches to reduce CPU/network contention with scanning
+        if (batchStart + validationBatchSize < imageList.length) {
+          await Future.delayed(delayBetweenBatches);
+        }
+      }
+
+      // Validation complete
+      developer.log(
+        '✅ Streaming validation complete: ${_validationChanges.length} improvements applied',
+      );
+
+      if (mounted) {
+        setState(() {
+          _validating = false;
+          _validationComplete = true; // Mark validation as complete
+        });
+
+        // Cancel dot animation if scanning is also complete
+        if (!_scanning) {
+          _dotAnimationTimer?.cancel();
+          _dotAnimationTimer = null;
+          // Show combined completion message
+          _showGalleryReadyMessage();
+        }
+      }
+    } catch (e) {
+      developer.log('❌ Streaming validation error: $e');
+      if (mounted) {
+        setState(() {
+          _validating = false;
+        });
+        // Cancel dot animation if scanning is also complete
+        if (!_scanning) {
+          _dotAnimationTimer?.cancel();
+          _dotAnimationTimer = null;
+        }
+      }
+    }
+  }
+
+  /// Process a single validation batch (shared by regular and streaming validation)
+  Future<void> _processValidationBatch(List<Map<String, dynamic>> batch) async {
+    try {
+      final validationData = <Map<String, dynamic>>[];
+      final yoloTagsList = <List<String>>[];
+
+      for (final item in batch) {
+        final url = item['url'] as String;
+        final filename = url.startsWith('local:')
+            ? 'photo_${item['photoID']}.jpg'
+            : p.basename(url);
+
+        validationData.add({'file': item['file'], 'filename': filename});
+        yoloTagsList.add(item['tags'] as List<String>);
+      }
+
+      final res = await ApiService.validateYoloClassifications(
+        validationData,
+        yoloTagsList,
+      );
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final body = json.decode(res.body);
+
+        if (body is Map && body['validations'] is List) {
+          final validations = body['validations'] as List;
+
+          for (var i = 0; i < validations.length && i < batch.length; i++) {
+            final validation = validations[i];
+            final item = batch[i];
+
+            await _applyValidationResult(validation, item);
+          }
+        }
+      }
+
+      // Update progress
+      if (mounted) {
+        setState(() {
+          _validationProcessed += batch.length;
+        });
+      }
+    } catch (e) {
+      developer.log('❌ Validation batch error: $e');
+    }
+  }
+
+  /// Apply a single validation result (shared logic)
+  Future<void> _applyValidationResult(
+    Map<String, dynamic> validation,
+    Map<String, dynamic> item,
+  ) async {
+    final url = item['url'] as String;
+    final basename = p.basename(url);
+    final photoID = item['photoID'] as String;
+    final oldTags = item['tags'] as List<String>;
+
+    final clipTags = (validation['clip_tags'] as List).cast<String>();
+    final shouldOverride = validation['should_override'] == true;
+    final agreement = validation['agreement'] == true;
+    final overrideTags = validation['override_tags'] != null
+        ? (validation['override_tags'] as List).cast<String>()
+        : clipTags;
+    final reason = validation['reason'] as String? ?? '';
+
+    if (agreement) {
+      _validationAgreements++;
+      developer.log('✅ Agreement: $basename');
+    } else {
+      _validationDisagreements++;
+      developer.log(
+        '⚠️ Disagreement: $basename - ${oldTags.join(", ")} vs ${clipTags.join(", ")}',
+      );
+
+      if (shouldOverride) {
+        _validationOverrides++;
+
+        // Auto-apply the improvement
+        photoTags[basename] = overrideTags;
+        await TagStore.saveLocalTags(photoID, overrideTags);
+
+        // Track for animation
+        _recentlyValidated[photoID] = DateTime.now();
+
+        // Log the change
+        _validationChanges.add({
+          'url': url,
+          'basename': basename,
+          'photoID': photoID,
+          'oldTags': oldTags,
+          'newTags': overrideTags,
+          'clipTags': clipTags,
+          'reason': reason,
+        });
+
+        developer.log(
+          '🔄 Auto-applied override: $basename -> ${overrideTags.join(", ")} ($reason)',
+        );
+
+        // Update UI to show the change
+        if (mounted) setState(() {});
+      }
     }
   }
 
@@ -1159,6 +1512,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
     setState(() {
       _validating = true;
+      _validationComplete = false;
       _validationCancelled = false;
       _validationPaused = false;
       _validationTotal = imagesToValidate.length;
@@ -1167,7 +1521,7 @@ class GalleryScreenState extends State<GalleryScreen>
       _validationDisagreements = 0;
       _validationOverrides = 0;
       _validationChanges.clear(); // Clear previous changes
-      _validationSuggestions.clear(); // Clear previous suggestions
+      _recentlyValidated.clear(); // Clear previous animation timestamps
     });
 
     try {
@@ -1190,53 +1544,6 @@ class GalleryScreenState extends State<GalleryScreen>
           if (!mounted) return;
         }
 
-        // Check for new unscanned photos every 50 images (5 batches)
-        if (batchStart > 0 && batchStart % 50 == 0) {
-          developer.log(
-            '🔍 Checking for new unscanned photos during validation...',
-          );
-          await _updateUnscannedCount();
-
-          if (_currentUnscannedCount > 0) {
-            developer.log(
-              '📸 Found $_currentUnscannedCount new unscanned photos - pausing validation to scan them',
-            );
-
-            // Get list of unscanned photos
-            final localUrls = imageUrls
-                .where((u) => u.startsWith('local:') || u.startsWith('file:'))
-                .toList();
-            final toScan = <String>[];
-            for (final u in localUrls) {
-              final photoID = PhotoId.canonicalId(u);
-              final tags = await TagStore.loadLocalTags(photoID);
-              if (tags == null) toScan.add(u);
-            }
-
-            if (toScan.isNotEmpty) {
-              // Pause validation and scan new photos
-              setState(() {
-                _validationPaused = true;
-              });
-
-              developer.log(
-                '🚀 Scanning ${toScan.length} new photos before resuming validation',
-              );
-              await _scanImages(toScan);
-
-              // Resume validation
-              if (mounted) {
-                setState(() {
-                  _validationPaused = false;
-                });
-                developer.log(
-                  '▶️ Resuming validation after scanning new photos',
-                );
-              }
-            }
-          }
-        }
-
         final batchEnd = (batchStart + validationBatchSize).clamp(
           0,
           imagesToValidate.length,
@@ -1247,131 +1554,8 @@ class GalleryScreenState extends State<GalleryScreen>
           '🔍 Validating batch ${(batchStart ~/ validationBatchSize) + 1}/${(imagesToValidate.length / validationBatchSize).ceil()} (${batch.length} images)',
         );
 
-        // Call validation endpoint
-        try {
-          final validationData = <Map<String, dynamic>>[];
-          final yoloTagsList = <List<String>>[];
-
-          for (final item in batch) {
-            final url = item['url'] as String;
-            final filename = url.startsWith('local:')
-                ? 'photo_${item['photoID']}.jpg'
-                : p.basename(url);
-
-            validationData.add({
-              'file': item['file'], // Uint8List from asset.originBytes
-              'filename': filename,
-            });
-            yoloTagsList.add(item['tags'] as List<String>);
-          }
-
-          developer.log(
-            '📤 Sending validation request for batch of ${batch.length} images...',
-          );
-
-          final res = await ApiService.validateYoloClassifications(
-            validationData,
-            yoloTagsList,
-          );
-
-          developer.log(
-            '📥 Received validation response: status=${res.statusCode}',
-          );
-
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            final body = json.decode(res.body);
-
-            if (body is Map && body['validations'] is List) {
-              final validations = body['validations'] as List;
-              final summary = body['summary'] as Map?;
-
-              // Process validation results
-              for (var i = 0; i < validations.length && i < batch.length; i++) {
-                final validation = validations[i];
-                final item = batch[i];
-                final url = item['url'] as String;
-                final photoID = item['photoID'] as String;
-                final yoloTags = item['tags'] as List<String>;
-
-                final agreement = validation['agreement'] == true;
-                final shouldOverride = validation['should_override'] == true;
-                final clipTags =
-                    (validation['clip_tags'] as List?)?.cast<String>() ?? [];
-                final overrideTags =
-                    (validation['override_tags'] as List?)?.cast<String>() ??
-                    [];
-                final reason = validation['reason'] as String? ?? '';
-
-                // Update stats
-                if (mounted) {
-                  setState(() {
-                    _validationProcessed++;
-                    if (agreement) {
-                      _validationAgreements++;
-                    } else {
-                      _validationDisagreements++;
-                    }
-                    if (shouldOverride) {
-                      _validationOverrides++;
-                    }
-                  });
-                }
-
-                // Log validation results
-                if (agreement) {
-                  developer.log(
-                    '✅ Validation: ${p.basename(url)} - Agreement: ${yoloTags.join(", ")}',
-                  );
-                } else {
-                  developer.log(
-                    '⚠️ Validation: ${p.basename(url)} - Disagreement',
-                  );
-                  developer.log('   YOLO: ${yoloTags.join(", ")}');
-                  developer.log('   CLIP: ${clipTags.join(", ")}');
-                  developer.log('   Reason: $reason');
-
-                  if (shouldOverride && overrideTags.isNotEmpty) {
-                    developer.log(
-                      '   🔄 Override recommended: ${overrideTags.join(", ")}',
-                    );
-
-                    // Track this suggestion for user review (NOT auto-applied)
-                    // SAFETY: Never suggest empty tags
-                    _validationSuggestions.add({
-                      'url': url,
-                      'photoID': photoID,
-                      'oldTags': List<String>.from(yoloTags),
-                      'newTags': List<String>.from(overrideTags),
-                      'reason': reason,
-                      'clipTags': List<String>.from(clipTags),
-                      'basename': p.basename(url),
-                    });
-
-                    developer.log('   📋 Suggestion recorded for user review');
-                  } else if (shouldOverride && overrideTags.isEmpty) {
-                    developer.log(
-                      '   ⚠️ WARNING: Override suggested with EMPTY tags! Ignoring to prevent data loss.',
-                    );
-                  }
-                }
-              }
-
-              // Log batch summary
-              if (summary != null) {
-                developer.log(
-                  '📊 Validation batch summary: ${summary['agreements']} agreements, ${summary['disagreements']} disagreements, ${summary['overrides']} overrides',
-                );
-              }
-            }
-          } else {
-            developer.log(
-              '⚠️ Validation batch failed: status=${res.statusCode}, body=${res.body}',
-            );
-          }
-        } catch (e, stackTrace) {
-          developer.log('⚠️ Validation batch error: $e');
-          developer.log('Stack trace: $stackTrace');
-        }
+        // Use shared batch processing method
+        await _processValidationBatch(batch);
 
         // Small delay between validation batches
         await Future.delayed(const Duration(milliseconds: 500));
@@ -1381,35 +1565,21 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log(
         '✅ Background validation complete: $_validationAgreements agreements, $_validationDisagreements disagreements, $_validationOverrides overrides',
       );
-
-      // Show summary if significant improvements were made
-      if (mounted && _validationOverrides > 0) {
-        final improvementPercent =
-            (_validationOverrides / _validationTotal * 100).toStringAsFixed(1);
-        // ignore: use_build_context_synchronously
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Validation complete: $_validationOverrides images reclassified ($improvementPercent% improved)',
-            ),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'Refresh',
-              onPressed: () {
-                setState(() {}); // Refresh UI to show updated tags
-              },
-            ),
-          ),
-        );
-      }
     } catch (e) {
       developer.log('⚠️ Background validation error: $e');
     } finally {
       if (mounted) {
         setState(() {
           _validating = false;
+          _validationComplete = true; // Mark validation as complete
         });
+        // Cancel dot animation if scanning is also complete
+        if (!_scanning) {
+          _dotAnimationTimer?.cancel();
+          _dotAnimationTimer = null;
+          // Show combined completion message
+          _showGalleryReadyMessage();
+        }
       }
     }
   }
@@ -1436,6 +1606,72 @@ class GalleryScreenState extends State<GalleryScreen>
     } else {
       return Image.network(ApiService.resolveImageUrl(url), fit: fit);
     }
+  }
+
+  /// Show message when gallery is fully scanned and validated
+  void _showGalleryReadyMessage() {
+    if (!mounted) return;
+    final totalPhotos = imageUrls
+        .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+        .length;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '✅ Gallery ready: $totalPhotos photos scanned & verified',
+        ),
+        backgroundColor: Colors.blue.shade700,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// Build validation status popup content
+  Widget _buildValidationPopup() {
+    final totalPhotos = _cachedLocalPhotoCount;
+    final scannedPhotos = photoTags.length;
+    final scannedPercentage = totalPhotos > 0
+        ? (scannedPhotos / totalPhotos * 100).toStringAsFixed(0)
+        : '0';
+
+    // Check server status for display
+    final serverOnline = ApiService.baseUrl.isNotEmpty;
+
+    final validationStatus = _validationComplete
+        ? '✓ Validated'
+        : _validating
+        ? 'Validating...'
+        : _scanning
+        ? 'Scanning...'
+        : !serverOnline
+        ? '⚠ Server offline'
+        : 'Not validated';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _validationComplete
+            ? Colors.blue.shade700
+            : _scanning
+            ? Colors.orange.shade700
+            : Colors.grey.shade700,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Text(
+        '$scannedPhotos/$totalPhotos ($scannedPercentage%) • $validationStatus',
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
   }
 
   /// Show validation progress and changes dialog
@@ -1582,17 +1818,21 @@ class GalleryScreenState extends State<GalleryScreen>
                 ),
               ),
 
-              // Suggested changes list (during validation)
-              if (_validationSuggestions.isNotEmpty) ...[
+              // Applied changes list (for viewing history)
+              if (_validationChanges.isNotEmpty) ...[
                 const Divider(height: 1),
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
-                      const Icon(Icons.lightbulb_outline, size: 20),
+                      const Icon(
+                        Icons.check_circle,
+                        size: 20,
+                        color: Colors.green,
+                      ),
                       const SizedBox(width: 8),
                       Text(
-                        'Suggested Changes (${_validationSuggestions.length})',
+                        'Auto-Applied Changes (${_validationChanges.length})',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1603,10 +1843,10 @@ class GalleryScreenState extends State<GalleryScreen>
                 ),
                 Expanded(
                   child: ListView.builder(
-                    itemCount: _validationSuggestions.length,
+                    itemCount: _validationChanges.length,
                     itemBuilder: (context, index) {
-                      final suggestion = _validationSuggestions[index];
-                      return _buildChangeItem(suggestion);
+                      final change = _validationChanges[index];
+                      return _buildChangeItem(change);
                     },
                   ),
                 ),
@@ -1614,7 +1854,7 @@ class GalleryScreenState extends State<GalleryScreen>
                 const Padding(
                   padding: EdgeInsets.all(32),
                   child: Text(
-                    'No changes suggested',
+                    'No changes applied',
                     style: TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                 ),
@@ -1988,6 +2228,52 @@ class GalleryScreenState extends State<GalleryScreen>
     );
   }
 
+  /// Build 4-dot loading animation that lights up sequentially
+  /// Uses ValueListenableBuilder to avoid rebuilding the entire widget tree
+  Widget _buildLoadingDots() {
+    // Start timer if not running (timer updates ValueNotifier, not setState)
+    if (_dotAnimationTimer == null || !_dotAnimationTimer!.isActive) {
+      _dotIndexNotifier.value = 0;
+      _dotAnimationTimer?.cancel();
+      _dotAnimationTimer = Timer.periodic(const Duration(milliseconds: 300), (
+        timer,
+      ) {
+        if (mounted && (_scanning || _validating)) {
+          _dotIndexNotifier.value = (_dotIndexNotifier.value + 1) % 4;
+        } else {
+          timer.cancel();
+          _dotAnimationTimer = null;
+        }
+      });
+    }
+
+    return ValueListenableBuilder<int>(
+      valueListenable: _dotIndexNotifier,
+      builder: (context, currentIndex, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(4, (index) {
+            final isLit = index == currentIndex;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: isLit
+                      ? Colors.orange.shade400
+                      : Colors.grey.shade400.withValues(alpha: 0.3),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
   /// Get current RAM usage in MB
   Future<double> _getCurrentRamUsage() async {
     try {
@@ -2091,386 +2377,6 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Show dialog to review and approve/reject validation suggestions
-  void _showReviewChangesDialog() {
-    if (_validationSuggestions.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No changes to review')));
-      return;
-    }
-
-    // Track which suggestions are selected (all selected by default)
-    final selectedIndices = List<int>.generate(
-      _validationSuggestions.length,
-      (index) => index,
-    ).toSet();
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => Dialog(
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.85,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade700,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(4),
-                      topRight: Radius.circular(4),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.rate_review, color: Colors.white),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Review Suggested Changes',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${_validationSuggestions.length} changes suggested • ${selectedIndices.length} selected',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Quick actions
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      TextButton.icon(
-                        icon: const Icon(Icons.select_all, size: 16),
-                        label: const Text('Select All'),
-                        onPressed: () {
-                          setDialogState(() {
-                            selectedIndices.addAll(
-                              List<int>.generate(
-                                _validationSuggestions.length,
-                                (index) => index,
-                              ),
-                            );
-                          });
-                        },
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        icon: const Icon(Icons.deselect, size: 16),
-                        label: const Text('Deselect All'),
-                        onPressed: () {
-                          setDialogState(() {
-                            selectedIndices.clear();
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-
-                // Suggestions list
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _validationSuggestions.length,
-                    itemBuilder: (context, index) {
-                      final suggestion = _validationSuggestions[index];
-                      final isSelected = selectedIndices.contains(index);
-
-                      return CheckboxListTile(
-                        value: isSelected,
-                        onChanged: (selected) {
-                          setDialogState(() {
-                            if (selected == true) {
-                              selectedIndices.add(index);
-                            } else {
-                              selectedIndices.remove(index);
-                            }
-                          });
-                        },
-                        title: Row(
-                          children: [
-                            // Thumbnail (tappable to show details)
-                            GestureDetector(
-                              onTap: () => _showChangeDetails(suggestion),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(4),
-                                child: SizedBox(
-                                  width: 60,
-                                  height: 60,
-                                  child: _buildImageWidget(
-                                    suggestion['url'] as String,
-                                    BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            // Change info
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Old tags
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.label_off,
-                                        size: 14,
-                                        color: Colors.red,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          (suggestion['oldTags']
-                                                  as List<String>)
-                                              .join(', '),
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.red.shade700,
-                                            decoration:
-                                                TextDecoration.lineThrough,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  // New tags
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.label,
-                                        size: 14,
-                                        color: Colors.green,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          (suggestion['newTags']
-                                                  as List<String>)
-                                              .join(', '),
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.green.shade700,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  // Reason
-                                  Text(
-                                    suggestion['reason'] as String,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey.shade600,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // Action buttons
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.check_circle,
-                                    color: Colors.green.shade600,
-                                    size: 28,
-                                  ),
-                                  onPressed: () async {
-                                    Navigator.pop(context);
-                                    await _applySelectedChanges([index]);
-                                  },
-                                  tooltip: 'Approve',
-                                ),
-                                IconButton(
-                                  icon: Icon(
-                                    Icons.cancel,
-                                    color: Colors.red.shade600,
-                                    size: 28,
-                                  ),
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      _validationSuggestions.removeAt(index);
-                                      selectedIndices.remove(index);
-                                      // Adjust indices after removal
-                                      final adjustedIndices = <int>{};
-                                      for (var i in selectedIndices) {
-                                        if (i > index) {
-                                          adjustedIndices.add(i - 1);
-                                        } else if (i < index) {
-                                          adjustedIndices.add(i);
-                                        }
-                                      }
-                                      selectedIndices
-                                        ..clear()
-                                        ..addAll(adjustedIndices);
-                                    });
-                                    if (_validationSuggestions.isEmpty) {
-                                      Navigator.pop(context);
-                                    }
-                                  },
-                                  tooltip: 'Decline',
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                // Action buttons
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.close),
-                          label: const Text('Reject All'),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            setState(() {
-                              _validationSuggestions.clear();
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('All changes rejected'),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.check),
-                          label: Text(
-                            'Apply ${selectedIndices.length} Changes',
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green.shade600,
-                            foregroundColor: Colors.white,
-                          ),
-                          onPressed: selectedIndices.isEmpty
-                              ? null
-                              : () async {
-                                  Navigator.pop(context);
-                                  await _applySelectedChanges(
-                                    selectedIndices.toList(),
-                                  );
-                                },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Apply selected validation changes
-  Future<void> _applySelectedChanges(List<int> indices) async {
-    try {
-      int appliedCount = 0;
-
-      for (final index in indices) {
-        if (index >= _validationSuggestions.length) continue;
-
-        final suggestion = _validationSuggestions[index];
-        final basename = suggestion['basename'] as String;
-        final photoID = suggestion['photoID'] as String;
-        final newTags = suggestion['newTags'] as List<String>;
-
-        // Apply the change
-        photoTags[basename] = newTags;
-        await TagStore.saveLocalTags(photoID, newTags);
-
-        // Track as applied change
-        _validationChanges.add(suggestion);
-        appliedCount++;
-
-        developer.log('✅ Applied change: $basename -> ${newTags.join(", ")}');
-      }
-
-      setState(() {
-        // Remove applied suggestions (iterate backwards to avoid index issues)
-        final sortedIndices = indices.toList()..sort((a, b) => b.compareTo(a));
-        for (final index in sortedIndices) {
-          if (index < _validationSuggestions.length) {
-            _validationSuggestions.removeAt(index);
-          }
-        }
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Applied $appliedCount changes'),
-            backgroundColor: Colors.green.shade600,
-          ),
-        );
-      }
-    } catch (e) {
-      developer.log('Error applying changes: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error applying changes: $e'),
-            backgroundColor: Colors.red.shade600,
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _loadOrganizedImages() async {
     // Skip server for now - load directly from device
     developer.log('🔄 Loading photos directly from device...');
@@ -2489,7 +2395,9 @@ class GalleryScreenState extends State<GalleryScreen>
       // Accept limited permission (Android 14+) - don't show dialog every time
       if (!perm.isAuth && perm != PermissionState.limited) {
         developer.log('❌ Permission denied: ${perm.name}');
-        setState(() => imageUrls = []);
+        setState(() {
+          _setImageUrls([]);
+        });
         return;
       }
 
@@ -2515,11 +2423,15 @@ class GalleryScreenState extends State<GalleryScreen>
         try {
           final pics = await _discoverPicturesFromFs();
           if (pics.isNotEmpty) {
-            setState(() => imageUrls = pics);
+            setState(() {
+              _setImageUrls(pics);
+            });
             return;
           }
         } catch (_) {}
-        setState(() => imageUrls = []);
+        setState(() {
+          _setImageUrls([]);
+        });
         return;
       }
 
@@ -2541,11 +2453,15 @@ class GalleryScreenState extends State<GalleryScreen>
           final pics = await _discoverPicturesFromFs();
           developer.log('📂 Filesystem found ${pics.length} photos');
           if (pics.isNotEmpty) {
-            setState(() => imageUrls = pics);
+            setState(() {
+              _setImageUrls(pics);
+            });
             return;
           }
         } catch (_) {}
-        setState(() => imageUrls = []);
+        setState(() {
+          _setImageUrls([]);
+        });
         return;
       }
 
@@ -2581,14 +2497,18 @@ class GalleryScreenState extends State<GalleryScreen>
         urls.add('local:$id');
       }
       developer.log('✅ Loaded ${urls.length} photo URLs');
-      setState(() => imageUrls = urls);
+      setState(() {
+        _setImageUrls(urls);
+      });
 
       if (urls.isEmpty) {
         // fallback to filesystem scan if MediaStore returned no assets
         try {
           final pics = await _discoverPicturesFromFs();
           if (pics.isNotEmpty) {
-            setState(() => imageUrls = pics);
+            setState(() {
+              _setImageUrls(pics);
+            });
             return;
           }
         } catch (_) {}
@@ -2596,7 +2516,9 @@ class GalleryScreenState extends State<GalleryScreen>
     } catch (e, stack) {
       developer.log('❌ Error loading device photos: $e');
       developer.log('Stack trace: $stack');
-      setState(() => imageUrls = []);
+      setState(() {
+        _setImageUrls([]);
+      });
     }
   }
 
@@ -2630,8 +2552,11 @@ class GalleryScreenState extends State<GalleryScreen>
     if (asset == null) return null;
     try {
       final bytes = await asset.thumbnailDataWithSize(
-        const ThumbnailSize(768, 768),
-        quality: 80,
+        const ThumbnailSize(
+          256,
+          256,
+        ), // Reduced from 768 for better performance
+        quality: 75,
       );
       if (bytes != null) _thumbCache[id] = bytes;
       return bytes;
@@ -2641,8 +2566,94 @@ class GalleryScreenState extends State<GalleryScreen>
     }
   }
 
+  /// Get cached thumbnail future to prevent recreating on every rebuild
+  Future<Uint8List?> _getCachedThumbFuture(String id) {
+    return _thumbFutureCache.putIfAbsent(id, () => _getThumbForAsset(id));
+  }
+
+  /// Update cached filtered list when inputs change
+  void _updateCachedFilteredList() {
+    // Check if we need to recompute
+    if (_lastSearchQuery == searchQuery &&
+        _lastImageUrlsLength == imageUrls.length &&
+        _lastPhotoTagsLength == photoTags.length &&
+        _sortNewestFirstCached == _sortNewestFirst &&
+        _cachedFilteredUrls.isNotEmpty) {
+      return; // No changes, use cached version
+    }
+
+    // Recompute filtered list
+    _cachedFilteredUrls = imageUrls.where((u) {
+      final key = p.basename(u);
+      final tags = photoTags[key] ?? [];
+      final allDetections = photoAllDetections[key] ?? [];
+      if (searchQuery.isEmpty) return true;
+
+      if (searchQuery.trim().toLowerCase() == 'none') {
+        return tags.isEmpty;
+      }
+
+      final searchTerms = searchQuery
+          .split(' ')
+          .where((term) => term.isNotEmpty)
+          .map((term) => term.toLowerCase())
+          .toList();
+
+      return searchTerms.any(
+        (searchTerm) =>
+            tags.any((t) => t.toLowerCase().contains(searchTerm)) ||
+            allDetections.any((d) => d.toLowerCase().contains(searchTerm)),
+      );
+    }).toList();
+
+    // Sort the filtered list
+    _cachedFilteredUrls.sort((a, b) {
+      if (a.startsWith('local:') && b.startsWith('local:')) {
+        final aId = a.substring('local:'.length);
+        final bId = b.substring('local:'.length);
+        final aAsset = _localAssets[aId];
+        final bAsset = _localAssets[bId];
+        if (aAsset != null && bAsset != null) {
+          final aDate = aAsset.createDateTime;
+          final bDate = bAsset.createDateTime;
+          return _sortNewestFirst
+              ? bDate.compareTo(aDate)
+              : aDate.compareTo(bDate);
+        }
+      }
+      return 0;
+    });
+
+    // Update cache keys
+    _lastSearchQuery = searchQuery;
+    _lastImageUrlsLength = imageUrls.length;
+    _lastPhotoTagsLength = photoTags.length;
+    _sortNewestFirstCached = _sortNewestFirst;
+  }
+
+  /// Update cached local photo count
+  void _updateCachedLocalPhotoCount() {
+    _cachedLocalPhotoCount = imageUrls
+        .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+        .length;
+  }
+
+  /// Helper to set imageUrls and update related caches
+  void _setImageUrls(List<String> urls) {
+    imageUrls = urls;
+    _updateCachedLocalPhotoCount();
+    // Invalidate filtered cache so it rebuilds on next access
+    _lastImageUrlsLength = -1;
+  }
+
   Future<void> _loadTags() async {
+    developer.log('📂 _loadTags called');
     // Batch load all tags at once for better performance
+    final allPhotoIDs = imageUrls
+        .map((url) => PhotoId.canonicalId(url))
+        .toList();
+    developer.log('📂 Total photos: ${allPhotoIDs.length}');
+
     final photoIDs = imageUrls
         .where((url) {
           final key = p.basename(url);
@@ -2653,19 +2664,28 @@ class GalleryScreenState extends State<GalleryScreen>
         .map((url) => PhotoId.canonicalId(url))
         .toList();
 
-    if (photoIDs.isEmpty) return;
+    developer.log('📂 Photos needing tag load: ${photoIDs.length}');
+    if (photoIDs.isEmpty) {
+      developer.log('📂 No photos need tag loading, returning');
+      return;
+    }
 
     // Load all tags in a single batch operation
     final tagsMap = await TagStore.loadAllTagsMap(photoIDs);
+    developer.log('📂 Loaded ${tagsMap.length} tags from storage');
 
     // Map back to basename keys
+    int loaded = 0;
     for (final url in imageUrls) {
       final key = p.basename(url);
       final photoID = PhotoId.canonicalId(url);
       if (tagsMap.containsKey(photoID)) {
         photoTags[key] = tagsMap[photoID]!;
+        loaded++;
       }
     }
+    developer.log('📂 Mapped $loaded tags to photoTags map');
+    developer.log('📂 photoTags now has ${photoTags.length} entries');
   }
 
   Future<void> _createAlbumFromSelection() async {
@@ -2830,117 +2850,6 @@ class GalleryScreenState extends State<GalleryScreen>
     );
   }
 
-  Future<void> _showUnscannedModal() async {
-    final prefs = await SharedPreferences.getInstance();
-    final unscanned = imageUrls
-        .where(
-          (u) =>
-              (u.startsWith('local:') || u.startsWith('file:')) &&
-              !prefs.containsKey(p.basename(u)),
-        )
-        .toList();
-    if (unscanned.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No unscanned images')));
-      return;
-    }
-
-    if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(ctx).size.height * 0.75,
-            child: GridView.builder(
-              padding: const EdgeInsets.all(12),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: 1.0,
-              ),
-              itemCount: unscanned.length,
-              itemBuilder: (c, idx) {
-                final url = unscanned[idx];
-                final key = p.basename(url);
-                return GestureDetector(
-                  onTap: () async {
-                    Navigator.pop(c);
-                    if (url.startsWith('local:')) {
-                      final id = url.substring('local:'.length);
-                      final asset = _localAssets[id];
-                      if (asset != null) {
-                        final file = await asset.file;
-                        if (file != null && mounted) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => PhotoViewer(
-                                filePath: file.path,
-                                heroTag: key,
-                              ),
-                            ),
-                          );
-                        }
-                      }
-                    } else if (url.startsWith('file:')) {
-                      final path = url.substring('file:'.length);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PhotoViewer(filePath: path, heroTag: key),
-                        ),
-                      );
-                    } else {
-                      final resolved = ApiService.resolveImageUrl(url);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PhotoViewer(networkUrl: resolved, heroTag: key),
-                        ),
-                      );
-                    }
-                  },
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: url.startsWith('local:')
-                        ? FutureBuilder<Uint8List?>(
-                            future: _getThumbForAsset(url.substring(6)),
-                            builder: (ctx, snap) {
-                              if (snap.hasData && snap.data != null) {
-                                return Image.memory(
-                                  snap.data!,
-                                  fit: BoxFit.cover,
-                                );
-                              }
-                              return Container(color: Colors.black26);
-                            },
-                          )
-                        : (url.startsWith('file:')
-                              ? Image.file(
-                                  File(url.substring('file:'.length)),
-                                  fit: BoxFit.cover,
-                                )
-                              : Image.network(
-                                  ApiService.resolveImageUrl(url),
-                                  fit: BoxFit.cover,
-                                )),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _createAlbumWithTag(String tag) async {
     final tagged = imageUrls
         .where((u) => (photoTags[p.basename(u)] ?? []).contains(tag))
@@ -3088,7 +2997,12 @@ class GalleryScreenState extends State<GalleryScreen>
 
   @override
   void dispose() {
+    _dotAnimationTimer?.cancel();
+    _autoScanRetryTimer?.cancel();
+    _progressRefreshTimer?.cancel();
+    _dotIndexNotifier.dispose();
     _scanProgressNotifier.dispose();
+    _scannedCountNotifier.dispose();
     _scrollController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -3178,6 +3092,7 @@ class GalleryScreenState extends State<GalleryScreen>
                     child: SizedBox(
                       height: 100,
                       child: Stack(
+                        clipBehavior: Clip.none,
                         alignment: Alignment.centerLeft,
                         children: [
                           // Three dots menu on the left at credits height
@@ -3199,7 +3114,138 @@ class GalleryScreenState extends State<GalleryScreen>
                               constraints: const BoxConstraints(),
                             ),
                           ),
-                          // Tag toggle button
+                          // Validation badge - next to tag toggle
+                          // Only show blue badge when BOTH scanning and validation are complete
+                          if (_validationComplete && !_validating && !_scanning)
+                            Positioned(
+                              right: 173,
+                              top: 2,
+                              child: GestureDetector(
+                                onTap: () => _showBadgeTooltip(
+                                  context,
+                                  '✓ All ${photoTags.length} photos scanned',
+                                  Colors.blue.shade700,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade600,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.2,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: const Icon(
+                                    Icons.verified,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // Show grey/orange badge when scanning or validation is in progress
+                          if (!_validationComplete || _scanning || _validating)
+                            Positioned(
+                              right: 173,
+                              top: 2,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      final pct = _cachedLocalPhotoCount > 0
+                                          ? (photoTags.length /
+                                                    _cachedLocalPhotoCount *
+                                                    100)
+                                                .toStringAsFixed(0)
+                                          : '0';
+                                      final status = _scanning
+                                          ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
+                                          : _validating
+                                          ? 'Validating...'
+                                          : 'Waiting for server';
+                                      _showBadgeTooltip(
+                                        context,
+                                        status,
+                                        _scanning
+                                            ? Colors.orange.shade700
+                                            : Colors.grey.shade700,
+                                      );
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: _scanning
+                                            ? Colors.orange.shade100.withValues(
+                                                alpha: 0.3,
+                                              )
+                                            : Colors.grey.shade400.withValues(
+                                                alpha: 0.3,
+                                              ),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: _scanning
+                                              ? Colors.orange.shade600
+                                              : Colors.grey.shade600,
+                                          width: 2,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.1,
+                                            ),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Icon(
+                                        Icons.verified_outlined,
+                                        color: _scanning
+                                            ? Colors.orange.shade600
+                                            : Colors.grey.shade600,
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_scanning || _validating)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: _buildLoadingDots(),
+                                    ),
+                                  // Show scan progress percentage during scanning
+                                  if (_scanning && _scanTotal > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: ValueListenableBuilder<int>(
+                                        valueListenable: _scannedCountNotifier,
+                                        builder: (context, scannedCount, _) {
+                                          final pct = _cachedLocalPhotoCount > 0
+                                              ? (scannedCount /
+                                                        _cachedLocalPhotoCount *
+                                                        100)
+                                                    .toStringAsFixed(0)
+                                              : '0';
+                                          return Text(
+                                            '$pct%',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              color: Colors.orange.shade700,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                           Positioned(
                             right: 120,
                             top: -3,
@@ -3286,240 +3332,6 @@ class GalleryScreenState extends State<GalleryScreen>
                               ),
                             ),
                           ),
-                          // Minimized scanning indicator (next to menu)
-                          if (_scanning && _scanProgressMinimized)
-                            Positioned(
-                              left: 35,
-                              top: 0,
-                              child: GestureDetector(
-                                onTap: () => setState(
-                                  () => _scanProgressMinimized = false,
-                                ),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.grey.shade900
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(20),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SizedBox(
-                                        width: 40,
-                                        height: 40,
-                                        child: Stack(
-                                          alignment: Alignment.center,
-                                          children: [
-                                            if (!_scanPaused)
-                                              SizedBox(
-                                                width: 40,
-                                                height: 40,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2.5,
-                                                  valueColor:
-                                                      AlwaysStoppedAnimation<
-                                                        Color
-                                                      >(
-                                                        Colors
-                                                            .lightBlue
-                                                            .shade300,
-                                                      ),
-                                                ),
-                                              ),
-                                            Text(
-                                              '${(_scanProgress * 100).round()}%',
-                                              style: TextStyle(
-                                                color:
-                                                    Theme.of(
-                                                          context,
-                                                        ).brightness ==
-                                                        Brightness.dark
-                                                    ? Colors.white
-                                                    : Colors.black87,
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      // Pause/Play button
-                                      InkWell(
-                                        onTap: () => setState(
-                                          () => _scanPaused = !_scanPaused,
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(4),
-                                          child: Icon(
-                                            _scanPaused
-                                                ? Icons.play_arrow
-                                                : Icons.pause,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 22,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      // Stop button
-                                      InkWell(
-                                        onTap: () => setState(() {
-                                          _scanning = false;
-                                          _scanPaused = false;
-                                          _scanProgressMinimized = false;
-                                          _scanTotal = 0;
-                                          _scanProcessed = 0;
-                                          _scanProgress = 0.0;
-                                        }),
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(4),
-                                          child: Icon(
-                                            Icons.stop,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 22,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                          // Scan start button (when not scanning)
-                          if (!_scanning)
-                            Positioned(
-                              left: 35,
-                              top: 0,
-                              child: InkWell(
-                                onTap: () => _manualScan(),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 14,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.grey.shade900
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(22),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.play_arrow,
-                                        color: Colors.lightBlue.shade300,
-                                        size: 22,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Scan',
-                                        style: TextStyle(
-                                          color:
-                                              Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? Colors.white
-                                              : Colors.black87,
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                          // Unscanned button on the right (if any unscanned)
-                          if (_currentUnscannedCount > 0)
-                            Positioned(
-                              right: 5,
-                              top: 50,
-                              child: GestureDetector(
-                                onTap: _showUnscannedModal,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Colors.orange.shade400,
-                                        Colors.orange.shade600,
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    borderRadius: BorderRadius.circular(20),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.pending_outlined,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Unscanned $_currentUnscannedCount',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -3757,63 +3569,9 @@ class GalleryScreenState extends State<GalleryScreen>
                           },
                           child: Builder(
                             builder: (context) {
-                              var filtered = imageUrls.where((u) {
-                                final key = p.basename(u);
-                                final tags = photoTags[key] ?? [];
-                                final allDetections =
-                                    photoAllDetections[key] ?? [];
-                                if (searchQuery.isEmpty) return true;
-
-                                // Special case: "None" searches for untagged photos
-                                if (searchQuery.trim().toLowerCase() ==
-                                    'none') {
-                                  return tags.isEmpty;
-                                }
-
-                                // Split search query into individual search terms
-                                final searchTerms = searchQuery
-                                    .split(' ')
-                                    .where((term) => term.isNotEmpty)
-                                    .map((term) => term.toLowerCase())
-                                    .toList();
-
-                                // Check if any tag or detection contains search terms
-                                return searchTerms.any(
-                                  (searchTerm) =>
-                                      tags.any(
-                                        (t) => t.toLowerCase().contains(
-                                          searchTerm,
-                                        ),
-                                      ) ||
-                                      allDetections.any(
-                                        (d) => d.toLowerCase().contains(
-                                          searchTerm,
-                                        ),
-                                      ),
-                                );
-                              }).toList();
-
-                              // Apply sorting based on creation date
-                              filtered.sort((a, b) {
-                                // For local: assets, get creation date from AssetEntity
-                                if (a.startsWith('local:') &&
-                                    b.startsWith('local:')) {
-                                  final aId = a.substring('local:'.length);
-                                  final bId = b.substring('local:'.length);
-                                  final aAsset = _localAssets[aId];
-                                  final bAsset = _localAssets[bId];
-                                  if (aAsset != null && bAsset != null) {
-                                    final aDate = aAsset.createDateTime;
-                                    final bDate = bAsset.createDateTime;
-                                    return _sortNewestFirst
-                                        ? bDate.compareTo(aDate) // newest first
-                                        : aDate.compareTo(
-                                            bDate,
-                                          ); // oldest first
-                                  }
-                                }
-                                return 0; // Keep original order if can't determine dates
-                              });
+                              // Use cached filtered list for performance
+                              _updateCachedFilteredList();
+                              final filtered = _cachedFilteredUrls;
 
                               // Adjust spacing based on column count - fewer columns = more spacing
                               final spacing = _crossAxisCount <= 2
@@ -4082,7 +3840,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                             Uint8List?
                                                           >(
                                                             future:
-                                                                _getThumbForAsset(
+                                                                _getCachedThumbFuture(
                                                                   url.substring(
                                                                     6,
                                                                   ),
@@ -4202,23 +3960,99 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       right: 8,
                                                       bottom: 8,
                                                       child: LayoutBuilder(
-                                                        builder:
-                                                            (
-                                                              context,
-                                                              constraints,
-                                                            ) {
-                                                              final chips =
-                                                                  _buildTagChipsForWidth(
-                                                                    visibleTags,
-                                                                    fullTags,
-                                                                    constraints
-                                                                        .maxWidth,
-                                                                  );
-                                                              return Wrap(
-                                                                spacing: 4,
-                                                                children: chips,
+                                                        builder: (context, constraints) {
+                                                          final chips =
+                                                              _buildTagChipsForWidth(
+                                                                visibleTags,
+                                                                fullTags,
+                                                                constraints
+                                                                    .maxWidth,
                                                               );
-                                                            },
+
+                                                          // Check if this photo was recently validated (within last 10 seconds)
+                                                          final photoID =
+                                                              PhotoId.canonicalId(
+                                                                url,
+                                                              );
+                                                          final recentlyValidated =
+                                                              _recentlyValidated
+                                                                  .containsKey(
+                                                                    photoID,
+                                                                  ) &&
+                                                              DateTime.now()
+                                                                      .difference(
+                                                                        _recentlyValidated[photoID]!,
+                                                                      )
+                                                                      .inSeconds <
+                                                                  10;
+
+                                                          return Row(
+                                                            mainAxisSize:
+                                                                MainAxisSize
+                                                                    .min,
+                                                            children: [
+                                                              Expanded(
+                                                                child: AnimatedOpacity(
+                                                                  opacity: 1.0,
+                                                                  duration:
+                                                                      const Duration(
+                                                                        milliseconds:
+                                                                            300,
+                                                                      ),
+                                                                  child: Wrap(
+                                                                    spacing: 4,
+                                                                    children:
+                                                                        chips,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                              if (recentlyValidated)
+                                                                Padding(
+                                                                  padding:
+                                                                      const EdgeInsets.only(
+                                                                        left: 4,
+                                                                      ),
+                                                                  child: Container(
+                                                                    padding:
+                                                                        const EdgeInsets.all(
+                                                                          4,
+                                                                        ),
+                                                                    decoration: BoxDecoration(
+                                                                      color: Colors
+                                                                          .green
+                                                                          .withValues(
+                                                                            alpha:
+                                                                                0.9,
+                                                                          ),
+                                                                      shape: BoxShape
+                                                                          .circle,
+                                                                      boxShadow: [
+                                                                        BoxShadow(
+                                                                          color: Colors.black.withValues(
+                                                                            alpha:
+                                                                                0.3,
+                                                                          ),
+                                                                          offset: const Offset(
+                                                                            0,
+                                                                            0.5,
+                                                                          ),
+                                                                          blurRadius:
+                                                                              2,
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                    child: const Icon(
+                                                                      Icons
+                                                                          .auto_awesome,
+                                                                      size: 14,
+                                                                      color: Colors
+                                                                          .white,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          );
+                                                        },
                                                       ),
                                                     ),
                                                 ],
@@ -4354,9 +4188,8 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     // Clear in-memory tags
                                                     photoTags.clear();
 
-                                                    // Update UI and unscanned counter
+                                                    // Update UI
                                                     if (mounted) {
-                                                      await _updateUnscannedCount();
                                                       setState(() {});
                                                     }
 
@@ -4422,256 +4255,6 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
                         ),
 
-                        // Floating glassmorphic scanning progress overlay
-                        if (_scanning && !_scanProgressMinimized)
-                          Positioned(
-                            left: 16,
-                            right: 100,
-                            bottom: 100,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.grey.shade900
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(16),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.1,
-                                        ),
-                                        blurRadius: 20,
-                                        offset: const Offset(0, 10),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(5),
-                                            decoration: BoxDecoration(
-                                              color: Colors.lightBlue.shade300,
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            child: Icon(
-                                              _scanPaused
-                                                  ? Icons.pause_circle_filled
-                                                  : Icons.sync,
-                                              color:
-                                                  Theme.of(
-                                                        context,
-                                                      ).brightness ==
-                                                      Brightness.dark
-                                                  ? Colors.grey.shade900
-                                                  : Colors.white,
-                                              size: 24,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Text(
-                                                      '${(_scanProgress * 100).round()}%',
-                                                      style: TextStyle(
-                                                        color:
-                                                            Theme.of(
-                                                                  context,
-                                                                ).brightness ==
-                                                                Brightness.dark
-                                                            ? Colors.white
-                                                            : Colors.black87,
-                                                        fontSize: 20,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Flexible(
-                                                      child: Text(
-                                                        'Scanning...',
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: TextStyle(
-                                                          color:
-                                                              (Theme.of(context)
-                                                                              .brightness ==
-                                                                          Brightness
-                                                                              .dark
-                                                                      ? Colors
-                                                                            .white
-                                                                      : Colors
-                                                                            .black87)
-                                                                  .withValues(
-                                                                    alpha: 0.9,
-                                                                  ),
-                                                          fontSize: 15,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  '$_scanProcessed / $_scanTotal tagged',
-                                                  style: TextStyle(
-                                                    color:
-                                                        (Theme.of(
-                                                                      context,
-                                                                    ).brightness ==
-                                                                    Brightness
-                                                                        .dark
-                                                                ? Colors.white
-                                                                : Colors
-                                                                      .black87)
-                                                            .withValues(
-                                                              alpha: 0.8,
-                                                            ),
-                                                    fontSize: 14,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Flexible(
-                                            flex: 0,
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                IconButton(
-                                                  icon: Icon(
-                                                    _showPerformanceMonitor
-                                                        ? Icons.speed
-                                                        : Icons.speed_outlined,
-                                                    color:
-                                                        Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                    size: 28,
-                                                  ),
-                                                  tooltip:
-                                                      'Performance Monitor',
-                                                  onPressed: () => setState(
-                                                    () => _showPerformanceMonitor =
-                                                        !_showPerformanceMonitor,
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  icon: Icon(
-                                                    _scanPaused
-                                                        ? Icons
-                                                              .play_circle_filled
-                                                        : Icons
-                                                              .pause_circle_filled,
-                                                    color:
-                                                        Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                    size: 32,
-                                                  ),
-                                                  tooltip: _scanPaused
-                                                      ? 'Resume scan'
-                                                      : 'Pause scan',
-                                                  onPressed: () => setState(
-                                                    () => _scanPaused =
-                                                        !_scanPaused,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 6),
-                                      ValueListenableBuilder<double>(
-                                        valueListenable: _scanProgressNotifier,
-                                        builder: (context, progress, child) {
-                                          return ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
-                                            child: LinearProgressIndicator(
-                                              value: _scanTotal > 0
-                                                  ? progress
-                                                  : null,
-                                              minHeight: 5,
-                                              backgroundColor:
-                                                  (Theme.of(
-                                                                context,
-                                                              ).brightness ==
-                                                              Brightness.dark
-                                                          ? Colors.white
-                                                          : Colors.black87)
-                                                      .withValues(alpha: 0.3),
-                                              valueColor:
-                                                  AlwaysStoppedAnimation<Color>(
-                                                    Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white
-                                                        : Colors.blue.shade700,
-                                                  ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                // Minimize button floating on left side
-                                Positioned(
-                                  top: -14,
-                                  left: -12,
-                                  child: Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      onTap: () => setState(
-                                        () => _scanProgressMinimized = true,
-                                      ),
-                                      borderRadius: BorderRadius.circular(5),
-                                      child: Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.lightBlue.shade300,
-                                          borderRadius: BorderRadius.circular(
-                                            5,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          Icons.remove,
-                                          color: Colors.white,
-                                          size: 16,
-                                          weight: 700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
                         // Scroll to top button
                         Positioned(
                           left: 0,
@@ -4728,152 +4311,6 @@ class GalleryScreenState extends State<GalleryScreen>
                             ),
                           ),
                         ),
-
-                        // Background validation indicator (compact, non-intrusive)
-                        if (_validating || _validationSuggestions.isNotEmpty)
-                          Positioned(
-                            left: 16,
-                            bottom: 40,
-                            child: GestureDetector(
-                              onTap: _validating
-                                  ? _showValidationProgressDialog
-                                  : _showReviewChangesDialog,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.deepPurple.shade700.withValues(
-                                    alpha: 0.9,
-                                  ),
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_validating) ...[
-                                      SizedBox(
-                                        width: 24,
-                                        height: 12,
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: List.generate(3, (index) {
-                                            return TweenAnimationBuilder<
-                                              double
-                                            >(
-                                              tween: Tween(
-                                                begin: 0.3,
-                                                end: 1.0,
-                                              ),
-                                              duration: const Duration(
-                                                milliseconds: 600,
-                                              ),
-                                              curve: Curves.easeInOut,
-                                              builder: (context, value, child) {
-                                                return Opacity(
-                                                  opacity: value,
-                                                  child: Container(
-                                                    width: 6,
-                                                    height: 6,
-                                                    decoration:
-                                                        const BoxDecoration(
-                                                          color: Colors.white,
-                                                          shape:
-                                                              BoxShape.circle,
-                                                        ),
-                                                  ),
-                                                );
-                                              },
-                                              onEnd: () {
-                                                if (mounted && _validating) {
-                                                  Future.delayed(
-                                                    Duration(
-                                                      milliseconds: index * 200,
-                                                    ),
-                                                    () {
-                                                      if (mounted) {
-                                                        setState(() {});
-                                                      }
-                                                    },
-                                                  );
-                                                }
-                                              },
-                                            );
-                                          }),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        _validationTotal == 0
-                                            ? 'Preparing...'
-                                            : 'Validating $_validationProcessed/$_validationTotal',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ] else ...[
-                                      const Icon(
-                                        Icons.rate_review,
-                                        color: Colors.white,
-                                        size: 14,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Review ${_validationSuggestions.length} Changes',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                    if (_validationSuggestions.isNotEmpty) ...[
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.orange.shade600,
-                                          borderRadius: BorderRadius.circular(
-                                            10,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          '${_validationSuggestions.length}',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(width: 4),
-                                    const Icon(
-                                      Icons.touch_app,
-                                      color: Colors.white70,
-                                      size: 12,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
 
                         // Performance Monitor Overlay
                         if (_scanning && _showPerformanceMonitor)
