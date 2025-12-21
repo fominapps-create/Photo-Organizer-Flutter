@@ -779,13 +779,10 @@ class GalleryScreenState extends State<GalleryScreen>
     _progressRefreshTimer?.cancel();
     _progressRefreshTimer = null;
 
-    // Sync tags from server to ensure local cache is up-to-date
-    developer.log('🔄 Syncing tags from server after scan completion');
-    await _syncTagsFromServer();
-
-    // Reload all tags from storage to ensure UI reflects persisted data
-    developer.log('🔄 Reloading tags from storage after scan completion');
-    await _loadTags();
+    // Note: Skip _syncTagsFromServer() and _loadTags() here - we already have
+    // all tags in memory from the batch processing loop. Re-downloading from
+    // server and re-reading from storage is redundant and slow.
+    developer.log('✅ Scan complete - tags already in memory, skipping redundant sync/load');
 
     setState(() {
       _scanning = false;
@@ -857,43 +854,58 @@ class GalleryScreenState extends State<GalleryScreen>
       '🔍 Checking which images were YOLO-classified or unknown...',
     );
 
+    // OPTIMIZATION: Load all tags in one batch instead of individual loads
+    final allPhotoIDs = localUrls.map((u) => PhotoId.canonicalId(u)).toList();
+    final allTagsMap = await TagStore.loadAllTagsMap(allPhotoIDs);
+    developer.log('📦 Loaded ${allTagsMap.length} tags in batch');
+
+    // Find photos with YOLO tags that need validation
+    final urlsToValidate = <String>[];
     for (final url in localUrls) {
       final photoID = PhotoId.canonicalId(url);
-      final tags = await TagStore.loadLocalTags(photoID);
+      final tags = allTagsMap[photoID];
 
-      if (tags == null) continue;
+      if (tags == null || tags.isEmpty) continue;
 
       // Include ONLY if image has YOLO-detectable categories (people/animals/food)
       // Don't validate unknown images - they already failed, nothing to validate
       // Don't validate scenery/document - those are CLIP-only, not YOLO
       final hasYoloTags = tags.any((tag) => yoloCategories.contains(tag));
-
       if (hasYoloTags) {
-        // Load the file bytes (photo_manager assets need to be read as bytes)
-        Uint8List? fileBytes;
-        if (url.startsWith('local:')) {
-          final id = url.substring('local:'.length);
-          final asset = _localAssets[id];
-          if (asset != null) {
-            // Get bytes directly from asset - more reliable than File
-            fileBytes = await asset.originBytes;
-          }
-        } else if (url.startsWith('file:')) {
-          final path = url.substring('file:'.length);
-          final file = File(path);
-          if (await file.exists()) {
-            fileBytes = await file.readAsBytes();
-          }
-        }
+        urlsToValidate.add(url);
+      }
+    }
 
-        if (fileBytes != null && fileBytes.isNotEmpty) {
-          imagesToValidate.add({
-            'file': fileBytes,
-            'url': url,
-            'tags': tags,
-            'photoID': photoID,
-          });
+    developer.log('📸 Found ${urlsToValidate.length} photos needing validation');
+
+    // Load file bytes only for photos that need validation
+    for (final url in urlsToValidate) {
+      final photoID = PhotoId.canonicalId(url);
+      final tags = allTagsMap[photoID]!;
+
+      Uint8List? fileBytes;
+      if (url.startsWith('local:')) {
+        final id = url.substring('local:'.length);
+        final asset = _localAssets[id];
+        if (asset != null) {
+          // Get bytes directly from asset - more reliable than File
+          fileBytes = await asset.originBytes;
         }
+      } else if (url.startsWith('file:')) {
+        final path = url.substring('file:'.length);
+        final file = File(path);
+        if (await file.exists()) {
+          fileBytes = await file.readAsBytes();
+        }
+      }
+
+      if (fileBytes != null && fileBytes.isNotEmpty) {
+        imagesToValidate.add({
+          'file': fileBytes,
+          'url': url,
+          'tags': tags,
+          'photoID': photoID,
+        });
       }
     }
 
@@ -1333,11 +1345,11 @@ class GalleryScreenState extends State<GalleryScreen>
     });
 
     try {
-      // Smaller batch size for streaming to minimize memory usage
-      const validationBatchSize = 5;
+      // Batch size for streaming validation (matches regular validation)
+      const validationBatchSize = 10;
 
-      // Add delays between batches to avoid overwhelming phone during concurrent scan
-      const delayBetweenBatches = Duration(milliseconds: 500);
+      // Short delay between batches to avoid overwhelming phone during concurrent scan
+      const delayBetweenBatches = Duration(milliseconds: 200);
 
       for (
         var batchStart = 0;
