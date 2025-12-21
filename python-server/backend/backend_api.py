@@ -369,7 +369,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
         if ids_list and idx < len(ids_list):
             photo_id = ids_list[idx]
             try:
-                _tags_db.set_tags(photo_id, tags)
+                _tags_db.set_tags(photo_id, tags, all_detections=all_detections)
             except Exception:
                 logging.exception('Failed to persist tags for photoID in batch')
 

@@ -73,14 +73,28 @@ def get_tags(photo_id: str) -> List[str]:
     return entry.get('tags', [])
 
 
-def set_tags(photo_id: str, tags: List[str], source: str = 'classifier') -> None:
+def set_tags(photo_id: str, tags: List[str], source: str = 'classifier', all_detections: List[str] = None) -> None:
     db = _load_tags_db()
-    db[photo_id] = {
+    entry = {
         'tags': tags,
         'last_updated': _now_iso(),
         'source': source,
     }
+    if all_detections:
+        entry['all_detections'] = all_detections
+    db[photo_id] = entry
     _save_tags_db(db)
+
+
+def get_all_detections(photo_id: str) -> List[str]:
+    """Get all detections for a photo (detailed objects for search)."""
+    db = _load_tags_db()
+    entry = db.get(photo_id)
+    if not entry:
+        return []
+    if isinstance(entry, dict):
+        return entry.get('all_detections', entry.get('tags', []))
+    return []
 
 
 def move_tags(old_photo_id: str, new_photo_id: str) -> None:

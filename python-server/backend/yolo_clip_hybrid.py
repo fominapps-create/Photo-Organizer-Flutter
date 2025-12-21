@@ -156,7 +156,12 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
         
         debug_info["max_confidence"] = max(debug_info["max_confidence"], confidence)
         
-        # Check if this class maps to a category
+        # Capture ALL detected objects for search (chairs, tables, etc.) with basic threshold
+        # This allows searching for any YOLO-detected object, not just our main categories
+        if confidence >= confidence_threshold and box_percent >= MIN_BOX_PERCENT:
+            all_objects.add(class_name.lower())
+        
+        # Check if this class maps to a main category (people, animals, food, document)
         if class_id in YOLO_TO_CATEGORY:
             category = YOLO_TO_CATEGORY[class_id]
             
@@ -174,7 +179,7 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
                 min_conf = PEOPLE_MIN_CONFIDENCE
             
             if confidence >= min_conf:
-                # Store all objects for search (regardless of size)
+                # Also add to all_objects if it passes stricter category threshold
                 all_objects.add(class_name.lower())
                 
                 # Filter out objects that are too small for main tags

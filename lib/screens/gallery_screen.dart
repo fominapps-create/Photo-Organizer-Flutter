@@ -1181,6 +1181,7 @@ class GalleryScreenState extends State<GalleryScreen>
           if (body is Map && body['results'] is List) {
             final results = body['results'] as List;
             final batchTagsToSave = <String, List<String>>{};
+            final batchDetectionsToSave = <String, List<String>>{};
 
             // Check for pause before processing results
             while (_scanPaused && _scanning) {
@@ -1214,6 +1215,7 @@ class GalleryScreenState extends State<GalleryScreen>
               photoTags[basename] = tags;
               photoAllDetections[basename] = allDetections;
               batchTagsToSave[photoID] = tags;
+              batchDetectionsToSave[photoID] = allDetections;
               // Update scanned count notifier for live UI updates
               _scannedCountNotifier.value = photoTags.length;
 
@@ -1239,6 +1241,7 @@ class GalleryScreenState extends State<GalleryScreen>
             // Save all tags in one batch operation (much faster)
             final saveStartTime = DateTime.now();
             await TagStore.saveLocalTagsBatch(batchTagsToSave);
+            await TagStore.saveLocalDetectionsBatch(batchDetectionsToSave);
             final saveEndTime = DateTime.now();
             developer.log(
               '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
@@ -2698,6 +2701,10 @@ class GalleryScreenState extends State<GalleryScreen>
     final tagsMap = await TagStore.loadAllTagsMap(photoIDs);
     developer.log('📂 Loaded ${tagsMap.length} tags from storage');
 
+    // Load all detections in a single batch operation
+    final detectionsMap = await TagStore.loadAllDetectionsMap(photoIDs);
+    developer.log('📂 Loaded ${detectionsMap.length} detections from storage');
+
     // Map back to basename keys
     int loaded = 0;
     for (final url in imageUrls) {
@@ -2706,6 +2713,9 @@ class GalleryScreenState extends State<GalleryScreen>
       if (tagsMap.containsKey(photoID)) {
         photoTags[key] = tagsMap[photoID]!;
         loaded++;
+      }
+      if (detectionsMap.containsKey(photoID)) {
+        photoAllDetections[key] = detectionsMap[photoID]!;
       }
     }
     developer.log('📂 Mapped $loaded tags to photoTags map');
@@ -2730,6 +2740,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
         // Convert to Map<String, List<String>> and save to local storage
         final tagsToSave = <String, List<String>>{};
+        final detectionsToSave = <String, List<String>>{};
         for (final entry in serverTags.entries) {
           final photoID = entry.key;
           final tagData = entry.value;
@@ -2737,6 +2748,14 @@ class GalleryScreenState extends State<GalleryScreen>
             final tags = (tagData['tags'] as List).cast<String>();
             if (tags.isNotEmpty) {
               tagsToSave[photoID] = tags;
+            }
+            // Also extract all_detections if available
+            if (tagData['all_detections'] is List) {
+              final detections = (tagData['all_detections'] as List)
+                  .cast<String>();
+              if (detections.isNotEmpty) {
+                detectionsToSave[photoID] = detections;
+              }
             }
           } else if (tagData is List) {
             final tags = tagData.cast<String>();
@@ -2746,19 +2765,28 @@ class GalleryScreenState extends State<GalleryScreen>
           }
         }
 
-        // Save all tags to local storage
+        // Save all tags and detections to local storage
         await TagStore.saveLocalTagsBatch(tagsToSave);
+        if (detectionsToSave.isNotEmpty) {
+          await TagStore.saveLocalDetectionsBatch(detectionsToSave);
+        }
         developer.log('💾 Saved ${tagsToSave.length} tags to local storage');
 
-        // Update in-memory photoTags
+        // Update in-memory photoTags and photoAllDetections
         for (final url in imageUrls) {
           final key = p.basename(url);
           final photoID = PhotoId.canonicalId(url);
           if (tagsToSave.containsKey(photoID)) {
             photoTags[key] = tagsToSave[photoID]!;
           }
+          if (detectionsToSave.containsKey(photoID)) {
+            photoAllDetections[key] = detectionsToSave[photoID]!;
+          }
         }
         developer.log('📂 Updated photoTags with ${photoTags.length} entries');
+        developer.log(
+          '📂 Updated photoAllDetections with ${photoAllDetections.length} entries',
+        );
 
         // Update scanned count
         _scannedCountNotifier.value = photoTags.length;
