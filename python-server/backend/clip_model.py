@@ -17,6 +17,7 @@ PHOTO_CATEGORIES = [
     "food",
     "scenery",
     "text document with visible writing",
+    "cartoon, illustration, drawing, mascot, artwork",  # Prevents false food detection on cartoon images
 ]
 
 
@@ -114,15 +115,31 @@ class CLIPPhotoClassifier:
                 "animals": 0.70,
                 "people": 0.80,
                 "scenery": 0.70,
+                "illustration": 0.60,  # Lower threshold for cartoon/mascot detection
             }
+            
+            # Check if this looks like an illustration/cartoon - if so, suppress food detection
+            # to avoid false positives (e.g., mascot with magnifying glass tagged as food)
+            illustration_score = next((score for tag, score in all_scores if tag == "illustration"), 0)
+            is_likely_illustration = illustration_score >= 0.40
             
             results = []
             for tag_name, prob in all_scores:
+                # Skip illustration - it's only used internally for food suppression
+                if tag_name == "illustration":
+                    continue
+                
                 required_threshold = category_thresholds.get(tag_name, confidence_threshold)
+                
+                # Suppress food detection for illustrations/cartoons
+                if tag_name == "food" and is_likely_illustration:
+                    logger.info(f"Suppressing food (score={prob:.2f}) - looks like illustration (score={illustration_score:.2f})")
+                    continue
+                    
                 if prob >= required_threshold:
                     results.append((tag_name, prob))
             
-            # If no categories matched, tag as 'unknown' and log why
+            # If no categories matched, tag as 'unknown'
             if not results:
                 logger.warning(f"No categories matched for {image_path}. Top scores: {all_scores[:3]}")
                 results.append(("unknown", 0.0))
@@ -181,10 +198,10 @@ class CLIPPhotoClassifier:
                 logits_per_image = outputs.logits_per_image
                 probs = logits_per_image.softmax(dim=1)
             
-            # Map category indices to clean names
+            # Map category indices to clean names (must match PHOTO_CATEGORIES order)
             category_names = [
                 "people", "animals", "food", "scenery",
-                "document"
+                "document", "illustration"
             ]
             
             # Strict thresholds to minimize false positives
@@ -195,22 +212,37 @@ class CLIPPhotoClassifier:
                 "animals": 0.70,
                 "people": 0.80,
                 "scenery": 0.70,
+                "illustration": 0.60,
             }
             
             # Process results for each image
             batch_results = []
             for img_idx, image_probs in enumerate(probs):
+                # First pass: get illustration score for food suppression
+                illustration_score = 0.0
+                for idx, prob in enumerate(image_probs):
+                    tag_name = category_names[idx] if idx < len(category_names) else "other"
+                    if tag_name == "illustration":
+                        illustration_score = float(prob)
+                        break
+                
+                is_likely_illustration = illustration_score >= 0.40
+                
                 results = []
                 for idx, prob in enumerate(image_probs):
                     tag_name = category_names[idx] if idx < len(category_names) else "other"
                     
-                    # Skip 'other' tag
-                    if tag_name == "other":
+                    # Skip 'other' and 'illustration' (illustration is internal only)
+                    if tag_name in ("other", "illustration"):
+                        continue
+                    
+                    # Suppress food for illustrations
+                    if tag_name == "food" and is_likely_illustration:
+                        logger.info(f"[Batch] Suppressing food (score={float(prob):.2f}) - looks like illustration (score={illustration_score:.2f})")
                         continue
                     
                     # Apply category-specific threshold
                     required_threshold = category_thresholds.get(tag_name, confidence_threshold)
-                    
                     if prob >= required_threshold:
                         results.append((tag_name, float(prob)))
                 
@@ -259,8 +291,6 @@ def classify_image(image_path: str, confidence_threshold: float = 0.15, max_tags
     """
     Convenience function to classify a single image.
     Returns only the most confident category.
-    Lower default threshold (0.15) to reduce None results, but strict categories
-    like messaging (0.35) and social-media (0.30) still require high confidence.
     
     Args:
         image_path: Path to image
@@ -273,6 +303,7 @@ def classify_image(image_path: str, confidence_threshold: float = 0.15, max_tags
     """
     classifier = get_clip_model()
     results = classifier.classify_image(image_path, confidence_threshold, max_tags, expected_tags)
+    
     tags = [tag for tag, _ in results]
     # Filter out "other" unless it's the only option
     if len(tags) > 1 and "other" in tags:
@@ -284,7 +315,6 @@ def classify_batch(image_paths: list, confidence_threshold: float = 0.15, max_ta
     """
     Convenience function to classify multiple images.
     Returns only the most confident category per image.
-    Lower default threshold to reduce None results.
     
     Returns:
         List of tag lists: [["people"], ["scenery"], ["food"], ...]
@@ -292,10 +322,12 @@ def classify_batch(image_paths: list, confidence_threshold: float = 0.15, max_ta
     classifier = get_clip_model()
     results = classifier.classify_batch(image_paths, confidence_threshold, max_tags)
     cleaned_results = []
+    
     for img_results in results:
         tags = [tag for tag, _ in img_results]
         # Filter out "other" unless it's the only option
         if len(tags) > 1 and "other" in tags:
             tags = [t for t in tags if t != "other"]
         cleaned_results.append(tags)
+    
     return cleaned_results

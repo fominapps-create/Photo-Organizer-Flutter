@@ -360,8 +360,8 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
             # Map CLIP results back to original indices
             for clip_idx, original_idx in enumerate(clip_needed_indices):
                 results[original_idx] = clip_results[clip_idx]
-                # For CLIP-only results, all_detections same as tags (no object-level data)
-                if not all_detections[original_idx]:  # Only if YOLO didn't find anything
+                # For CLIP-only results, all_detections same as tags
+                if not all_detections[original_idx]:
                     all_detections[original_idx] = clip_results[clip_idx]
                 stats["clip_fallback"] += 1
                 

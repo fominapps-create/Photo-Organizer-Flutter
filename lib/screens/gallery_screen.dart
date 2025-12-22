@@ -102,7 +102,7 @@ class GalleryScreenState extends State<GalleryScreen>
   Timer? _dotAnimationTimer;
   Timer? _autoScanRetryTimer;
   Timer? _progressRefreshTimer; // Refresh progress display periodically
-  
+
   // Smooth progress animation state
   Timer? _smoothProgressTimer;
   double _displayProgress = 0.0; // Smoothly animated progress for display
@@ -468,29 +468,36 @@ class GalleryScreenState extends State<GalleryScreen>
   void _startProgressRefreshTimer() {
     _progressRefreshTimer?.cancel();
     _smoothProgressTimer?.cancel();
-    
+
     // Smooth progress animation - ticks every 500ms
-    _smoothProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+    _smoothProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (
+      timer,
+    ) {
       if (!mounted || (!_scanning && !_validating)) {
         timer.cancel();
         _smoothProgressTimer = null;
         return;
       }
-      
+
       // Smoothly animate towards target progress
       if (_displayProgress < _targetProgress) {
         // Calculate increment based on estimated speed
         // If we estimate 300ms/photo and tick every 500ms, we process ~1.67 photos/tick
         final photosPerTick = 500.0 / _estimatedMsPerPhoto;
-        final incrementPerTick = _scanTotal > 0 ? photosPerTick / _scanTotal : 0.01;
-        
+        final incrementPerTick = _scanTotal > 0
+            ? photosPerTick / _scanTotal
+            : 0.01;
+
         // Increment but cap at 95% of target (never exceed actual progress)
         final maxDisplay = _targetProgress * 0.95;
-        _displayProgress = (_displayProgress + incrementPerTick).clamp(0.0, maxDisplay);
+        _displayProgress = (_displayProgress + incrementPerTick).clamp(
+          0.0,
+          maxDisplay,
+        );
         _scanProgressNotifier.value = _displayProgress;
       }
     });
-    
+
     // Also keep the slower UI refresh for other elements
     _progressRefreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (mounted && (_scanning || _validating)) {
@@ -821,7 +828,9 @@ class GalleryScreenState extends State<GalleryScreen>
     // Note: Skip _syncTagsFromServer() and _loadTags() here - we already have
     // all tags in memory from the batch processing loop. Re-downloading from
     // server and re-reading from storage is redundant and slow.
-    developer.log('✅ Scan complete - tags already in memory, skipping redundant sync/load');
+    developer.log(
+      '✅ Scan complete - tags already in memory, skipping redundant sync/load',
+    );
 
     setState(() {
       _scanning = false;
@@ -915,7 +924,9 @@ class GalleryScreenState extends State<GalleryScreen>
       }
     }
 
-    developer.log('📸 Found ${urlsToValidate.length} photos needing validation');
+    developer.log(
+      '📸 Found ${urlsToValidate.length} photos needing validation',
+    );
 
     // Load file bytes only for photos that need validation
     for (final url in urlsToValidate) {
@@ -1154,7 +1165,7 @@ class GalleryScreenState extends State<GalleryScreen>
             final width = asset.width;
             final height = asset.height;
             final maxDimension = width > height ? width : height;
-            
+
             if (maxDimension <= 1024) {
               // Small image - use original bytes to preserve quality
               imageBytes = await asset.originBytes;
@@ -1345,26 +1356,30 @@ class GalleryScreenState extends State<GalleryScreen>
     // Update progress and performance stats
     if (mounted && _scanning) {
       final elapsedSeconds = DateTime.now().difference(scanStartTime).inSeconds;
-      
+
       // Update adaptive timing estimate (exponential moving average)
       if (batchUrls.isNotEmpty) {
         final actualMsPerPhoto = batchDuration / batchUrls.length;
-        _estimatedMsPerPhoto = (_estimatedMsPerPhoto * 0.7) + (actualMsPerPhoto * 0.3);
-        developer.log('📈 Updated timing estimate: ${_estimatedMsPerPhoto.toStringAsFixed(0)}ms/photo');
+        _estimatedMsPerPhoto =
+            (_estimatedMsPerPhoto * 0.7) + (actualMsPerPhoto * 0.3);
+        developer.log(
+          '📈 Updated timing estimate: ${_estimatedMsPerPhoto.toStringAsFixed(0)}ms/photo',
+        );
       }
-      
+
       setState(() {
         // Set actual progress and snap display to it
         _scanProcessed = (batchStart + batchUrls.length).clamp(0, _scanTotal);
         _scanProgress = (_scanTotal == 0)
             ? 0.0
             : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
-        
+
         // Update target for smooth animation, snap display to actual
         _targetProgress = _scanProgress;
-        _displayProgress = _scanProgress; // Snap to real value on batch complete
+        _displayProgress =
+            _scanProgress; // Snap to real value on batch complete
         _scanProgressNotifier.value = _displayProgress;
-        
+
         developer.log('📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal');
         _avgBatchTimeMs = batchDuration;
         _imagesPerSecond = elapsedSeconds > 0
@@ -4263,6 +4278,64 @@ class GalleryScreenState extends State<GalleryScreen>
                                                           );
                                                         },
                                                       ),
+                                                    ),
+                                                  // When tags are hidden, show scan status indicator
+                                                  if (!_showTags)
+                                                    Positioned(
+                                                      right: 6,
+                                                      bottom: 6,
+                                                      child: fullTags.isNotEmpty
+                                                          // Green sparkles = scanned
+                                                          ? Container(
+                                                              padding:
+                                                                  const EdgeInsets.all(
+                                                                    4,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: Colors
+                                                                    .green
+                                                                    .withValues(
+                                                                      alpha:
+                                                                          0.9,
+                                                                    ),
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                                boxShadow: [
+                                                                  BoxShadow(
+                                                                    color: Colors
+                                                                        .black
+                                                                        .withValues(
+                                                                          alpha:
+                                                                              0.3,
+                                                                        ),
+                                                                    blurRadius:
+                                                                        2,
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              child: const Icon(
+                                                                Icons
+                                                                    .auto_awesome,
+                                                                size: 12,
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                            )
+                                                          // Grey circle outline = not scanned
+                                                          : Container(
+                                                              width: 20,
+                                                              height: 20,
+                                                              decoration: BoxDecoration(
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                                border: Border.all(
+                                                                  color: Colors
+                                                                      .grey
+                                                                      .shade400,
+                                                                  width: 2,
+                                                                ),
+                                                              ),
+                                                            ),
                                                     ),
                                                 ],
                                               ),

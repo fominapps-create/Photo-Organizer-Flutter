@@ -340,7 +340,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
             logging.info(f"Starting CLIP-only classification for {len(temp_paths)} images")
             t0 = time.time()
             batch_tags = clip_classify_batch(temp_paths, confidence_threshold=clip_threshold, max_tags=max_tags)
-            # For CLIP-only, all_detections same as tags (no object-level detection)
+            # For CLIP-only, all_detections same as tags
             batch_all_detections = batch_tags
             t1 = time.time()
             logging.info(f"CLIP batch took {round((t1 - t0) * 1000)}ms for {len(temp_paths)} images ({round((t1-t0)*1000/len(temp_paths))}ms per image)")
