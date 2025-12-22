@@ -1104,22 +1104,31 @@ class GalleryScreenState extends State<GalleryScreen>
     try {
       final assetLoadStartTime = DateTime.now();
       // Load files in parallel for maximum speed
+      // Use thumbnails (1024px) instead of full-resolution images for 10-25x smaller upload
       final fileLoadFutures = batch.map((u) async {
-        File? file;
+        Uint8List? imageBytes;
         if (u.startsWith('local:')) {
           final id = u.substring('local:'.length);
           final asset = _localAssets[id];
           if (asset != null) {
-            file = await asset.file;
+            // Use 1024px thumbnail - plenty for CLIP (uses 224x224 internally)
+            // This reduces ~5MB images to ~200KB, massive speed improvement
+            imageBytes = await asset.thumbnailDataWithSize(
+              const ThumbnailSize(1024, 1024),
+              quality: 85,
+            );
           }
         } else if (u.startsWith('file:')) {
           final path = u.substring('file:'.length);
-          file = File(path);
+          final file = File(path);
+          if (await file.exists()) {
+            imageBytes = await file.readAsBytes();
+          }
         }
 
-        if (file != null) {
+        if (imageBytes != null && imageBytes.isNotEmpty) {
           final photoID = PhotoId.canonicalId(u);
-          return {'file': file, 'photoID': photoID, 'url': u};
+          return {'file': imageBytes, 'photoID': photoID, 'url': u};
         }
         return null;
       }).toList();

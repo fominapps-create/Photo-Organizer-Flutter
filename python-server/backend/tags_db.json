@@ -1,0 +1,3783 @@
+{
+  "1000003298": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.886767Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003300": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.892721Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003301": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.894835Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003302": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.896339Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003306": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.898358Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003307": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.899544Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003308": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.900746Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003319": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.903940Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003331": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.906451Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003347": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.907466Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003354": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.910079Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003358": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.912190Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "person",
+      "dog"
+    ]
+  },
+  "1000003376": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:36.914399Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003396": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.916595Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table",
+      "person"
+    ]
+  },
+  "1000003397": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.918741Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table",
+      "person"
+    ]
+  },
+  "1000003398": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.920078Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003399": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.922086Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000003400": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.923137Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000003401": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.925545Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000003402": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.927045Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000003403": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.930329Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table",
+      "cup"
+    ]
+  },
+  "1000003404": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.932733Z",
+    "source": "classifier",
+    "all_detections": [
+      "bowl"
+    ]
+  },
+  "1000003405": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:36.933815Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table"
+    ]
+  },
+  "1000003407": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:36.936323Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003409": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.938867Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table",
+      "wine glass",
+      "person"
+    ]
+  },
+  "1000003410": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.941525Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003411": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.943591Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003412": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.944596Z",
+    "source": "classifier",
+    "all_detections": [
+      "wine glass",
+      "person"
+    ]
+  },
+  "1000003413": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.947620Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003414": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.949637Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003415": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.951720Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003416": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.953854Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003417": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.956386Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003418": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.958663Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003419": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.960745Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003420": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.962881Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003421": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.964896Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003422": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.966399Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003423": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.968426Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003424": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.970497Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003425": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.973779Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003428": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.974848Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003429": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.977382Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003430": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.984836Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003431": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.987576Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003432": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.988760Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003433": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.990957Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003434": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.993341Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003435": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.995617Z",
+    "source": "classifier",
+    "all_detections": [
+      "wine glass",
+      "person"
+    ]
+  },
+  "1000003436": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.997671Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003437": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:36.998843Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003438": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.002657Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003439": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.004652Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003440": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.007152Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003441": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.009592Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003442": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.011733Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003443": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:57:37.013927Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003444": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:57:37.016788Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table",
+      "person"
+    ]
+  },
+  "1000003452": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.019265Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003464": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.022458Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003465": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.025079Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003470": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.027701Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003471": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.031850Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003478": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.034070Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003498": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.037723Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003499": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.040160Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003500": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.044011Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003501": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.045136Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003505": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.048853Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003506": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.051102Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003507": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.053195Z",
+    "source": "classifier",
+    "all_detections": [
+      "chair",
+      "cat"
+    ]
+  },
+  "1000003508": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.056801Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003509": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:57:37.058940Z",
+    "source": "classifier",
+    "all_detections": [
+      "chair",
+      "cat"
+    ]
+  },
+  "1000003513": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.061762Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003514": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:57:37.063823Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003515": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:18.979008Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003516": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:18.998465Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003517": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.010933Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003563": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.013922Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003587": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.016420Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003591": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.019830Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003592": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.023314Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003613": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.026356Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003614": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.028796Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003620": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.031786Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003623": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.033780Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003624": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.036278Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003633": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.040621Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003634": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:19.042707Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000003635": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:19.045010Z",
+    "source": "classifier",
+    "all_detections": [
+      "chair"
+    ]
+  },
+  "1000003669": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:19.048523Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000003684": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.050849Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003725": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.053966Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003807": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.056464Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003822": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.059464Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003823": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.061457Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003824": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.064770Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003825": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.069539Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003826": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.072537Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003827": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.077025Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003828": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.081133Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003829": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.094486Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003830": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.099264Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003831": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.103575Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003832": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.106447Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003833": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.111464Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003839": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.116526Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "dog"
+    ]
+  },
+  "1000003840": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.119543Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003869": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.123793Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003878": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.127669Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003879": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.130837Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003880": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.134032Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003907": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.137553Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003908": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.139875Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003909": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.143487Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003914": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.146538Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003923": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.149724Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003924": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.152900Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003925": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.156416Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003926": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.158741Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003936": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.162120Z",
+    "source": "classifier",
+    "all_detections": [
+      "bed"
+    ]
+  },
+  "1000003938": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.165189Z",
+    "source": "classifier",
+    "all_detections": [
+      "bed"
+    ]
+  },
+  "1000003943": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.168734Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003945": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.170899Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003953": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.174489Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003955": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.177841Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003957": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.181176Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003958": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.184535Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003962": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.206676Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "person"
+    ]
+  },
+  "1000003970": {
+    "tags": [
+      "scenery"
+    ],
+    "last_updated": "2025-12-21T23:58:19.208967Z",
+    "source": "classifier",
+    "all_detections": [
+      "car"
+    ]
+  },
+  "1000003995": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.212336Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003996": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.215627Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004007": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.218574Z",
+    "source": "classifier",
+    "all_detections": [
+      "truck"
+    ]
+  },
+  "1000004008": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.221709Z",
+    "source": "classifier",
+    "all_detections": [
+      "truck"
+    ]
+  },
+  "1000004025": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.224984Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004047": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.227680Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004048": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.230892Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004049": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.234012Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004059": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.236512Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004060": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.239884Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004061": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:19.243261Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004075": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.245544Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000004076": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.248637Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "dog"
+    ]
+  },
+  "1000004078": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.250870Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004083": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.254103Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000004090": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.257567Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004096": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:19.259966Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004100": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.263401Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004101": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.266672Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004102": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:19.271040Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002912": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.096192Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002941": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:58:49.110216Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002942": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.144231Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "tv"
+    ]
+  },
+  "1000002945": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.148193Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002958": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.152552Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "keyboard"
+    ]
+  },
+  "1000002960": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:58:49.154790Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002964": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.159430Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002970": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:58:49.162808Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002973": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:58:49.166402Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002980": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:58:49.169996Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002986": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:49.173401Z",
+    "source": "classifier",
+    "all_detections": [
+      "laptop",
+      "book"
+    ]
+  },
+  "1000003023": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.176476Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000003035": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.179838Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003036": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.184047Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003037": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.187615Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003038": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.191643Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003039": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.195045Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003040": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.198568Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003042": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.202694Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000003043": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.206646Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003057": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.210302Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003059": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:49.214336Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000003061": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.219535Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003072": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.225176Z",
+    "source": "classifier",
+    "all_detections": [
+      "suitcase"
+    ]
+  },
+  "1000003073": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.230757Z",
+    "source": "classifier",
+    "all_detections": [
+      "suitcase"
+    ]
+  },
+  "1000003074": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.235163Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003089": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.240257Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003090": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.244885Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003091": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.250121Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003092": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.253891Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003093": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.258591Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003094": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.263865Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003095": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.267409Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003096": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.270914Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003097": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.275160Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003098": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.277696Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003099": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.281040Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003100": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.285516Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003101": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.289099Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003102": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.292206Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000003103": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.295537Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003116": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:49.299377Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000003150": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-21T23:58:49.302421Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000003203": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.306442Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000003204": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.309462Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003211": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.312706Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003212": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.316324Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003213": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.319744Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003217": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.322328Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003219": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.326116Z",
+    "source": "classifier",
+    "all_detections": [
+      "couch"
+    ]
+  },
+  "1000003220": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.329775Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003221": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.333239Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003223": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.336288Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003224": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.339441Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003227": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.344061Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003228": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.347402Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003238": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.359661Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003253": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:49.363058Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003254": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:58:49.366577Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000003257": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.370245Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003258": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.373251Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003259": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.376788Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003260": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.380361Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003261": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.384384Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "dog"
+    ]
+  },
+  "1000003262": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.387404Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003263": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.390903Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "dog"
+    ]
+  },
+  "1000003264": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.394959Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003265": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.399559Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003266": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.403182Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003267": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.406248Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003288": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:58:49.410841Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000003294": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.413678Z",
+    "source": "classifier",
+    "all_detections": [
+      "bed",
+      "cat"
+    ]
+  },
+  "1000003295": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.417821Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003296": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.420935Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000003297": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:58:49.425454Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002413": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.832782Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002414": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.847047Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002416": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.851414Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002426": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.854666Z",
+    "source": "classifier",
+    "all_detections": [
+      "chair"
+    ]
+  },
+  "1000002439": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.859289Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002444": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.863522Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002448": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.867041Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002458": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.871162Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002469": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:59:43.874930Z",
+    "source": "classifier",
+    "all_detections": [
+      "cake"
+    ]
+  },
+  "1000002534": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.879625Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002538": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.883039Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002540": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.888609Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002544": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.892080Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002556": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.896094Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002557": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.900478Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002558": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.904026Z",
+    "source": "classifier",
+    "all_detections": [
+      "elephant"
+    ]
+  },
+  "1000002559": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.907372Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002560": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.911472Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002561": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.916319Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002562": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.920977Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002563": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.925192Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002564": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.928311Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002565": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.933167Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002566": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.937038Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002567": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.941932Z",
+    "source": "classifier",
+    "all_detections": [
+      "dog"
+    ]
+  },
+  "1000002568": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.946389Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002569": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.951104Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "dog"
+    ]
+  },
+  "1000002580": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.956071Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002586": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:43.959291Z",
+    "source": "classifier",
+    "all_detections": [
+      "keyboard",
+      "person",
+      "tv"
+    ]
+  },
+  "1000002638": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.963648Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002639": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.981746Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002640": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.985803Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002641": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:43.990426Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002642": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.994411Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002653": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:43.998501Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002672": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.001659Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002673": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.006426Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002674": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.010632Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002679": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.014850Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002681": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.019423Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002684": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.023687Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002685": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.028273Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002686": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.033470Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002687": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.038124Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002688": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.041707Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002689": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.047322Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002690": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.051751Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002697": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.054948Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002698": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.060691Z",
+    "source": "classifier",
+    "all_detections": [
+      "bed",
+      "cat"
+    ]
+  },
+  "1000002708": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.065150Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002709": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.069366Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002710": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.073710Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002711": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.078270Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002751": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.082188Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000002760": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.086358Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002761": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.090507Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000002762": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.095011Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "bird"
+    ]
+  },
+  "1000002774": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.099450Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002775": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.104044Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002825": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-21T23:59:44.108636Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000002828": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.112686Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002867": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.116442Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002868": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.121014Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002869": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.126445Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002870": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.130917Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002871": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.134253Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002889": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.139189Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002890": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.143805Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002891": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.148085Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002894": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-21T23:59:44.152278Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000002895": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.156967Z",
+    "source": "classifier",
+    "all_detections": [
+      "bed",
+      "cat"
+    ]
+  },
+  "1000002896": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.161140Z",
+    "source": "classifier",
+    "all_detections": [
+      "laptop"
+    ]
+  },
+  "1000002897": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.164886Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000002898": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-21T23:59:44.169517Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat",
+      "tv"
+    ]
+  },
+  "1000002908": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-21T23:59:44.173765Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004103": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.895422Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004127": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.903996Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004143": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.908540Z",
+    "source": "classifier",
+    "all_detections": [
+      "couch",
+      "person"
+    ]
+  },
+  "1000004144": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.914318Z",
+    "source": "classifier",
+    "all_detections": [
+      "couch",
+      "person"
+    ]
+  },
+  "1000004147": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.920805Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004148": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.926292Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004149": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.930902Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004150": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.936807Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004151": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.940797Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004159": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.946140Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004161": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.952130Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004163": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.956116Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004169": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.961603Z",
+    "source": "classifier",
+    "all_detections": [
+      "boat"
+    ]
+  },
+  "1000004170": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.966292Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004171": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.971350Z",
+    "source": "classifier",
+    "all_detections": [
+      "person",
+      "boat"
+    ]
+  },
+  "1000004172": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.976418Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004173": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:12.981905Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004174": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.986396Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004175": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.991392Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004176": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:12.996877Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004177": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.001862Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004178": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.007421Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004180": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.012406Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004182": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.018008Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004183": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.028331Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004184": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.032227Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004185": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.037191Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004186": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.043343Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004200": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.048417Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004228": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-22T00:00:13.052891Z",
+    "source": "classifier",
+    "all_detections": [
+      "food"
+    ]
+  },
+  "1000004229": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.058359Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004230": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.062346Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004231": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.067097Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004232": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.072701Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004233": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.077222Z",
+    "source": "classifier",
+    "all_detections": [
+      "teddy bear"
+    ]
+  },
+  "1000004234": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.082582Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004235": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.087047Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004236": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.092026Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004237": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.097587Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004239": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.101885Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004247": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.107050Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004248": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-22T00:00:13.112337Z",
+    "source": "classifier",
+    "all_detections": [
+      "donut"
+    ]
+  },
+  "1000004251": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.117254Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004300": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.121559Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004303": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.126128Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004350": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.131083Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004351": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.136019Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004372": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.140571Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004373": {
+    "tags": [
+      "scenery"
+    ],
+    "last_updated": "2025-12-22T00:00:13.145005Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004374": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.148555Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004377": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.153761Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004381": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.157427Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004385": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.162735Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004387": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.167694Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004388": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.174870Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004389": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.179413Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004392": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.183584Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004393": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.188857Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004404": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.193581Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004405": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.200088Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004408": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.204779Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004430": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.209437Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004431": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.214830Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004432": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.218814Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004445": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.224215Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000004446": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.229346Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004447": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.233425Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004448": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-22T00:00:13.239092Z",
+    "source": "classifier",
+    "all_detections": [
+      "cat"
+    ]
+  },
+  "1000004451": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.244074Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004452": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.248658Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004453": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-22T00:00:13.253864Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004458": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.258999Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000004467": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-22T00:00:13.264293Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000004468": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-22T00:00:13.269049Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000004472": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-22T00:00:13.273952Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  }
+}
