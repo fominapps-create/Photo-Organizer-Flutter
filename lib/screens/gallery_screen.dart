@@ -102,6 +102,12 @@ class GalleryScreenState extends State<GalleryScreen>
   Timer? _dotAnimationTimer;
   Timer? _autoScanRetryTimer;
   Timer? _progressRefreshTimer; // Refresh progress display periodically
+  
+  // Smooth progress animation state
+  Timer? _smoothProgressTimer;
+  double _displayProgress = 0.0; // Smoothly animated progress for display
+  double _targetProgress = 0.0; // Actual progress to animate towards
+  double _estimatedMsPerPhoto = 300.0; // Adaptive estimate, starts at 300ms
 
   // Cached filtered list to avoid recomputing on every build
   List<String> _cachedFilteredUrls = [];
@@ -458,14 +464,37 @@ class GalleryScreenState extends State<GalleryScreen>
     });
   }
 
-  /// Start a timer that refreshes the progress display every 5 seconds during scanning
+  /// Start a timer that smoothly animates progress between batch updates
   void _startProgressRefreshTimer() {
     _progressRefreshTimer?.cancel();
-    _progressRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    _smoothProgressTimer?.cancel();
+    
+    // Smooth progress animation - ticks every 500ms
+    _smoothProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (!mounted || (!_scanning && !_validating)) {
+        timer.cancel();
+        _smoothProgressTimer = null;
+        return;
+      }
+      
+      // Smoothly animate towards target progress
+      if (_displayProgress < _targetProgress) {
+        // Calculate increment based on estimated speed
+        // If we estimate 300ms/photo and tick every 500ms, we process ~1.67 photos/tick
+        final photosPerTick = 500.0 / _estimatedMsPerPhoto;
+        final incrementPerTick = _scanTotal > 0 ? photosPerTick / _scanTotal : 0.01;
+        
+        // Increment but cap at 95% of target (never exceed actual progress)
+        final maxDisplay = _targetProgress * 0.95;
+        _displayProgress = (_displayProgress + incrementPerTick).clamp(0.0, maxDisplay);
+        _scanProgressNotifier.value = _displayProgress;
+      }
+    });
+    
+    // Also keep the slower UI refresh for other elements
+    _progressRefreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (mounted && (_scanning || _validating)) {
-        setState(() {
-          // Just trigger a rebuild to update percentage display
-        });
+        setState(() {});
       } else {
         timer.cancel();
         _progressRefreshTimer = null;
@@ -686,6 +715,9 @@ class GalleryScreenState extends State<GalleryScreen>
       // Don't reset _scanPaused - let user control pause/resume
       _scanProcessed = 0;
       _scanProgress = 0.0;
+      // Reset smooth progress animation
+      _displayProgress = 0.0;
+      _targetProgress = 0.0;
     });
     // Initialize scanned count notifier with current count
     _scannedCountNotifier.value = photoTags.length;
@@ -697,6 +729,8 @@ class GalleryScreenState extends State<GalleryScreen>
     // Stop progress refresh timer
     _progressRefreshTimer?.cancel();
     _progressRefreshTimer = null;
+    _smoothProgressTimer?.cancel();
+    _smoothProgressTimer = null;
 
     setState(() {
       _scanning = false;
@@ -767,6 +801,9 @@ class GalleryScreenState extends State<GalleryScreen>
       // Don't reset _scanPaused - let user control pause/resume
       _scanProcessed = 0;
       _scanProgress = 0.0;
+      // Reset smooth progress animation
+      _displayProgress = 0.0;
+      _targetProgress = 0.0;
     });
     // Initialize scanned count notifier with current count
     _scannedCountNotifier.value = photoTags.length;
@@ -778,6 +815,8 @@ class GalleryScreenState extends State<GalleryScreen>
     // Stop progress refresh timer
     _progressRefreshTimer?.cancel();
     _progressRefreshTimer = null;
+    _smoothProgressTimer?.cancel();
+    _smoothProgressTimer = null;
 
     // Note: Skip _syncTagsFromServer() and _loadTags() here - we already have
     // all tags in memory from the batch processing loop. Re-downloading from
@@ -1306,13 +1345,26 @@ class GalleryScreenState extends State<GalleryScreen>
     // Update progress and performance stats
     if (mounted && _scanning) {
       final elapsedSeconds = DateTime.now().difference(scanStartTime).inSeconds;
+      
+      // Update adaptive timing estimate (exponential moving average)
+      if (batchUrls.isNotEmpty) {
+        final actualMsPerPhoto = batchDuration / batchUrls.length;
+        _estimatedMsPerPhoto = (_estimatedMsPerPhoto * 0.7) + (actualMsPerPhoto * 0.3);
+        developer.log('📈 Updated timing estimate: ${_estimatedMsPerPhoto.toStringAsFixed(0)}ms/photo');
+      }
+      
       setState(() {
-        // Set actual progress (may have been smoothly estimated during batch)
+        // Set actual progress and snap display to it
         _scanProcessed = (batchStart + batchUrls.length).clamp(0, _scanTotal);
         _scanProgress = (_scanTotal == 0)
             ? 0.0
             : (_scanProcessed / _scanTotal).clamp(0.0, 1.0);
-        _scanProgressNotifier.value = _scanProgress;
+        
+        // Update target for smooth animation, snap display to actual
+        _targetProgress = _scanProgress;
+        _displayProgress = _scanProgress; // Snap to real value on batch complete
+        _scanProgressNotifier.value = _displayProgress;
+        
         developer.log('📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal');
         _avgBatchTimeMs = batchDuration;
         _imagesPerSecond = elapsedSeconds > 0
@@ -3143,6 +3195,7 @@ class GalleryScreenState extends State<GalleryScreen>
     _dotAnimationTimer?.cancel();
     _autoScanRetryTimer?.cancel();
     _progressRefreshTimer?.cancel();
+    _smoothProgressTimer?.cancel();
     _dotIndexNotifier.dispose();
     _scanProgressNotifier.dispose();
     _scannedCountNotifier.dispose();
