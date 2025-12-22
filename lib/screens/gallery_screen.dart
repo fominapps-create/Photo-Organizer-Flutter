@@ -1104,19 +1104,29 @@ class GalleryScreenState extends State<GalleryScreen>
     try {
       final assetLoadStartTime = DateTime.now();
       // Load files in parallel for maximum speed
-      // Use thumbnails (1024px) instead of full-resolution images for 10-25x smaller upload
+      // Use thumbnails (1024px) for large images, original for small ones
       final fileLoadFutures = batch.map((u) async {
         Uint8List? imageBytes;
         if (u.startsWith('local:')) {
           final id = u.substring('local:'.length);
           final asset = _localAssets[id];
           if (asset != null) {
-            // Use 1024px thumbnail - plenty for CLIP (uses 224x224 internally)
-            // This reduces ~5MB images to ~200KB, massive speed improvement
-            imageBytes = await asset.thumbnailDataWithSize(
-              const ThumbnailSize(1024, 1024),
-              quality: 85,
-            );
+            // Check if image is already small - if so, use original to preserve quality
+            final width = asset.width;
+            final height = asset.height;
+            final maxDimension = width > height ? width : height;
+            
+            if (maxDimension <= 1024) {
+              // Small image - use original bytes to preserve quality
+              imageBytes = await asset.originBytes;
+            } else {
+              // Large image - use 1024px thumbnail for speed
+              // CLIP uses 224x224 internally, so 1024px is plenty
+              imageBytes = await asset.thumbnailDataWithSize(
+                const ThumbnailSize(1024, 1024),
+                quality: 85,
+              );
+            }
           }
         } else if (u.startsWith('file:')) {
           final path = u.substring('file:'.length);
