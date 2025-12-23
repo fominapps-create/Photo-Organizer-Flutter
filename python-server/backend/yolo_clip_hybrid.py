@@ -65,7 +65,8 @@ YOLO_TO_CATEGORY = {
     22: "animals",  # zebra
     23: "animals",  # giraffe
     
-    # FOOD (classes 46-60)
+    # FOOD (classes 46-60) - Only ACTUAL food items, not accessories
+    # This prevents a bowl or cup from overriding a cat photo!
     46: "food",  # banana
     47: "food",  # apple
     48: "food",  # sandwich
@@ -77,14 +78,9 @@ YOLO_TO_CATEGORY = {
     54: "food",  # donut
     55: "food",  # cake
     
-    # Additional food-related items
-    39: "food",  # bottle (often drink/beverage photos)
-    40: "food",  # wine glass
-    41: "food",  # cup
-    42: "food",  # fork
-    43: "food",  # knife
-    44: "food",  # spoon
-    45: "food",  # bowl
+    # NOTE: Food accessories (bowl, cup, fork, etc.) are NOT mapped to "food"
+    # because they often appear in pet photos and would incorrectly override
+    # the animal category. These are still captured in all_detections for search.
     
     # DOCUMENT-like objects (but keep confidence low - let CLIP handle most documents)
     # We'll be conservative here since YOLO can't detect "text document with visible writing"
@@ -104,6 +100,7 @@ PEOPLE_MIN_CONFIDENCE = 0.50  # Moderate for people detection
 def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float = YOLO_MIN_CONFIDENCE) -> Tuple[List[str], dict]:
     """
     Map YOLO detection results to our 5 categories.
+    Returns only the DOMINANT category based on weighted score (confidence * area).
     
     Args:
         yolo_results: YOLO model inference results
@@ -111,10 +108,9 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
         
     Returns:
         Tuple of (category_list, debug_info_dict)
-        - category_list: List of detected categories (empty if nothing confident found)
+        - category_list: List with single dominant category (or empty if nothing found)
         - debug_info: Dict with detection details for logging
     """
-    categories = set()
     all_objects = set()  # All detected objects regardless of size
     debug_info = {
         "detections": [],
@@ -122,6 +118,9 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
         "all_objects": [],
         "max_confidence": 0.0,
     }
+    
+    # Track category with highest weighted score (confidence * area)
+    category_scores = {}  # category -> weighted_score
     
     if not yolo_results or not hasattr(yolo_results, 'boxes') or yolo_results.boxes is None:
         return [], debug_info
@@ -189,16 +188,46 @@ def map_yolo_detections_to_categories(yolo_results, confidence_threshold: float 
                     debug_info["all_objects"].append(class_name.lower())
                     continue
                 
-                categories.add(category)
+                # Weighted score = confidence * box_percent (both 0-1 range)
+                weighted_score = confidence * box_percent
+                if category not in category_scores:
+                    category_scores[category] = 0.0
+                category_scores[category] += weighted_score
+                
                 debug_info["mapped_categories"].append({
                     "category": category,
                     "from_class": class_name,
-                    "confidence": confidence
+                    "confidence": confidence,
+                    "box_percent": round(box_percent * 100, 1),
+                    "weighted_score": round(weighted_score * 100, 2)
                 })
                 debug_info["all_objects"].append(class_name.lower())
     
-    result = list(categories)
+    # Return only the dominant category with priority consideration
+    # Priority: people > animals > food > document > other
+    # This ensures a cat isn't tagged as "food" just because there's a bowl nearby
+    CATEGORY_PRIORITY = {
+        "people": 4,
+        "animals": 3,
+        "food": 2,
+        "document": 1,
+    }
+    
+    if category_scores:
+        # Sort by priority first, then by weighted score
+        def sort_key(cat):
+            priority = CATEGORY_PRIORITY.get(cat, 0)
+            score = category_scores[cat]
+            return (priority, score)
+        
+        dominant_category = max(category_scores.keys(), key=sort_key)
+        result = [dominant_category]
+        logger.debug(f"Category scores: {category_scores} -> Dominant: {dominant_category} (priority-based)")
+    else:
+        result = []
+    
     debug_info["all_objects_list"] = list(all_objects)
+    debug_info["category_scores"] = {k: round(v * 100, 2) for k, v in category_scores.items()}
     return result, debug_info
 
 
@@ -551,7 +580,7 @@ def validate_batch_with_clip(image_paths: List[str], yolo_tags_list: List[List[s
         List of validation results (one per image)
     """
     # For now, validate sequentially (could optimize with true batching later)
-    from .clip_model import classify_image as clip_classify_single
+    from .clip_switcher import classify_image as clip_classify_single
     
     results = []
     for image_path, yolo_tags in zip(image_paths, yolo_tags_list):

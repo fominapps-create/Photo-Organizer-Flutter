@@ -119,6 +119,13 @@ class GalleryScreenState extends State<GalleryScreen>
   // Cached local photo count
   int _cachedLocalPhotoCount = 0;
 
+  // Fast scroller state
+  bool _showFastScroller = false;
+  Timer? _fastScrollerHideTimer;
+  Timer? _longPressTimer;
+  bool _isDraggingScroller = false;
+  String _currentScrollYear = '';
+
   // Thumbnail future cache to prevent recreating futures on rebuild
   final Map<String, Future<Uint8List?>> _thumbFutureCache = {};
 
@@ -400,6 +407,36 @@ class GalleryScreenState extends State<GalleryScreen>
     setState(() => albums = {});
   }
 
+  /// Build a list of PhotoData for all filtered photos (for swipe navigation)
+  /// This is instant - no file loading happens here, only URL references
+  List<PhotoData> _buildPhotoDataList(List<String> filtered) {
+    final List<PhotoData> photos = [];
+
+    for (final url in filtered) {
+      final key = p.basename(url);
+      final tags = photoTags[key] ?? [];
+      final detections = photoAllDetections[key] ?? [];
+
+      AssetEntity? asset;
+      if (url.startsWith('local:')) {
+        final id = url.substring('local:'.length);
+        asset = _localAssets[id];
+      }
+
+      photos.add(
+        PhotoData(
+          url: url,
+          heroTag: key,
+          tags: tags,
+          allDetections: detections,
+          asset: asset,
+        ),
+      );
+    }
+
+    return photos;
+  }
+
   Future<void> _loadAllImages() async {
     developer.log('🚀 START: _loadAllImages called');
     setState(() => loading = true);
@@ -447,10 +484,9 @@ class GalleryScreenState extends State<GalleryScreen>
       // Only retry if not already scanning/validating and not complete
       if (!_scanning && !_validating && !_validationComplete && mounted) {
         developer.log(
-          '🔄 Auto-retry: Reloading photos and checking if scan is needed...',
+          '🔄 Auto-retry: Checking if scan is needed (silent, no reload)...',
         );
-        // Reload photos first to pick up any new ones
-        await _loadAllImages();
+        // Just check if scan is needed - don't reload images (causes loading animation)
         await _startAutoScanIfNeeded();
       }
       // Stop retrying once validation is complete
@@ -511,39 +547,57 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Show a small tooltip-like popup near the badge
   OverlayEntry? _badgeTooltipEntry;
-  void _showBadgeTooltip(BuildContext context, String message, Color color) {
+  Timer? _tooltipTimer;
+
+  void _dismissTooltip() {
+    _tooltipTimer?.cancel();
     _badgeTooltipEntry?.remove();
+    _badgeTooltipEntry = null;
+  }
+
+  void _showBadgeTooltip(BuildContext context, String message, Color color) {
+    _dismissTooltip();
     final overlay = Overlay.of(context);
     _badgeTooltipEntry = OverlayEntry(
       builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + 62,
-        right: 210,
+        top: MediaQuery.of(context).padding.top + 64, // 4px rule
+        right: 208, // 4px rule
         child: FractionalTranslation(
-          translation: const Offset(
-            0.5,
-            0,
-          ), // Shift left by half width to center under badge
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(6),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+          translation: const Offset(0.5, 0),
+          child: GestureDetector(
+            onTap: _dismissTooltip, // Tap on tooltip itself to dismiss
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ), // 4px rule
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(8), // 4px rule
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 8, // 4px rule
+                      offset: const Offset(0, 4), // 4px rule
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      message,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.close, color: Colors.white70, size: 14),
+                  ],
                 ),
               ),
             ),
@@ -552,11 +606,183 @@ class GalleryScreenState extends State<GalleryScreen>
       ),
     );
     overlay.insert(_badgeTooltipEntry!);
-    // Auto-dismiss after 1.5 seconds
-    Future.delayed(const Duration(milliseconds: 1500), () {
-      _badgeTooltipEntry?.remove();
-      _badgeTooltipEntry = null;
-    });
+    // Auto-dismiss after 10 seconds
+    _tooltipTimer = Timer(const Duration(seconds: 10), _dismissTooltip);
+  }
+
+  /// Get year from a photo URL for fast scroller
+  int? _getYearForPhoto(String url) {
+    if (url.startsWith('local:')) {
+      final id = url.substring('local:'.length);
+      final asset = _localAssets[id];
+      if (asset != null) {
+        return asset.createDateTime.year;
+      }
+    }
+    return null;
+  }
+
+  /// Build year markers for the fast scroller based on current filtered list
+  List<MapEntry<double, int>> _buildYearMarkers(List<String> filtered) {
+    if (filtered.isEmpty) return [];
+
+    final markers = <MapEntry<double, int>>[];
+    int? lastYear;
+
+    for (int i = 0; i < filtered.length; i++) {
+      final year = _getYearForPhoto(filtered[i]);
+      if (year != null && year != lastYear) {
+        // Position as fraction of total list
+        final position = i / filtered.length;
+        markers.add(MapEntry(position, year));
+        lastYear = year;
+      }
+    }
+
+    return markers;
+  }
+
+  /// Scroll to position based on scroller drag
+  void _scrollToPosition(double fraction, List<String> filtered) {
+    if (_scrollController.hasClients && filtered.isNotEmpty) {
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      final targetOffset = (fraction * maxExtent).clamp(0.0, maxExtent);
+      _scrollController.jumpTo(targetOffset);
+
+      // Update current year display
+      final index = (fraction * filtered.length)
+          .clamp(0, filtered.length - 1)
+          .toInt();
+      if (index < filtered.length) {
+        final year = _getYearForPhoto(filtered[index]);
+        if (year != null) {
+          setState(() {
+            _currentScrollYear = "'${year.toString().substring(2)}";
+          });
+        }
+      }
+    }
+  }
+
+  /// Get current scroll position as fraction
+  double _getCurrentScrollFraction() {
+    if (!_scrollController.hasClients) return 0.0;
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    if (maxExtent <= 0) return 0.0;
+    return (_scrollController.offset / maxExtent).clamp(0.0, 1.0);
+  }
+
+  /// Build the fast scroller widget
+  Widget _buildFastScroller(List<String> filtered, double height) {
+    final yearMarkers = _buildYearMarkers(filtered);
+    final scrollFraction = _getCurrentScrollFraction();
+    final scrollerHeight = height - 140; // Account for bottom offset
+
+    return Positioned(
+      right: 4,
+      top: 0,
+      bottom: 140, // End above floating buttons
+      child: AnimatedOpacity(
+        opacity: _showFastScroller ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: IgnorePointer(
+          ignoring: !_showFastScroller,
+          child: GestureDetector(
+            onVerticalDragStart: (details) {
+              setState(() {
+                _isDraggingScroller = true;
+              });
+              final fraction = details.localPosition.dy / scrollerHeight;
+              _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
+            },
+            onVerticalDragUpdate: (details) {
+              final fraction = details.localPosition.dy / scrollerHeight;
+              _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
+            },
+            onVerticalDragEnd: (details) {
+              setState(() {
+                _isDraggingScroller = false;
+                _currentScrollYear = '';
+              });
+              // Hide after 2 seconds
+              _fastScrollerHideTimer?.cancel();
+              _fastScrollerHideTimer = Timer(const Duration(seconds: 2), () {
+                if (mounted && !_isDraggingScroller) {
+                  setState(() => _showFastScroller = false);
+                }
+              });
+            },
+            child: Container(
+              width: 16,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Stack(
+                children: [
+                  // Year markers
+                  ...yearMarkers.map(
+                    (marker) => Positioned(
+                      top: marker.key * scrollerHeight,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Text(
+                          "'${marker.value.toString().substring(2)}",
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Scroll indicator thumb
+                  Positioned(
+                    top: scrollFraction * (scrollerHeight - 24),
+                    left: 2,
+                    right: 2,
+                    child: Container(
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(6),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: _currentScrollYear.isNotEmpty
+                            ? Text(
+                                _currentScrollYear,
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                            : Container(
+                                width: 8,
+                                height: 3,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade400,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void reload() => _loadAllImages();
@@ -622,15 +848,7 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log(
         '⚠️ Server not available at ${ApiService.baseUrl}, skipping auto-scan',
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Server offline: ${ApiService.baseUrl}'),
-            duration: const Duration(seconds: 3),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+      // Silent - settings indicator shows server status, no snackbar needed
       return;
     }
     developer.log('✅ Server available!');
@@ -768,12 +986,8 @@ class GalleryScreenState extends State<GalleryScreen>
     );
     if (!serverAvailable) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Server is offline. Please start the server first.'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      // Silent - settings indicator shows server status
+      developer.log('⚠️ Server offline, manual scan aborted silently');
       return;
     }
 
@@ -867,12 +1081,8 @@ class GalleryScreenState extends State<GalleryScreen>
     );
     if (!serverAvailable) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Server is offline. Please start the server first.'),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      // Silent - settings indicator shows server status
+      developer.log('⚠️ Server offline, rescan aborted silently');
       return;
     }
 
@@ -1491,7 +1701,10 @@ class GalleryScreenState extends State<GalleryScreen>
       if (mounted) {
         setState(() {
           _validating = false;
-          _validationComplete = true; // Mark validation as complete
+          // Only mark complete if scanning is also done
+          if (!_scanning) {
+            _validationComplete = true;
+          }
         });
 
         // Cancel dot animation if scanning is also complete
@@ -1696,7 +1909,10 @@ class GalleryScreenState extends State<GalleryScreen>
       if (mounted) {
         setState(() {
           _validating = false;
-          _validationComplete = true; // Mark validation as complete
+          // Only mark complete if scanning is also done
+          if (!_scanning) {
+            _validationComplete = true;
+          }
         });
         // Cancel dot animation if scanning is also complete
         if (!_scanning) {
@@ -3211,6 +3427,9 @@ class GalleryScreenState extends State<GalleryScreen>
     _autoScanRetryTimer?.cancel();
     _progressRefreshTimer?.cancel();
     _smoothProgressTimer?.cancel();
+    _fastScrollerHideTimer?.cancel();
+    _longPressTimer?.cancel();
+    _tooltipTimer?.cancel();
     _dotIndexNotifier.dispose();
     _scanProgressNotifier.dispose();
     _scannedCountNotifier.dispose();
@@ -3226,6 +3445,21 @@ class GalleryScreenState extends State<GalleryScreen>
       _showScrollToTop.value = true;
     } else if (_scrollController.offset < 200 && _showScrollToTop.value) {
       _showScrollToTop.value = false;
+    }
+
+    // Show fast scroller when scrolling (if not already dragging it)
+    if (!_isDraggingScroller && _scrollController.offset > 0) {
+      // Always setState to update the scroller thumb position
+      setState(() {
+        _showFastScroller = true;
+      });
+      // Reset hide timer
+      _fastScrollerHideTimer?.cancel();
+      _fastScrollerHideTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted && !_isDraggingScroller) {
+          setState(() => _showFastScroller = false);
+        }
+      });
     }
   }
 
@@ -3299,16 +3533,21 @@ class GalleryScreenState extends State<GalleryScreen>
                   SizedBox(height: MediaQuery.of(context).padding.top),
                   // Gallery title and Credits
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+                    padding: const EdgeInsets.fromLTRB(
+                      16,
+                      0,
+                      16,
+                      8,
+                    ), // 4px rule
                     child: SizedBox(
-                      height: 100,
+                      height: 96, // 4px rule (divisible by 8)
                       child: Stack(
                         clipBehavior: Clip.none,
                         alignment: Alignment.centerLeft,
                         children: [
                           // Three dots menu on the left at credits height
                           Positioned(
-                            left: -15,
+                            left: -12, // 4px rule
                             top: 0,
                             child: IconButton(
                               icon: Icon(
@@ -3325,37 +3564,42 @@ class GalleryScreenState extends State<GalleryScreen>
                               constraints: const BoxConstraints(),
                             ),
                           ),
-                          // Validation badge - next to tag toggle
+                          // Validation badge - centered horizontally
                           // Only show blue badge when BOTH scanning and validation are complete
                           if (_validationComplete && !_validating && !_scanning)
                             Positioned(
-                              right: 173,
-                              top: 2,
-                              child: GestureDetector(
-                                onTap: () => _showBadgeTooltip(
-                                  context,
-                                  '✓ All ${photoTags.length} photos scanned',
-                                  Colors.blue.shade700,
-                                ),
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.shade600,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.2,
-                                        ),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
+                              left: 0,
+                              right: 0,
+                              top: 4, // 4px rule
+                              child: Center(
+                                child: GestureDetector(
+                                  onTap: () => _showBadgeTooltip(
+                                    context,
+                                    '✓ All ${photoTags.length} photos scanned',
+                                    Colors.blue.shade700,
                                   ),
-                                  child: const Icon(
-                                    Icons.verified,
-                                    color: Colors.white,
-                                    size: 18,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(
+                                      4,
+                                    ), // 4px rule - smaller
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade600,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Icon(
+                                      Icons.verified,
+                                      color: Colors.white,
+                                      size: 16, // 4px rule - smaller
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3363,116 +3607,126 @@ class GalleryScreenState extends State<GalleryScreen>
                           // Show grey/orange badge when scanning or validation is in progress
                           if (!_validationComplete || _scanning || _validating)
                             Positioned(
-                              right: 173,
-                              top: 2,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      final pct = _cachedLocalPhotoCount > 0
-                                          ? (photoTags.length /
-                                                    _cachedLocalPhotoCount *
-                                                    100)
-                                                .toStringAsFixed(0)
-                                          : '0';
-                                      final status = _scanning
-                                          ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
-                                          : _validating
-                                          ? 'Validating...'
-                                          : 'Waiting for server';
-                                      _showBadgeTooltip(
-                                        context,
-                                        status,
-                                        (_scanning || _validating)
-                                            ? Colors.orange.shade700
-                                            : Colors.grey.shade700,
-                                      );
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.all(6),
-                                      decoration: BoxDecoration(
-                                        color: (_scanning || _validating)
-                                            ? Colors.orange.shade100.withValues(
-                                                alpha: 0.3,
-                                              )
-                                            : Colors.grey.shade400.withValues(
-                                                alpha: 0.3,
+                              left: 0,
+                              right: 0,
+                              top: 4, // 4px rule
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () {
+                                        final pct = _cachedLocalPhotoCount > 0
+                                            ? (photoTags.length /
+                                                      _cachedLocalPhotoCount *
+                                                      100)
+                                                  .toStringAsFixed(0)
+                                            : '0';
+                                        final status = _scanning
+                                            ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
+                                            : _validating
+                                            ? 'Validating...'
+                                            : 'Waiting for server';
+                                        _showBadgeTooltip(
+                                          context,
+                                          status,
+                                          (_scanning || _validating)
+                                              ? Colors.orange.shade700
+                                              : Colors.grey.shade700,
+                                        );
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(
+                                          4,
+                                        ), // 4px rule - smaller
+                                        decoration: BoxDecoration(
+                                          color: (_scanning || _validating)
+                                              ? Colors.orange.shade100
+                                                    .withValues(alpha: 0.3)
+                                              : Colors.grey.shade400.withValues(
+                                                  alpha: 0.3,
+                                                ),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: (_scanning || _validating)
+                                                ? Colors.orange.shade600
+                                                : Colors.grey.shade600,
+                                            width: 2,
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.1,
                                               ),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Icon(
+                                          Icons.verified_outlined,
                                           color: (_scanning || _validating)
                                               ? Colors.orange.shade600
                                               : Colors.grey.shade600,
-                                          width: 2,
+                                          size: 16, // 4px rule - smaller
                                         ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: 0.1,
-                                            ),
-                                            blurRadius: 4,
-                                            offset: const Offset(0, 2),
+                                      ),
+                                    ),
+                                    if (_scanning || _validating)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          top: 4,
+                                        ), // 4px rule
+                                        child: _buildLoadingDots(),
+                                      ),
+                                    // Show scan progress percentage during scanning
+                                    if (_scanning && _scanTotal > 0)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          top: 4,
+                                        ), // 4px rule
+                                        child: ValueListenableBuilder<int>(
+                                          valueListenable:
+                                              _scannedCountNotifier,
+                                          builder: (context, scannedCount, _) {
+                                            final pct =
+                                                _cachedLocalPhotoCount > 0
+                                                ? (scannedCount /
+                                                          _cachedLocalPhotoCount *
+                                                          100)
+                                                      .toStringAsFixed(0)
+                                                : '0';
+                                            return Text(
+                                              '$pct%',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.orange.shade700,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    // Show "Validating" text during validation
+                                    if (_validating && !_scanning)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          'Validating',
+                                          style: TextStyle(
+                                            fontSize: 8,
+                                            color: Colors.orange.shade700,
+                                            fontWeight: FontWeight.w600,
                                           ),
-                                        ],
-                                      ),
-                                      child: Icon(
-                                        Icons.verified_outlined,
-                                        color: (_scanning || _validating)
-                                            ? Colors.orange.shade600
-                                            : Colors.grey.shade600,
-                                        size: 18,
-                                      ),
-                                    ),
-                                  ),
-                                  if (_scanning || _validating)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: _buildLoadingDots(),
-                                    ),
-                                  // Show scan progress percentage during scanning
-                                  if (_scanning && _scanTotal > 0)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: ValueListenableBuilder<int>(
-                                        valueListenable: _scannedCountNotifier,
-                                        builder: (context, scannedCount, _) {
-                                          final pct = _cachedLocalPhotoCount > 0
-                                              ? (scannedCount /
-                                                        _cachedLocalPhotoCount *
-                                                        100)
-                                                    .toStringAsFixed(0)
-                                              : '0';
-                                          return Text(
-                                            '$pct%',
-                                            style: TextStyle(
-                                              fontSize: 9,
-                                              color: Colors.orange.shade700,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  // Show "Validating" text during validation
-                                  if (_validating && !_scanning)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        'Validating',
-                                        style: TextStyle(
-                                          fontSize: 8,
-                                          color: Colors.orange.shade700,
-                                          fontWeight: FontWeight.w600,
                                         ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           Positioned(
-                            right: 120,
-                            top: -3,
+                            right: 120, // 4px rule
+                            top: 0, // 4px rule
                             child: IconButton(
                               icon: Icon(
                                 _showTags ? Icons.label_off : Icons.label,
@@ -3492,18 +3746,20 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
                           // Credits on the right
                           Positioned(
-                            right: 5,
+                            right: 4, // 4px rule
                             top: 0,
                             child: Container(
                               padding: const EdgeInsets.only(
-                                left: 12,
-                                right: 4,
-                                top: 6,
-                                bottom: 6,
+                                left: 12, // 4px rule
+                                right: 4, // 4px rule
+                                top: 8, // 4px rule
+                                bottom: 8, // 4px rule
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white,
-                                borderRadius: BorderRadius.circular(20),
+                                borderRadius: BorderRadius.circular(
+                                  24,
+                                ), // 4px rule
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withValues(alpha: 0.1),
@@ -3583,7 +3839,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 12,
-                                              vertical: 6,
+                                              vertical: 8, // 4px rule
                                             ),
                                             decoration: BoxDecoration(
                                               gradient: LinearGradient(
@@ -3606,7 +3862,10 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   color: Colors.black
                                                       .withValues(alpha: 0.2),
                                                   blurRadius: 8,
-                                                  offset: const Offset(0, 3),
+                                                  offset: const Offset(
+                                                    0,
+                                                    4,
+                                                  ), // 4px rule
                                                 ),
                                               ],
                                             ),
@@ -3627,7 +3886,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
-                                                const SizedBox(width: 6),
+                                                const SizedBox(
+                                                  width: 8,
+                                                ), // 4px rule
                                                 GestureDetector(
                                                   onTap: () {
                                                     setState(() {
@@ -3669,7 +3930,10 @@ class GalleryScreenState extends State<GalleryScreen>
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(
+                            width: 8,
+                          ), // 4px rule - gap before Clear
+                          // Clear button on the right
                           Container(
                             decoration: BoxDecoration(
                               color:
@@ -3692,76 +3956,45 @@ class GalleryScreenState extends State<GalleryScreen>
                               style: TextButton.styleFrom(
                                 foregroundColor: Colors.lightBlue.shade300,
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
+                                  horizontal: 12, // 4px rule
+                                  vertical: 8, // 4px rule
                                 ),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                           ),
-                          const Spacer(),
-                          // Sort toggle on the right
-                          TextButton.icon(
-                            icon: Icon(
-                              _sortNewestFirst
-                                  ? Icons.arrow_downward
-                                  : Icons.arrow_upward,
-                              color:
-                                  Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? Colors.white
-                                  : Colors.black87,
-                              size: 20,
-                            ),
-                            label: Text(
-                              _sortNewestFirst ? 'Newest' : 'Oldest',
-                              style: TextStyle(
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.white
-                                    : Colors.black87,
-                                fontSize: 14,
-                              ),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _sortNewestFirst = !_sortNewestFirst;
-                              });
-                            },
-                          ),
                         ],
                       ),
                     ), // Show album chips (horizontal) when albums exist.
-                  if (albums.isNotEmpty)
-                    SizedBox(
-                      height: 64,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        scrollDirection: Axis.horizontal,
-                        itemBuilder: (ctx, idx) {
-                          final name = albums.keys.elementAt(idx);
-                          final count = albums[name]?.length ?? 0;
-                          return ActionChip(
-                            label: Text('$name ($count)'),
-                            onPressed: () {
-                              // Open AlbumScreen to show album contents
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (c) => const AlbumScreen(),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 8),
-                        itemCount: albums.length,
-                      ),
-                    ),
-
+                  // TODO: Re-enable album chips when needed
+                  // if (albums.isNotEmpty)
+                  //   SizedBox(
+                  //     height: 64,
+                  //     child: ListView.separated(
+                  //       padding: const EdgeInsets.symmetric(horizontal: 12),
+                  //       scrollDirection: Axis.horizontal,
+                  //       itemBuilder: (ctx, idx) {
+                  //         final name = albums.keys.elementAt(idx);
+                  //         final count = albums[name]?.length ?? 0;
+                  //         return ActionChip(
+                  //           label: Text('$name ($count)'),
+                  //           onPressed: () {
+                  //             // Open AlbumScreen to show album contents
+                  //             Navigator.push(
+                  //               context,
+                  //               MaterialPageRoute(
+                  //                 builder: (c) => const AlbumScreen(),
+                  //               ),
+                  //             );
+                  //           },
+                  //         );
+                  //       },
+                  //       separatorBuilder: (context, index) =>
+                  //           const SizedBox(width: 8),
+                  //       itemCount: albums.length,
+                  //     ),
+                  //   ),
                   Expanded(
                     child: Stack(
                       children: [
@@ -3808,9 +4041,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(
                                       16,
+                                      8, // 4px rule - reduced
                                       16,
-                                      16,
-                                      4,
+                                      8, // 4px rule
                                     ),
                                     child: Row(
                                       children: [
@@ -3934,415 +4167,401 @@ class GalleryScreenState extends State<GalleryScreen>
                                       ],
                                     ),
                                   ),
-                                  // Photo Grid
+                                  // Photo Grid with Fast Scroller
                                   Expanded(
-                                    child: RefreshIndicator(
-                                      onRefresh: () async {
-                                        developer.log(
-                                          '🔄 Pull-to-refresh triggered',
-                                        );
-                                        await _loadAllImages();
-                                        developer.log('✅ Refresh complete');
-                                      },
-                                      child: GridView.builder(
-                                        controller: _scrollController,
-                                        padding: const EdgeInsets.fromLTRB(
-                                          12,
-                                          12,
-                                          12,
-                                          12,
-                                        ),
-                                        gridDelegate:
-                                            SliverGridDelegateWithFixedCrossAxisCount(
-                                              crossAxisCount: _crossAxisCount,
-                                              mainAxisSpacing: spacing,
-                                              crossAxisSpacing: spacing,
-                                              childAspectRatio: 1.0,
-                                            ),
-                                        itemCount: filtered.length,
-                                        itemBuilder: (context, index) {
-                                          final url = filtered[index];
-                                          final key = p.basename(url);
-                                          final fullTags = photoTags[key] ?? [];
-                                          // Only show tags <= 8 characters in the grid
-                                          final shortTags = fullTags
-                                              .where((t) => t.length <= 8)
-                                              .toList();
-                                          final visibleTags = shortTags
-                                              .take(3)
-                                              .toList();
-
-                                          final isSelected = _selectedKeys
-                                              .contains(key);
-                                          return GestureDetector(
-                                            onTap: () async {
-                                              if (_isSelectMode) {
-                                                setState(() {
-                                                  if (isSelected) {
-                                                    _selectedKeys.remove(key);
-                                                  } else {
-                                                    _selectedKeys.add(key);
-                                                  }
-                                                });
-                                                return;
-                                              }
-
-                                              // Open full-screen viewer. For local assets, load the file first.
-                                              if (url.startsWith('local:')) {
-                                                final id = url.substring(
-                                                  'local:'.length,
+                                    child: LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        final gridHeight =
+                                            constraints.maxHeight;
+                                        return Stack(
+                                          children: [
+                                            // Grid with RefreshIndicator
+                                            RefreshIndicator(
+                                              displacement: 80,
+                                              edgeOffset: 0,
+                                              onRefresh: () async {
+                                                developer.log(
+                                                  '🔄 Pull-to-refresh triggered',
                                                 );
-                                                final asset = _localAssets[id];
-                                                if (asset != null) {
-                                                  final file = await asset.file;
-                                                  if (file != null && mounted) {
-                                                    final nav = Navigator.of(
-                                                      // ignore: use_build_context_synchronously
-                                                      context,
-                                                    );
-                                                    nav.push(
-                                                      MaterialPageRoute(
-                                                        builder: (_) =>
-                                                            PhotoViewer(
-                                                              filePath:
-                                                                  file.path,
-                                                              heroTag: key,
-                                                            ),
-                                                      ),
-                                                    );
-                                                  }
-                                                }
-                                              } else if (url.startsWith(
-                                                'file:',
-                                              )) {
-                                                final path = url.substring(
-                                                  'file:'.length,
+                                                await _loadAllImages();
+                                                developer.log(
+                                                  '✅ Refresh complete',
                                                 );
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (_) => PhotoViewer(
-                                                      filePath: path,
-                                                      heroTag: key,
+                                              },
+                                              child: GridView.builder(
+                                                controller: _scrollController,
+                                                padding: const EdgeInsets.only(
+                                                  left: 12,
+                                                  right: 12,
+                                                  top: 12,
+                                                  bottom:
+                                                      100, // Extra space for navbar
+                                                ),
+                                                gridDelegate:
+                                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                                      crossAxisCount:
+                                                          _crossAxisCount,
+                                                      mainAxisSpacing: spacing,
+                                                      crossAxisSpacing: spacing,
+                                                      childAspectRatio: 1.0,
                                                     ),
-                                                  ),
-                                                );
-                                              } else {
-                                                final resolved =
-                                                    ApiService.resolveImageUrl(
-                                                      url,
-                                                    );
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (_) => PhotoViewer(
-                                                      networkUrl: resolved,
-                                                      heroTag: key,
-                                                    ),
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                            onLongPress: () {
-                                              setState(() {
-                                                _isSelectMode = true;
-                                                _selectedKeys.add(key);
-                                              });
-                                            },
-                                            child: ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              child: Stack(
-                                                fit: StackFit.expand,
-                                                children: [
-                                                  // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
-                                                  Hero(
-                                                    tag: key,
-                                                    child:
-                                                        url.startsWith('local:')
-                                                        ? FutureBuilder<
-                                                            Uint8List?
-                                                          >(
-                                                            future:
-                                                                _getCachedThumbFuture(
-                                                                  url.substring(
-                                                                    6,
-                                                                  ),
-                                                                ),
-                                                            builder: (context, snap) {
-                                                              if (snap.hasData &&
-                                                                  snap.data !=
-                                                                      null) {
-                                                                return Image.memory(
-                                                                  snap.data!,
-                                                                  fit: BoxFit
-                                                                      .cover,
-                                                                );
-                                                              }
-                                                              if (snap.connectionState ==
-                                                                  ConnectionState
-                                                                      .waiting) {
-                                                                return Container(
-                                                                  color: Colors
-                                                                      .black26,
-                                                                );
-                                                              }
-                                                              return Container(
-                                                                color: Colors
-                                                                    .black26,
-                                                                child: const Icon(
-                                                                  Icons
-                                                                      .broken_image,
-                                                                  color: Colors
-                                                                      .white54,
-                                                                ),
+                                                itemCount: filtered.length,
+                                                itemBuilder: (context, index) {
+                                                  final url = filtered[index];
+                                                  final key = p.basename(url);
+                                                  final fullTags =
+                                                      photoTags[key] ?? [];
+                                                  // Only show tags <= 8 characters in the grid
+                                                  final shortTags = fullTags
+                                                      .where(
+                                                        (t) => t.length <= 8,
+                                                      )
+                                                      .toList();
+                                                  final visibleTags = shortTags
+                                                      .take(3)
+                                                      .toList();
+
+                                                  final isSelected =
+                                                      _selectedKeys.contains(
+                                                        key,
+                                                      );
+                                                  return RepaintBoundary(
+                                                    child: GestureDetector(
+                                                      onTap: () async {
+                                                        if (_isSelectMode) {
+                                                          setState(() {
+                                                            if (isSelected) {
+                                                              _selectedKeys
+                                                                  .remove(key);
+                                                            } else {
+                                                              _selectedKeys.add(
+                                                                key,
                                                               );
-                                                            },
-                                                          )
-                                                        : (url.startsWith(
-                                                                'file:',
-                                                              )
-                                                              ? (() {
-                                                                  final path = url
-                                                                      .substring(
-                                                                        'file:'
-                                                                            .length,
-                                                                      );
-                                                                  return ClipRRect(
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                          6,
-                                                                        ),
-                                                                    child: Image.file(
-                                                                      File(
-                                                                        path,
-                                                                      ),
-                                                                      fit: BoxFit
-                                                                          .cover,
-                                                                    ),
-                                                                  );
-                                                                })()
-                                                              : Image.network(
-                                                                  ApiService.resolveImageUrl(
-                                                                    url,
-                                                                  ),
-                                                                  fit: BoxFit
-                                                                      .cover,
-                                                                  // Show a neutral placeholder instead of the
-                                                                  // engine's red X when the server returns 404
-                                                                  // or other network errors.
-                                                                  errorBuilder:
-                                                                      (
-                                                                        context,
-                                                                        error,
-                                                                        stackTrace,
-                                                                      ) {
-                                                                        return Container(
-                                                                          color:
-                                                                              Colors.black26,
-                                                                          child: const Center(
-                                                                            child: Icon(
-                                                                              Icons.broken_image,
-                                                                              color: Colors.white54,
-                                                                              size: 36,
-                                                                            ),
-                                                                          ),
-                                                                        );
-                                                                      },
-                                                                )),
-                                                  ),
-                                                  if (_isSelectMode)
-                                                    Positioned(
-                                                      top: 8,
-                                                      left: 8,
-                                                      child: Container(
-                                                        decoration: BoxDecoration(
-                                                          shape:
-                                                              BoxShape.circle,
-                                                          color: isSelected
-                                                              ? Colors
-                                                                    .blueAccent
-                                                              : Colors.black54,
-                                                        ),
-                                                        padding:
-                                                            const EdgeInsets.all(
+                                                            }
+                                                          });
+                                                          return;
+                                                        }
+
+                                                        // Build list of all photos for swipe navigation (instant, no file loading)
+                                                        final allPhotos =
+                                                            _buildPhotoDataList(
+                                                              filtered,
+                                                            );
+
+                                                        // Navigate to photo viewer with swipe support
+                                                        Navigator.push(
+                                                          context,
+                                                          MaterialPageRoute(
+                                                            builder: (_) =>
+                                                                PhotoViewer(
+                                                                  heroTag: key,
+                                                                  allPhotos:
+                                                                      allPhotos,
+                                                                  initialIndex:
+                                                                      index,
+                                                                ),
+                                                          ),
+                                                        );
+                                                      },
+                                                      onLongPress: () {
+                                                        setState(() {
+                                                          _isSelectMode = true;
+                                                          _selectedKeys.add(
+                                                            key,
+                                                          );
+                                                        });
+                                                      },
+                                                      child: ClipRRect(
+                                                        borderRadius:
+                                                            BorderRadius.circular(
                                                               6,
                                                             ),
-                                                        child: Icon(
-                                                          isSelected
-                                                              ? Icons.check_box
-                                                              : Icons
-                                                                    .crop_square,
-                                                          color: Colors.white,
-                                                          size: 18,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  if (_showTags)
-                                                    Positioned(
-                                                      left: 8,
-                                                      right: 8,
-                                                      bottom: 8,
-                                                      child: LayoutBuilder(
-                                                        builder: (context, constraints) {
-                                                          final chips =
-                                                              _buildTagChipsForWidth(
-                                                                visibleTags,
-                                                                fullTags,
-                                                                constraints
-                                                                    .maxWidth,
-                                                              );
-
-                                                          // Check if this photo was recently validated (within last 10 seconds)
-                                                          final photoID =
-                                                              PhotoId.canonicalId(
-                                                                url,
-                                                              );
-                                                          final recentlyValidated =
-                                                              _recentlyValidated
-                                                                  .containsKey(
-                                                                    photoID,
-                                                                  ) &&
-                                                              DateTime.now()
-                                                                      .difference(
-                                                                        _recentlyValidated[photoID]!,
-                                                                      )
-                                                                      .inSeconds <
-                                                                  10;
-
-                                                          return Row(
-                                                            mainAxisSize:
-                                                                MainAxisSize
-                                                                    .min,
-                                                            children: [
-                                                              Expanded(
-                                                                child: AnimatedOpacity(
-                                                                  opacity: 1.0,
-                                                                  duration:
-                                                                      const Duration(
-                                                                        milliseconds:
-                                                                            300,
+                                                        child: Stack(
+                                                          fit: StackFit.expand,
+                                                          children: [
+                                                            // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
+                                                            Hero(
+                                                              tag: key,
+                                                              child:
+                                                                  url.startsWith(
+                                                                    'local:',
+                                                                  )
+                                                                  ? FutureBuilder<
+                                                                      Uint8List?
+                                                                    >(
+                                                                      future: _getCachedThumbFuture(
+                                                                        url.substring(
+                                                                          6,
+                                                                        ),
                                                                       ),
-                                                                  child: Wrap(
-                                                                    spacing: 4,
-                                                                    children:
-                                                                        chips,
+                                                                      builder:
+                                                                          (
+                                                                            context,
+                                                                            snap,
+                                                                          ) {
+                                                                            if (snap.hasData &&
+                                                                                snap.data !=
+                                                                                    null) {
+                                                                              return Image.memory(
+                                                                                snap.data!,
+                                                                                fit: BoxFit.cover,
+                                                                              );
+                                                                            }
+                                                                            if (snap.connectionState ==
+                                                                                ConnectionState.waiting) {
+                                                                              return Container(
+                                                                                color: Colors.black26,
+                                                                              );
+                                                                            }
+                                                                            return Container(
+                                                                              color: Colors.black26,
+                                                                              child: const Icon(
+                                                                                Icons.broken_image,
+                                                                                color: Colors.white54,
+                                                                              ),
+                                                                            );
+                                                                          },
+                                                                    )
+                                                                  : (url.startsWith(
+                                                                          'file:',
+                                                                        )
+                                                                        ? (() {
+                                                                            final path = url.substring(
+                                                                              'file:'.length,
+                                                                            );
+                                                                            return ClipRRect(
+                                                                              borderRadius: BorderRadius.circular(
+                                                                                6,
+                                                                              ),
+                                                                              child: Image.file(
+                                                                                File(
+                                                                                  path,
+                                                                                ),
+                                                                                fit: BoxFit.cover,
+                                                                              ),
+                                                                            );
+                                                                          })()
+                                                                        : Image.network(
+                                                                            ApiService.resolveImageUrl(
+                                                                              url,
+                                                                            ),
+                                                                            fit:
+                                                                                BoxFit.cover,
+                                                                            // Show a neutral placeholder instead of the
+                                                                            // engine's red X when the server returns 404
+                                                                            // or other network errors.
+                                                                            errorBuilder:
+                                                                                (
+                                                                                  context,
+                                                                                  error,
+                                                                                  stackTrace,
+                                                                                ) {
+                                                                                  return Container(
+                                                                                    color: Colors.black26,
+                                                                                    child: const Center(
+                                                                                      child: Icon(
+                                                                                        Icons.broken_image,
+                                                                                        color: Colors.white54,
+                                                                                        size: 36,
+                                                                                      ),
+                                                                                    ),
+                                                                                  );
+                                                                                },
+                                                                          )),
+                                                            ),
+                                                            if (_isSelectMode)
+                                                              Positioned(
+                                                                top: 8,
+                                                                left: 8,
+                                                                child: Container(
+                                                                  decoration: BoxDecoration(
+                                                                    shape: BoxShape
+                                                                        .circle,
+                                                                    color:
+                                                                        isSelected
+                                                                        ? Colors
+                                                                              .blueAccent
+                                                                        : Colors
+                                                                              .black54,
+                                                                  ),
+                                                                  padding:
+                                                                      const EdgeInsets.all(
+                                                                        6,
+                                                                      ),
+                                                                  child: Icon(
+                                                                    isSelected
+                                                                        ? Icons
+                                                                              .check_box
+                                                                        : Icons
+                                                                              .crop_square,
+                                                                    color: Colors
+                                                                        .white,
+                                                                    size: 18,
                                                                   ),
                                                                 ),
                                                               ),
-                                                              if (recentlyValidated)
-                                                                Padding(
-                                                                  padding:
-                                                                      const EdgeInsets.only(
-                                                                        left: 4,
-                                                                      ),
-                                                                  child: Container(
-                                                                    padding:
-                                                                        const EdgeInsets.all(
-                                                                          4,
-                                                                        ),
-                                                                    decoration: BoxDecoration(
-                                                                      color: Colors
-                                                                          .green
-                                                                          .withValues(
+                                                            if (_showTags)
+                                                              Positioned(
+                                                                left: 8,
+                                                                right: 8,
+                                                                bottom: 8,
+                                                                child: LayoutBuilder(
+                                                                  builder:
+                                                                      (
+                                                                        context,
+                                                                        constraints,
+                                                                      ) {
+                                                                        final chips = _buildTagChipsForWidth(
+                                                                          visibleTags,
+                                                                          fullTags,
+                                                                          constraints
+                                                                              .maxWidth,
+                                                                        );
+
+                                                                        // Check if this photo was recently validated (within last 10 seconds)
+                                                                        final photoID =
+                                                                            PhotoId.canonicalId(
+                                                                              url,
+                                                                            );
+                                                                        final recentlyValidated =
+                                                                            _recentlyValidated.containsKey(
+                                                                              photoID,
+                                                                            ) &&
+                                                                            DateTime.now()
+                                                                                    .difference(
+                                                                                      _recentlyValidated[photoID]!,
+                                                                                    )
+                                                                                    .inSeconds <
+                                                                                10;
+
+                                                                        return Row(
+                                                                          mainAxisSize:
+                                                                              MainAxisSize.min,
+                                                                          children: [
+                                                                            Expanded(
+                                                                              child: AnimatedOpacity(
+                                                                                opacity: 1.0,
+                                                                                duration: const Duration(
+                                                                                  milliseconds: 300,
+                                                                                ),
+                                                                                child: Wrap(
+                                                                                  spacing: 4,
+                                                                                  children: chips,
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                            if (recentlyValidated)
+                                                                              Padding(
+                                                                                padding: const EdgeInsets.only(
+                                                                                  left: 4,
+                                                                                ),
+                                                                                child: Container(
+                                                                                  padding: const EdgeInsets.all(
+                                                                                    4,
+                                                                                  ),
+                                                                                  decoration: BoxDecoration(
+                                                                                    color: Colors.green.withValues(
+                                                                                      alpha: 0.9,
+                                                                                    ),
+                                                                                    shape: BoxShape.circle,
+                                                                                    boxShadow: [
+                                                                                      BoxShadow(
+                                                                                        color: Colors.black.withValues(
+                                                                                          alpha: 0.3,
+                                                                                        ),
+                                                                                        offset: const Offset(
+                                                                                          0,
+                                                                                          0.5,
+                                                                                        ),
+                                                                                        blurRadius: 2,
+                                                                                      ),
+                                                                                    ],
+                                                                                  ),
+                                                                                  child: const Icon(
+                                                                                    Icons.auto_awesome,
+                                                                                    size: 14,
+                                                                                    color: Colors.white,
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                          ],
+                                                                        );
+                                                                      },
+                                                                ),
+                                                              ),
+                                                            // When tags are hidden, show scan status indicator
+                                                            if (!_showTags)
+                                                              Positioned(
+                                                                right: 6,
+                                                                bottom: 6,
+                                                                child:
+                                                                    fullTags
+                                                                        .isNotEmpty
+                                                                    // Green sparkles = scanned
+                                                                    ? Container(
+                                                                        padding:
+                                                                            const EdgeInsets.all(
+                                                                              4,
+                                                                            ),
+                                                                        decoration: BoxDecoration(
+                                                                          color: Colors.green.withValues(
                                                                             alpha:
                                                                                 0.9,
                                                                           ),
-                                                                      shape: BoxShape
-                                                                          .circle,
-                                                                      boxShadow: [
-                                                                        BoxShadow(
-                                                                          color: Colors.black.withValues(
-                                                                            alpha:
-                                                                                0.3,
-                                                                          ),
-                                                                          offset: const Offset(
-                                                                            0,
-                                                                            0.5,
-                                                                          ),
-                                                                          blurRadius:
-                                                                              2,
+                                                                          shape:
+                                                                              BoxShape.circle,
+                                                                          boxShadow: [
+                                                                            BoxShadow(
+                                                                              color: Colors.black.withValues(
+                                                                                alpha: 0.3,
+                                                                              ),
+                                                                              blurRadius: 2,
+                                                                            ),
+                                                                          ],
                                                                         ),
-                                                                      ],
-                                                                    ),
-                                                                    child: const Icon(
-                                                                      Icons
-                                                                          .auto_awesome,
-                                                                      size: 14,
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                            ],
-                                                          );
-                                                        },
+                                                                        child: const Icon(
+                                                                          Icons
+                                                                              .auto_awesome,
+                                                                          size:
+                                                                              12,
+                                                                          color:
+                                                                              Colors.white,
+                                                                        ),
+                                                                      )
+                                                                    // Grey circle outline = not scanned
+                                                                    : Container(
+                                                                        width:
+                                                                            20,
+                                                                        height:
+                                                                            20,
+                                                                        decoration: BoxDecoration(
+                                                                          shape:
+                                                                              BoxShape.circle,
+                                                                          border: Border.all(
+                                                                            color:
+                                                                                Colors.grey.shade400,
+                                                                            width:
+                                                                                2,
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                              ),
+                                                          ],
+                                                        ),
                                                       ),
                                                     ),
-                                                  // When tags are hidden, show scan status indicator
-                                                  if (!_showTags)
-                                                    Positioned(
-                                                      right: 6,
-                                                      bottom: 6,
-                                                      child: fullTags.isNotEmpty
-                                                          // Green sparkles = scanned
-                                                          ? Container(
-                                                              padding:
-                                                                  const EdgeInsets.all(
-                                                                    4,
-                                                                  ),
-                                                              decoration: BoxDecoration(
-                                                                color: Colors
-                                                                    .green
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.9,
-                                                                    ),
-                                                                shape: BoxShape
-                                                                    .circle,
-                                                                boxShadow: [
-                                                                  BoxShadow(
-                                                                    color: Colors
-                                                                        .black
-                                                                        .withValues(
-                                                                          alpha:
-                                                                              0.3,
-                                                                        ),
-                                                                    blurRadius:
-                                                                        2,
-                                                                  ),
-                                                                ],
-                                                              ),
-                                                              child: const Icon(
-                                                                Icons
-                                                                    .auto_awesome,
-                                                                size: 12,
-                                                                color: Colors
-                                                                    .white,
-                                                              ),
-                                                            )
-                                                          // Grey circle outline = not scanned
-                                                          : Container(
-                                                              width: 20,
-                                                              height: 20,
-                                                              decoration: BoxDecoration(
-                                                                shape: BoxShape
-                                                                    .circle,
-                                                                border: Border.all(
-                                                                  color: Colors
-                                                                      .grey
-                                                                      .shade400,
-                                                                  width: 2,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                    ),
-                                                ],
+                                                  );
+                                                },
                                               ),
                                             ),
-                                          );
-                                        },
-                                      ),
+                                            // Fast Scroller overlay
+                                            _buildFastScroller(
+                                              filtered,
+                                              gridHeight,
+                                            ),
+                                          ],
+                                        );
+                                      },
                                     ),
                                   ),
                                 ],
@@ -4464,6 +4683,20 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   if (confirm != true) return;
                                                   try {
                                                     // Clear server tags first
+                                                    // IMMEDIATELY stop any ongoing scanning/validation
+                                                    _scanning = false;
+                                                    _validating = false;
+                                                    _validationCancelled = true;
+                                                    _progressRefreshTimer
+                                                        ?.cancel();
+                                                    _smoothProgressTimer
+                                                        ?.cancel();
+                                                    _dotAnimationTimer
+                                                        ?.cancel();
+                                                    developer.log(
+                                                      '🛑 Stopped scanning/validation for tag clear',
+                                                    );
+
                                                     try {
                                                       await http
                                                           .delete(
@@ -4493,8 +4726,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     final removed =
                                                         await TagStore.clearAllTags();
 
-                                                    // Clear in-memory tags
+                                                    // Clear in-memory tags AND detections
                                                     photoTags.clear();
+                                                    photoAllDetections.clear();
 
                                                     // Reset validation state to allow re-scan
                                                     _validationComplete = false;
@@ -4519,6 +4753,12 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         ),
                                                       );
                                                     }
+
+                                                    // Start fresh scan after clearing
+                                                    developer.log(
+                                                      '🔄 Starting fresh scan after tag clear',
+                                                    );
+                                                    await _startAutoScanIfNeeded();
                                                   } catch (e) {
                                                     developer.log(
                                                       'Failed to remove tags: $e',

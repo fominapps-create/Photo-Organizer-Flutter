@@ -11,6 +11,9 @@ torchvision>=0.15.0
 transformers>=4.35.0
 pillow>=10.0.0
 
+# MobileCLIP (lightweight CLIP alternative for free tier)
+open_clip_torch>=2.24.0
+
 # Image processing
 opencv-python>=4.8.0
 

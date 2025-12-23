@@ -306,7 +306,7 @@ async def detect_tags_batch(files: List["UploadFile"] = File(...), photoIDs: str
     # Batch classify with YOLO+CLIP hybrid or CLIP-only based on config
     try:
         from .config import AUTO_TAG_MAX, USE_HYBRID_CLASSIFICATION
-        from .clip_model import classify_batch as clip_classify_batch
+        from .clip_switcher import classify_batch as clip_classify_batch
         
         max_tags = AUTO_TAG_MAX if AUTO_TAG_MAX is not None else 5
         # Use CLIP-specific threshold for batch classification as well
@@ -469,7 +469,7 @@ async def validate_yolo_classifications(
     # Run validation
     try:
         from .yolo_clip_hybrid import validate_batch_with_clip
-        from .clip_model import classify_batch as clip_classify_batch
+        from .clip_switcher import classify_batch as clip_classify_batch
         from .config import CLIP_CONFIDENCE_THRESHOLD
         
         clip_threshold = CLIP_CONFIDENCE_THRESHOLD if 'CLIP_CONFIDENCE_THRESHOLD' in globals() else CONFIDENCE_THRESHOLD
