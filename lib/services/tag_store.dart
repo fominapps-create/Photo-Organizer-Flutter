@@ -56,7 +56,6 @@ class TagStore {
   static Future<int> clearAllTags() async {
     final prefs = await SharedPreferences.getInstance();
     final keys = prefs.getKeys();
-    int removed = 0;
 
     // Find all tag and detection keys
     final tagKeys = keys
@@ -65,13 +64,10 @@ class TagStore {
         )
         .toList();
 
-    // Remove them all
-    for (final key in tagKeys) {
-      await prefs.remove(key);
-      removed++;
-    }
+    // Remove them all in parallel for speed
+    await Future.wait(tagKeys.map((key) => prefs.remove(key)));
 
-    return removed;
+    return tagKeys.length;
   }
 
   /// Save multiple tags at once (faster than individual saves)

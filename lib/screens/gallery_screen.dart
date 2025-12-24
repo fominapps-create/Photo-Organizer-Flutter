@@ -58,6 +58,10 @@ class GalleryScreenState extends State<GalleryScreen>
   final Map<String, double> _textWidthCache = {};
   // Auto-scan state
   bool _scanning = false;
+  bool _clearingTags = false; // Block scans during tag clearing
+  bool _hasScannedAtLeastOneBatch = false; // Must scan before validating
+  bool _galleryReadyShown =
+      false; // Prevent duplicate 'gallery ready' snackbars
   bool _scanProgressMinimized = false;
   final ValueNotifier<double> _scanProgressNotifier = ValueNotifier<double>(
     0.0,
@@ -466,8 +470,11 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Sync tags from server in background without blocking UI
   void _syncTagsFromServerInBackground() {
+    // Don't sync during tag clearing - the server DB was just wiped
+    if (_clearingTags) return;
+
     ApiService.pingServer(timeout: const Duration(seconds: 2)).then((online) {
-      if (online && mounted) {
+      if (online && mounted && !_clearingTags) {
         _syncTagsFromServer().then((_) {
           if (mounted) setState(() {});
         });
@@ -481,8 +488,12 @@ class GalleryScreenState extends State<GalleryScreen>
     _autoScanRetryTimer = Timer.periodic(const Duration(seconds: 30), (
       timer,
     ) async {
-      // Only retry if not already scanning/validating and not complete
-      if (!_scanning && !_validating && !_validationComplete && mounted) {
+      // Only retry if not already scanning/validating and not complete, and not clearing tags
+      if (!_scanning &&
+          !_validating &&
+          !_validationComplete &&
+          !_clearingTags &&
+          mounted) {
         developer.log(
           '🔄 Auto-retry: Checking if scan is needed (silent, no reload)...',
         );
@@ -534,15 +545,10 @@ class GalleryScreenState extends State<GalleryScreen>
       }
     });
 
-    // Also keep the slower UI refresh for other elements
-    _progressRefreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (mounted && (_scanning || _validating)) {
-        setState(() {});
-      } else {
-        timer.cancel();
-        _progressRefreshTimer = null;
-      }
-    });
+    // NOTE: Removed 2-second setState timer - it was rebuilding the entire
+    // 3000+ photo grid every 2 seconds during scan, causing major lag.
+    // All important UI elements (progress bar, dots, count) already use
+    // ValueListenableBuilder and update independently.
   }
 
   /// Show a small tooltip-like popup near the badge
@@ -584,20 +590,30 @@ class GalleryScreenState extends State<GalleryScreen>
                     ),
                   ],
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      message,
+                // Use ValueListenableBuilder for live progress updates
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _scannedCountNotifier,
+                  builder: (context, scannedCount, _) {
+                    final pct = _cachedLocalPhotoCount > 0
+                        ? (scannedCount / _cachedLocalPhotoCount * 100)
+                              .toStringAsFixed(0)
+                        : '0';
+                    final liveMessage = _scanning
+                        ? 'Scanning $scannedCount/$_cachedLocalPhotoCount ($pct%)'
+                        : _validating
+                        ? 'Validating...'
+                        : _validationComplete
+                        ? '✓ All $scannedCount photos scanned'
+                        : message;
+                    return Text(
+                      liveMessage,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.close, color: Colors.white70, size: 14),
-                  ],
+                    );
+                  },
                 ),
               ),
             ),
@@ -607,7 +623,48 @@ class GalleryScreenState extends State<GalleryScreen>
     );
     overlay.insert(_badgeTooltipEntry!);
     // Auto-dismiss after 10 seconds
-    _tooltipTimer = Timer(const Duration(seconds: 10), _dismissTooltip);
+    _tooltipTimer = Timer(const Duration(seconds: 3), _dismissTooltip);
+  }
+
+  /// Sort photos for optimal scan order: alternate between newest and oldest
+  /// This prioritizes both ends of the gallery (most browsed) and leaves middle for last
+  List<String> _sortForOptimalScanOrder(List<String> urls) {
+    if (urls.length <= 2) return urls;
+
+    // Sort by date first (newest first)
+    final sorted = List<String>.from(urls);
+    sorted.sort((a, b) {
+      if (a.startsWith('local:') && b.startsWith('local:')) {
+        final aId = a.substring('local:'.length);
+        final bId = b.substring('local:'.length);
+        final aAsset = _localAssets[aId];
+        final bAsset = _localAssets[bId];
+        if (aAsset != null && bAsset != null) {
+          return bAsset.createDateTime.compareTo(aAsset.createDateTime);
+        }
+      }
+      return 0;
+    });
+
+    // Interleave: take from front (newest) and back (oldest) alternately
+    final result = <String>[];
+    int front = 0;
+    int back = sorted.length - 1;
+    bool takeFront = true;
+
+    while (front <= back) {
+      if (takeFront) {
+        result.add(sorted[front]);
+        front++;
+      } else {
+        result.add(sorted[back]);
+        back--;
+      }
+      takeFront = !takeFront;
+    }
+
+    developer.log('📅 Optimized scan order: newest/oldest first, middle last');
+    return result;
   }
 
   /// Get year from a photo URL for fast scroller
@@ -649,16 +706,19 @@ class GalleryScreenState extends State<GalleryScreen>
       final targetOffset = (fraction * maxExtent).clamp(0.0, maxExtent);
       _scrollController.jumpTo(targetOffset);
 
-      // Update current year display
+      // Update current year display (only if changed to avoid unnecessary rebuilds)
       final index = (fraction * filtered.length)
           .clamp(0, filtered.length - 1)
           .toInt();
       if (index < filtered.length) {
         final year = _getYearForPhoto(filtered[index]);
         if (year != null) {
-          setState(() {
-            _currentScrollYear = "'${year.toString().substring(2)}";
-          });
+          final newYearStr = "'${year.toString().substring(2)}";
+          if (_currentScrollYear != newYearStr) {
+            setState(() {
+              _currentScrollYear = newYearStr;
+            });
+          }
         }
       }
     }
@@ -713,10 +773,10 @@ class GalleryScreenState extends State<GalleryScreen>
               });
             },
             child: Container(
-              width: 16,
+              width: 22,
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(11),
               ),
               child: Stack(
                 children: [
@@ -827,6 +887,10 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log('⏸️ Scan already in progress');
       return;
     }
+    if (_clearingTags) {
+      developer.log('⏸️ Tag clearing in progress, blocking scan');
+      return;
+    }
     final localUrls = imageUrls
         .where((u) => u.startsWith('local:') || u.startsWith('file:'))
         .toList();
@@ -887,6 +951,18 @@ class GalleryScreenState extends State<GalleryScreen>
 
     if (missing.isEmpty) {
       developer.log('✅ All photos already scanned!');
+
+      // Double-check: verify that photoTags actually has entries for all/most photos
+      // This prevents validation from starting if tags were just cleared
+      final scannedCount = photoTags.length;
+      if (scannedCount == 0 || scannedCount < localUrls.length * 0.9) {
+        developer.log(
+          '⚠️ Tags not fully loaded yet (have $scannedCount, need ~${localUrls.length}). NOT starting validation.',
+        );
+        // Don't try to validate - just return and let the scan happen first
+        return;
+      }
+
       developer.log('🔍 Now checking if validation is needed...');
       // Check if validation is complete
       // If all photos are scanned but validation isn't complete, trigger it
@@ -910,17 +986,28 @@ class GalleryScreenState extends State<GalleryScreen>
         }
 
         if (hasYoloImages) {
+          // Only validate if we've actually scanned photos
+          if (!_hasScannedAtLeastOneBatch) {
+            developer.log(
+              '⚠️ Found YOLO photos but no batches scanned yet - NOT validating',
+            );
+            return;
+          }
           developer.log(
             '📸 Found YOLO-classified photos. Starting validation...',
           );
           _validateAllClassifications();
-        } else {
+        } else if (_hasScannedAtLeastOneBatch) {
           developer.log(
             '✅ No YOLO-classified photos found. Marking validation as complete.',
           );
           setState(() {
             _validationComplete = true;
           });
+        } else {
+          developer.log(
+            '⚠️ No YOLO photos but also no batches scanned - NOT marking complete',
+          );
         }
       } else {
         developer.log(
@@ -930,9 +1017,13 @@ class GalleryScreenState extends State<GalleryScreen>
       return;
     }
 
-    // Scan all photos that need scanning
-    final toScan = missing;
+    // Sort photos by date and interleave newest/oldest for better UX
+    // Users typically browse recent photos or very old ones, middle is least viewed
+    final toScan = _sortForOptimalScanOrder(missing);
     developer.log('🚀 Starting scan of ${toScan.length} photos...');
+
+    // Reset the 'gallery ready' flag so message shows again after this scan
+    _galleryReadyShown = false;
     setState(() {
       _scanning = true;
       _scanTotal = toScan.length;
@@ -967,8 +1058,8 @@ class GalleryScreenState extends State<GalleryScreen>
     if (!_validating) {
       _dotAnimationTimer?.cancel();
       _dotAnimationTimer = null;
-      // Show combined completion message if validation is already done
-      if (_validationComplete) {
+      // Show combined completion message if validation is already done AND we scanned something
+      if (_validationComplete && _hasScannedAtLeastOneBatch) {
         _showGalleryReadyMessage();
       }
     }
@@ -977,7 +1068,20 @@ class GalleryScreenState extends State<GalleryScreen>
   // Manual scan helper restored: scans missing images by default,
   // or force-rescans all device images when `force` is true.
   Future<void> _manualScan({bool force = false}) async {
-    if (_scanning) return;
+    developer.log(
+      '🔧 _manualScan called with force=$force, _scanning=$_scanning, _clearingTags=$_clearingTags',
+    );
+    // Allow force scan even if _scanning is true (for post-clear recovery)
+    // but block if actually scanning (has scanTotal > 0)
+    if (_scanning && _scanTotal > 0) {
+      developer.log('⏸️ Already actively scanning, blocking manual scan');
+      return;
+    }
+    // Allow force=true to bypass _clearingTags check (post-clear rescan needs this)
+    if (_clearingTags && !force) {
+      developer.log('⏸️ Tag clearing in progress, blocking manual scan');
+      return;
+    }
 
     // Check server connectivity first
     final serverAvailable = await ApiService.pingServer(
@@ -994,7 +1098,13 @@ class GalleryScreenState extends State<GalleryScreen>
     final localUrls = imageUrls
         .where((u) => u.startsWith('local:') || u.startsWith('file:'))
         .toList();
-    if (localUrls.isEmpty) return;
+    developer.log(
+      '🔧 _manualScan: Found ${localUrls.length} local photos (imageUrls.length=${imageUrls.length})',
+    );
+    if (localUrls.isEmpty) {
+      developer.log('⚠️ _manualScan: No local photos found, returning');
+      return;
+    }
 
     // Use canonical photoID keys to check for scanned images
     final toScan = <String>[];
@@ -1015,10 +1125,19 @@ class GalleryScreenState extends State<GalleryScreen>
       return;
     }
 
+    // Reset gallery ready flag so message shows again after scan
+    _galleryReadyShown = false;
+
+    // Update cached local photo count for accurate progress display
+    _cachedLocalPhotoCount = localUrls.length;
+
     setState(() {
       _scanning = true;
       _scanTotal = toScan.length;
-      developer.log('📊 SET _scanTotal = $_scanTotal');
+      _validationComplete = false; // Reset validation since we're rescanning
+      developer.log(
+        '📊 SET _scanTotal = $_scanTotal, _cachedLocalPhotoCount = $_cachedLocalPhotoCount',
+      );
       // Don't reset _scanPaused - let user control pause/resume
       _scanProcessed = 0;
       _scanProgress = 0.0;
@@ -1052,14 +1171,59 @@ class GalleryScreenState extends State<GalleryScreen>
       _scanTotal = 0;
       _scanProcessed = 0;
     });
+
+    // After scan completes, mark as validation complete (YOLO-only scan doesn't need CLIP validation)
+    // BUT only if we actually scanned photos - don't complete if scan failed/aborted
+    if (mounted && !_validationComplete && _hasScannedAtLeastOneBatch) {
+      developer.log(
+        '✅ Manual scan complete with ${photoTags.length} tags, marking validation complete',
+      );
+      setState(() {
+        _validationComplete = true;
+      });
+      _showGalleryReadyMessage();
+    } else if (mounted && !_hasScannedAtLeastOneBatch) {
+      developer.log(
+        '⚠️ Manual scan ended but no batches were processed - NOT marking complete',
+      );
+    }
   }
 
   /// Validate all previously classified images with CLIP
   Future<void> _validateAllClassifications() async {
     developer.log('🔍 _validateAllClassifications called');
+    developer.log(
+      '   _scanning=$_scanning, _validating=$_validating, _clearingTags=$_clearingTags',
+    );
+    developer.log('   photoTags.length=${photoTags.length}');
 
     if (_scanning || _validating) {
       developer.log('⚠️ Already scanning or validating, returning');
+      return;
+    }
+
+    if (_clearingTags) {
+      developer.log('⏸️ Tag clearing in progress, blocking validation');
+      return;
+    }
+
+    // CRITICAL: Never validate if no batch has been scanned yet
+    if (!_hasScannedAtLeastOneBatch) {
+      developer.log(
+        '⏸️ No batch scanned yet. Validation blocked until scanning completes at least one batch.',
+      );
+      return;
+    }
+
+    // CRITICAL: Never start validation if we have no/few tags
+    // This prevents validation from starting before scanning
+    final localCount = imageUrls
+        .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+        .length;
+    if (photoTags.length < localCount * 0.9) {
+      developer.log(
+        '⏸️ Not enough photos scanned yet (${photoTags.length}/$localCount). Blocking validation.',
+      );
       return;
     }
 
@@ -1509,6 +1673,9 @@ class GalleryScreenState extends State<GalleryScreen>
               batchDetectionsToSave[photoID] = allDetections;
               // Update scanned count notifier for live UI updates
               _scannedCountNotifier.value = photoTags.length;
+              developer.log(
+                '📊 Updated _scannedCountNotifier to ${photoTags.length}',
+              );
 
               if (tags.isNotEmpty) {
                 developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
@@ -1537,6 +1704,17 @@ class GalleryScreenState extends State<GalleryScreen>
             developer.log(
               '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
             );
+
+            // Mark that at least one batch was scanned (enables validation)
+            _hasScannedAtLeastOneBatch = true;
+
+            // Trigger UI refresh to show new tags on photos
+            if (mounted) {
+              developer.log('🔄 Triggering setState after batch save');
+              // Also invalidate filter cache so tags appear on grid
+              _lastPhotoTagsLength = -1;
+              setState(() {});
+            }
           }
         } catch (e) {
           developer.log('Failed parsing batch response: $e');
@@ -1701,14 +1879,14 @@ class GalleryScreenState extends State<GalleryScreen>
       if (mounted) {
         setState(() {
           _validating = false;
-          // Only mark complete if scanning is also done
-          if (!_scanning) {
+          // Only mark complete if scanning is also done AND we actually scanned something
+          if (!_scanning && _hasScannedAtLeastOneBatch) {
             _validationComplete = true;
           }
         });
 
         // Cancel dot animation if scanning is also complete
-        if (!_scanning) {
+        if (!_scanning && _hasScannedAtLeastOneBatch) {
           _dotAnimationTimer?.cancel();
           _dotAnimationTimer = null;
           // Show combined completion message
@@ -1909,13 +2087,13 @@ class GalleryScreenState extends State<GalleryScreen>
       if (mounted) {
         setState(() {
           _validating = false;
-          // Only mark complete if scanning is also done
-          if (!_scanning) {
+          // Only mark complete if scanning is also done AND we actually scanned something
+          if (!_scanning && _hasScannedAtLeastOneBatch) {
             _validationComplete = true;
           }
         });
         // Cancel dot animation if scanning is also complete
-        if (!_scanning) {
+        if (!_scanning && _hasScannedAtLeastOneBatch) {
           _dotAnimationTimer?.cancel();
           _dotAnimationTimer = null;
           // Show combined completion message
@@ -1952,6 +2130,12 @@ class GalleryScreenState extends State<GalleryScreen>
   /// Show message when gallery is fully scanned and validated
   void _showGalleryReadyMessage() {
     if (!mounted) return;
+    // Only show once per scan cycle
+    if (_galleryReadyShown) {
+      developer.log('⏭️ Gallery ready message already shown, skipping');
+      return;
+    }
+    _galleryReadyShown = true;
     final totalPhotos = imageUrls
         .where((u) => u.startsWith('local:') || u.startsWith('file:'))
         .length;
@@ -3039,6 +3223,12 @@ class GalleryScreenState extends State<GalleryScreen>
   /// Sync all tags from server database to local storage
   /// This ensures local cache matches server data
   Future<void> _syncTagsFromServer() async {
+    // Don't sync during tag clearing - the server DB was just wiped
+    if (_clearingTags) {
+      developer.log('⏸️ Skipping server sync - tag clearing in progress');
+      return;
+    }
+
     developer.log('🔄 Starting tag sync from server...');
     try {
       final res = await http
@@ -3573,11 +3763,18 @@ class GalleryScreenState extends State<GalleryScreen>
                               top: 4, // 4px rule
                               child: Center(
                                 child: GestureDetector(
-                                  onTap: () => _showBadgeTooltip(
-                                    context,
-                                    '✓ All ${photoTags.length} photos scanned',
-                                    Colors.blue.shade700,
-                                  ),
+                                  onTap: () {
+                                    // Toggle tooltip - dismiss if already showing
+                                    if (_badgeTooltipEntry != null) {
+                                      _dismissTooltip();
+                                    } else {
+                                      _showBadgeTooltip(
+                                        context,
+                                        '✓ All ${photoTags.length} photos scanned',
+                                        Colors.blue.shade700,
+                                      );
+                                    }
+                                  },
                                   child: Container(
                                     padding: const EdgeInsets.all(
                                       4,
@@ -3616,6 +3813,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                   children: [
                                     GestureDetector(
                                       onTap: () {
+                                        // Toggle tooltip - dismiss if already showing
+                                        if (_badgeTooltipEntry != null) {
+                                          _dismissTooltip();
+                                          return;
+                                        }
                                         final pct = _cachedLocalPhotoCount > 0
                                             ? (photoTags.length /
                                                       _cachedLocalPhotoCount *
@@ -3680,7 +3882,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                         child: _buildLoadingDots(),
                                       ),
                                     // Show scan progress percentage during scanning
-                                    if (_scanning && _scanTotal > 0)
+                                    if (_scanning)
                                       Padding(
                                         padding: const EdgeInsets.only(
                                           top: 4,
@@ -3689,10 +3891,16 @@ class GalleryScreenState extends State<GalleryScreen>
                                           valueListenable:
                                               _scannedCountNotifier,
                                           builder: (context, scannedCount, _) {
-                                            final pct =
+                                            // Use _cachedLocalPhotoCount if available, otherwise fall back to _scanTotal
+                                            final totalPhotos =
                                                 _cachedLocalPhotoCount > 0
+                                                ? _cachedLocalPhotoCount
+                                                : (_scanTotal > 0
+                                                      ? _scanTotal
+                                                      : 1);
+                                            final pct = totalPhotos > 0
                                                 ? (scannedCount /
-                                                          _cachedLocalPhotoCount *
+                                                          totalPhotos *
                                                           100)
                                                       .toStringAsFixed(0)
                                                 : '0';
@@ -4003,6 +4211,9 @@ class GalleryScreenState extends State<GalleryScreen>
                             _lastScale = 1.0;
                           },
                           onScaleUpdate: (details) {
+                            // Only trigger zoom when 2+ fingers are on screen (true pinch gesture)
+                            if (details.pointerCount < 2) return;
+
                             // Detect scale changes more reliably with lower threshold for immediate response
                             final scaleDiff = details.scale - _lastScale;
 
@@ -4175,384 +4386,368 @@ class GalleryScreenState extends State<GalleryScreen>
                                             constraints.maxHeight;
                                         return Stack(
                                           children: [
-                                            // Grid with RefreshIndicator
-                                            RefreshIndicator(
-                                              displacement: 80,
-                                              edgeOffset: 0,
-                                              onRefresh: () async {
-                                                developer.log(
-                                                  '🔄 Pull-to-refresh triggered',
-                                                );
-                                                await _loadAllImages();
-                                                developer.log(
-                                                  '✅ Refresh complete',
-                                                );
-                                              },
-                                              child: GridView.builder(
-                                                controller: _scrollController,
-                                                padding: const EdgeInsets.only(
-                                                  left: 12,
-                                                  right: 12,
-                                                  top: 12,
-                                                  bottom:
-                                                      100, // Extra space for navbar
-                                                ),
-                                                gridDelegate:
-                                                    SliverGridDelegateWithFixedCrossAxisCount(
-                                                      crossAxisCount:
-                                                          _crossAxisCount,
-                                                      mainAxisSpacing: spacing,
-                                                      crossAxisSpacing: spacing,
-                                                      childAspectRatio: 1.0,
-                                                    ),
-                                                itemCount: filtered.length,
-                                                itemBuilder: (context, index) {
-                                                  final url = filtered[index];
-                                                  final key = p.basename(url);
-                                                  final fullTags =
-                                                      photoTags[key] ?? [];
-                                                  // Only show tags <= 8 characters in the grid
-                                                  final shortTags = fullTags
-                                                      .where(
-                                                        (t) => t.length <= 8,
-                                                      )
-                                                      .toList();
-                                                  final visibleTags = shortTags
-                                                      .take(3)
-                                                      .toList();
+                                            // Grid (refresh via button instead of pull-to-refresh)
+                                            GridView.builder(
+                                              controller: _scrollController,
+                                              padding: const EdgeInsets.only(
+                                                left: 12,
+                                                right: 12,
+                                                top: 12,
+                                                bottom:
+                                                    100, // Extra space for navbar
+                                              ),
+                                              gridDelegate:
+                                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                                    crossAxisCount:
+                                                        _crossAxisCount,
+                                                    mainAxisSpacing: spacing,
+                                                    crossAxisSpacing: spacing,
+                                                    childAspectRatio: 1.0,
+                                                  ),
+                                              itemCount: filtered.length,
+                                              itemBuilder: (context, index) {
+                                                final url = filtered[index];
+                                                final key = p.basename(url);
+                                                final fullTags =
+                                                    photoTags[key] ?? [];
+                                                // Show only the 1 main tag (first tag is highest priority from server)
+                                                final shortTags = fullTags
+                                                    .where((t) => t.length <= 8)
+                                                    .toList();
+                                                final visibleTags = shortTags
+                                                    .take(1)
+                                                    .toList();
 
-                                                  final isSelected =
-                                                      _selectedKeys.contains(
-                                                        key,
-                                                      );
-                                                  return RepaintBoundary(
-                                                    child: GestureDetector(
-                                                      onTap: () async {
-                                                        if (_isSelectMode) {
-                                                          setState(() {
-                                                            if (isSelected) {
-                                                              _selectedKeys
-                                                                  .remove(key);
-                                                            } else {
-                                                              _selectedKeys.add(
-                                                                key,
-                                                              );
-                                                            }
-                                                          });
-                                                          return;
-                                                        }
-
-                                                        // Build list of all photos for swipe navigation (instant, no file loading)
-                                                        final allPhotos =
-                                                            _buildPhotoDataList(
-                                                              filtered,
-                                                            );
-
-                                                        // Navigate to photo viewer with swipe support
-                                                        Navigator.push(
-                                                          context,
-                                                          MaterialPageRoute(
-                                                            builder: (_) =>
-                                                                PhotoViewer(
-                                                                  heroTag: key,
-                                                                  allPhotos:
-                                                                      allPhotos,
-                                                                  initialIndex:
-                                                                      index,
-                                                                ),
-                                                          ),
-                                                        );
-                                                      },
-                                                      onLongPress: () {
+                                                final isSelected = _selectedKeys
+                                                    .contains(key);
+                                                return RepaintBoundary(
+                                                  child: GestureDetector(
+                                                    onTap: () async {
+                                                      if (_isSelectMode) {
                                                         setState(() {
-                                                          _isSelectMode = true;
-                                                          _selectedKeys.add(
-                                                            key,
-                                                          );
+                                                          if (isSelected) {
+                                                            _selectedKeys
+                                                                .remove(key);
+                                                          } else {
+                                                            _selectedKeys.add(
+                                                              key,
+                                                            );
+                                                          }
                                                         });
-                                                      },
-                                                      child: ClipRRect(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              6,
-                                                            ),
-                                                        child: Stack(
-                                                          fit: StackFit.expand,
-                                                          children: [
-                                                            // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
-                                                            Hero(
-                                                              tag: key,
-                                                              child:
-                                                                  url.startsWith(
-                                                                    'local:',
-                                                                  )
-                                                                  ? FutureBuilder<
-                                                                      Uint8List?
-                                                                    >(
-                                                                      future: _getCachedThumbFuture(
-                                                                        url.substring(
-                                                                          6,
-                                                                        ),
-                                                                      ),
-                                                                      builder:
-                                                                          (
-                                                                            context,
-                                                                            snap,
-                                                                          ) {
-                                                                            if (snap.hasData &&
-                                                                                snap.data !=
-                                                                                    null) {
-                                                                              return Image.memory(
-                                                                                snap.data!,
-                                                                                fit: BoxFit.cover,
-                                                                              );
-                                                                            }
-                                                                            if (snap.connectionState ==
-                                                                                ConnectionState.waiting) {
-                                                                              return Container(
-                                                                                color: Colors.black26,
-                                                                              );
-                                                                            }
-                                                                            return Container(
-                                                                              color: Colors.black26,
-                                                                              child: const Icon(
-                                                                                Icons.broken_image,
-                                                                                color: Colors.white54,
-                                                                              ),
-                                                                            );
-                                                                          },
-                                                                    )
-                                                                  : (url.startsWith(
-                                                                          'file:',
-                                                                        )
-                                                                        ? (() {
-                                                                            final path = url.substring(
-                                                                              'file:'.length,
-                                                                            );
-                                                                            return ClipRRect(
-                                                                              borderRadius: BorderRadius.circular(
-                                                                                6,
-                                                                              ),
-                                                                              child: Image.file(
-                                                                                File(
-                                                                                  path,
-                                                                                ),
-                                                                                fit: BoxFit.cover,
-                                                                              ),
-                                                                            );
-                                                                          })()
-                                                                        : Image.network(
-                                                                            ApiService.resolveImageUrl(
-                                                                              url,
-                                                                            ),
-                                                                            fit:
-                                                                                BoxFit.cover,
-                                                                            // Show a neutral placeholder instead of the
-                                                                            // engine's red X when the server returns 404
-                                                                            // or other network errors.
-                                                                            errorBuilder:
-                                                                                (
-                                                                                  context,
-                                                                                  error,
-                                                                                  stackTrace,
-                                                                                ) {
-                                                                                  return Container(
-                                                                                    color: Colors.black26,
-                                                                                    child: const Center(
-                                                                                      child: Icon(
-                                                                                        Icons.broken_image,
-                                                                                        color: Colors.white54,
-                                                                                        size: 36,
-                                                                                      ),
-                                                                                    ),
-                                                                                  );
-                                                                                },
-                                                                          )),
-                                                            ),
-                                                            if (_isSelectMode)
-                                                              Positioned(
-                                                                top: 8,
-                                                                left: 8,
-                                                                child: Container(
-                                                                  decoration: BoxDecoration(
-                                                                    shape: BoxShape
-                                                                        .circle,
-                                                                    color:
-                                                                        isSelected
-                                                                        ? Colors
-                                                                              .blueAccent
-                                                                        : Colors
-                                                                              .black54,
-                                                                  ),
-                                                                  padding:
-                                                                      const EdgeInsets.all(
+                                                        return;
+                                                      }
+
+                                                      // Build list of all photos for swipe navigation (instant, no file loading)
+                                                      final allPhotos =
+                                                          _buildPhotoDataList(
+                                                            filtered,
+                                                          );
+
+                                                      // Navigate to photo viewer with swipe support
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (_) =>
+                                                              PhotoViewer(
+                                                                heroTag: key,
+                                                                allPhotos:
+                                                                    allPhotos,
+                                                                initialIndex:
+                                                                    index,
+                                                              ),
+                                                        ),
+                                                      );
+                                                    },
+                                                    onLongPress: () {
+                                                      setState(() {
+                                                        _isSelectMode = true;
+                                                        _selectedKeys.add(key);
+                                                      });
+                                                    },
+                                                    child: ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            6,
+                                                          ),
+                                                      child: Stack(
+                                                        fit: StackFit.expand,
+                                                        children: [
+                                                          // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
+                                                          Hero(
+                                                            tag: key,
+                                                            child:
+                                                                url.startsWith(
+                                                                  'local:',
+                                                                )
+                                                                ? FutureBuilder<
+                                                                    Uint8List?
+                                                                  >(
+                                                                    future: _getCachedThumbFuture(
+                                                                      url.substring(
                                                                         6,
                                                                       ),
-                                                                  child: Icon(
-                                                                    isSelected
-                                                                        ? Icons
-                                                                              .check_box
-                                                                        : Icons
-                                                                              .crop_square,
-                                                                    color: Colors
-                                                                        .white,
-                                                                    size: 18,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            if (_showTags)
-                                                              Positioned(
-                                                                left: 8,
-                                                                right: 8,
-                                                                bottom: 8,
-                                                                child: LayoutBuilder(
-                                                                  builder:
-                                                                      (
-                                                                        context,
-                                                                        constraints,
-                                                                      ) {
-                                                                        final chips = _buildTagChipsForWidth(
-                                                                          visibleTags,
-                                                                          fullTags,
-                                                                          constraints
-                                                                              .maxWidth,
-                                                                        );
-
-                                                                        // Check if this photo was recently validated (within last 10 seconds)
-                                                                        final photoID =
-                                                                            PhotoId.canonicalId(
-                                                                              url,
+                                                                    ),
+                                                                    builder:
+                                                                        (
+                                                                          context,
+                                                                          snap,
+                                                                        ) {
+                                                                          if (snap.hasData &&
+                                                                              snap.data !=
+                                                                                  null) {
+                                                                            return Image.memory(
+                                                                              snap.data!,
+                                                                              fit: BoxFit.cover,
                                                                             );
-                                                                        final recentlyValidated =
-                                                                            _recentlyValidated.containsKey(
-                                                                              photoID,
-                                                                            ) &&
-                                                                            DateTime.now()
-                                                                                    .difference(
-                                                                                      _recentlyValidated[photoID]!,
-                                                                                    )
-                                                                                    .inSeconds <
-                                                                                10;
-
-                                                                        return Row(
-                                                                          mainAxisSize:
-                                                                              MainAxisSize.min,
-                                                                          children: [
-                                                                            Expanded(
-                                                                              child: AnimatedOpacity(
-                                                                                opacity: 1.0,
-                                                                                duration: const Duration(
-                                                                                  milliseconds: 300,
-                                                                                ),
-                                                                                child: Wrap(
-                                                                                  spacing: 4,
-                                                                                  children: chips,
-                                                                                ),
-                                                                              ),
+                                                                          }
+                                                                          if (snap.connectionState ==
+                                                                              ConnectionState.waiting) {
+                                                                            return Container(
+                                                                              color: Colors.black26,
+                                                                            );
+                                                                          }
+                                                                          return Container(
+                                                                            color:
+                                                                                Colors.black26,
+                                                                            child: const Icon(
+                                                                              Icons.broken_image,
+                                                                              color: Colors.white54,
                                                                             ),
-                                                                            if (recentlyValidated)
-                                                                              Padding(
-                                                                                padding: const EdgeInsets.only(
-                                                                                  left: 4,
-                                                                                ),
-                                                                                child: Container(
-                                                                                  padding: const EdgeInsets.all(
-                                                                                    4,
-                                                                                  ),
-                                                                                  decoration: BoxDecoration(
-                                                                                    color: Colors.green.withValues(
-                                                                                      alpha: 0.9,
-                                                                                    ),
-                                                                                    shape: BoxShape.circle,
-                                                                                    boxShadow: [
-                                                                                      BoxShadow(
-                                                                                        color: Colors.black.withValues(
-                                                                                          alpha: 0.3,
-                                                                                        ),
-                                                                                        offset: const Offset(
-                                                                                          0,
-                                                                                          0.5,
-                                                                                        ),
-                                                                                        blurRadius: 2,
-                                                                                      ),
-                                                                                    ],
-                                                                                  ),
-                                                                                  child: const Icon(
-                                                                                    Icons.auto_awesome,
-                                                                                    size: 14,
-                                                                                    color: Colors.white,
-                                                                                  ),
-                                                                                ),
+                                                                          );
+                                                                        },
+                                                                  )
+                                                                : (url.startsWith(
+                                                                        'file:',
+                                                                      )
+                                                                      ? (() {
+                                                                          final path = url.substring(
+                                                                            'file:'.length,
+                                                                          );
+                                                                          return ClipRRect(
+                                                                            borderRadius: BorderRadius.circular(
+                                                                              6,
+                                                                            ),
+                                                                            child: Image.file(
+                                                                              File(
+                                                                                path,
                                                                               ),
-                                                                          ],
-                                                                        );
-                                                                      },
+                                                                              fit: BoxFit.cover,
+                                                                            ),
+                                                                          );
+                                                                        })()
+                                                                      : Image.network(
+                                                                          ApiService.resolveImageUrl(
+                                                                            url,
+                                                                          ),
+                                                                          fit: BoxFit
+                                                                              .cover,
+                                                                          // Show a neutral placeholder instead of the
+                                                                          // engine's red X when the server returns 404
+                                                                          // or other network errors.
+                                                                          errorBuilder:
+                                                                              (
+                                                                                context,
+                                                                                error,
+                                                                                stackTrace,
+                                                                              ) {
+                                                                                return Container(
+                                                                                  color: Colors.black26,
+                                                                                  child: const Center(
+                                                                                    child: Icon(
+                                                                                      Icons.broken_image,
+                                                                                      color: Colors.white54,
+                                                                                      size: 36,
+                                                                                    ),
+                                                                                  ),
+                                                                                );
+                                                                              },
+                                                                        )),
+                                                          ),
+                                                          if (_isSelectMode)
+                                                            Positioned(
+                                                              top: 8,
+                                                              left: 8,
+                                                              child: Container(
+                                                                decoration: BoxDecoration(
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                  color:
+                                                                      isSelected
+                                                                      ? Colors
+                                                                            .blueAccent
+                                                                      : Colors
+                                                                            .black54,
+                                                                ),
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      6,
+                                                                    ),
+                                                                child: Icon(
+                                                                  isSelected
+                                                                      ? Icons
+                                                                            .check_box
+                                                                      : Icons
+                                                                            .crop_square,
+                                                                  color: Colors
+                                                                      .white,
+                                                                  size: 18,
                                                                 ),
                                                               ),
-                                                            // When tags are hidden, show scan status indicator
-                                                            if (!_showTags)
-                                                              Positioned(
-                                                                right: 6,
-                                                                bottom: 6,
-                                                                child:
-                                                                    fullTags
-                                                                        .isNotEmpty
-                                                                    // Green sparkles = scanned
-                                                                    ? Container(
-                                                                        padding:
-                                                                            const EdgeInsets.all(
-                                                                              4,
-                                                                            ),
-                                                                        decoration: BoxDecoration(
-                                                                          color: Colors.green.withValues(
-                                                                            alpha:
-                                                                                0.9,
-                                                                          ),
-                                                                          shape:
-                                                                              BoxShape.circle,
-                                                                          boxShadow: [
-                                                                            BoxShadow(
-                                                                              color: Colors.black.withValues(
-                                                                                alpha: 0.3,
+                                                            ),
+                                                          if (_showTags)
+                                                            Positioned(
+                                                              left: 8,
+                                                              right: 8,
+                                                              bottom: 8,
+                                                              child: LayoutBuilder(
+                                                                builder:
+                                                                    (
+                                                                      context,
+                                                                      constraints,
+                                                                    ) {
+                                                                      final chips = _buildTagChipsForWidth(
+                                                                        visibleTags,
+                                                                        fullTags,
+                                                                        constraints
+                                                                            .maxWidth,
+                                                                      );
+
+                                                                      // Check if this photo was recently validated (within last 10 seconds)
+                                                                      final photoID =
+                                                                          PhotoId.canonicalId(
+                                                                            url,
+                                                                          );
+                                                                      final recentlyValidated =
+                                                                          _recentlyValidated.containsKey(
+                                                                            photoID,
+                                                                          ) &&
+                                                                          DateTime.now()
+                                                                                  .difference(
+                                                                                    _recentlyValidated[photoID]!,
+                                                                                  )
+                                                                                  .inSeconds <
+                                                                              10;
+
+                                                                      return Row(
+                                                                        mainAxisSize:
+                                                                            MainAxisSize.min,
+                                                                        children: [
+                                                                          Expanded(
+                                                                            child: AnimatedOpacity(
+                                                                              opacity: 1.0,
+                                                                              duration: const Duration(
+                                                                                milliseconds: 300,
                                                                               ),
-                                                                              blurRadius: 2,
+                                                                              child: Wrap(
+                                                                                spacing: 4,
+                                                                                children: chips,
+                                                                              ),
                                                                             ),
-                                                                          ],
-                                                                        ),
-                                                                        child: const Icon(
-                                                                          Icons
-                                                                              .auto_awesome,
-                                                                          size:
-                                                                              12,
-                                                                          color:
-                                                                              Colors.white,
-                                                                        ),
-                                                                      )
-                                                                    // Grey circle outline = not scanned
-                                                                    : Container(
-                                                                        width:
-                                                                            20,
-                                                                        height:
-                                                                            20,
-                                                                        decoration: BoxDecoration(
-                                                                          shape:
-                                                                              BoxShape.circle,
-                                                                          border: Border.all(
-                                                                            color:
-                                                                                Colors.grey.shade400,
-                                                                            width:
+                                                                          ),
+                                                                          if (recentlyValidated)
+                                                                            Padding(
+                                                                              padding: const EdgeInsets.only(
+                                                                                left: 4,
+                                                                              ),
+                                                                              child: Container(
+                                                                                padding: const EdgeInsets.all(
+                                                                                  4,
+                                                                                ),
+                                                                                decoration: BoxDecoration(
+                                                                                  color: Colors.green.withValues(
+                                                                                    alpha: 0.9,
+                                                                                  ),
+                                                                                  shape: BoxShape.circle,
+                                                                                  boxShadow: [
+                                                                                    BoxShadow(
+                                                                                      color: Colors.black.withValues(
+                                                                                        alpha: 0.3,
+                                                                                      ),
+                                                                                      offset: const Offset(
+                                                                                        0,
+                                                                                        0.5,
+                                                                                      ),
+                                                                                      blurRadius: 2,
+                                                                                    ),
+                                                                                  ],
+                                                                                ),
+                                                                                child: const Icon(
+                                                                                  Icons.auto_awesome,
+                                                                                  size: 14,
+                                                                                  color: Colors.white,
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                        ],
+                                                                      );
+                                                                    },
+                                                              ),
+                                                            ),
+                                                          // When tags are hidden, show scan status indicator
+                                                          if (!_showTags)
+                                                            Positioned(
+                                                              right: 6,
+                                                              bottom: 6,
+                                                              child:
+                                                                  fullTags
+                                                                      .isNotEmpty
+                                                                  // Green sparkles = scanned
+                                                                  ? Container(
+                                                                      padding:
+                                                                          const EdgeInsets.all(
+                                                                            4,
+                                                                          ),
+                                                                      decoration: BoxDecoration(
+                                                                        color: Colors
+                                                                            .green
+                                                                            .withValues(
+                                                                              alpha: 0.9,
+                                                                            ),
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                        boxShadow: [
+                                                                          BoxShadow(
+                                                                            color: Colors.black.withValues(
+                                                                              alpha: 0.3,
+                                                                            ),
+                                                                            blurRadius:
                                                                                 2,
                                                                           ),
+                                                                        ],
+                                                                      ),
+                                                                      child: const Icon(
+                                                                        Icons
+                                                                            .auto_awesome,
+                                                                        size:
+                                                                            12,
+                                                                        color: Colors
+                                                                            .white,
+                                                                      ),
+                                                                    )
+                                                                  // Grey circle outline = not scanned
+                                                                  : Container(
+                                                                      width: 20,
+                                                                      height:
+                                                                          20,
+                                                                      decoration: BoxDecoration(
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                        border: Border.all(
+                                                                          color: Colors
+                                                                              .grey
+                                                                              .shade400,
+                                                                          width:
+                                                                              2,
                                                                         ),
                                                                       ),
-                                                              ),
-                                                          ],
-                                                        ),
+                                                                    ),
+                                                            ),
+                                                        ],
                                                       ),
                                                     ),
-                                                  );
-                                                },
-                                              ),
+                                                  ),
+                                                );
+                                              },
                                             ),
                                             // Fast Scroller overlay
                                             _buildFastScroller(
@@ -4682,8 +4877,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   );
                                                   if (confirm != true) return;
                                                   try {
+                                                    // Block any new scans during clearing
+                                                    _clearingTags = true;
+
                                                     // Clear server tags first
-                                                    // IMMEDIATELY stop any ongoing scanning/validation
+                                                    // IMMEDIATELY stop any ongoing scanning/validation and ALL timers
                                                     _scanning = false;
                                                     _validating = false;
                                                     _validationCancelled = true;
@@ -4693,8 +4891,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         ?.cancel();
                                                     _dotAnimationTimer
                                                         ?.cancel();
+                                                    _autoScanRetryTimer
+                                                        ?.cancel();
+                                                    _autoScanRetryTimer = null;
                                                     developer.log(
-                                                      '🛑 Stopped scanning/validation for tag clear',
+                                                      '🛑 Stopped scanning/validation and all timers for tag clear',
                                                     );
 
                                                     try {
@@ -4726,21 +4927,45 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     final removed =
                                                         await TagStore.clearAllTags();
 
+                                                    // Verify storage is actually empty
+                                                    final remainingCount =
+                                                        await TagStore.getStoredTagCount();
+                                                    if (remainingCount > 0) {
+                                                      developer.log(
+                                                        '⚠️ WARNING: $remainingCount tags still in storage after clear!',
+                                                      );
+                                                    }
+
                                                     // Clear in-memory tags AND detections
                                                     photoTags.clear();
                                                     photoAllDetections.clear();
 
-                                                    // Reset validation state to allow re-scan
+                                                    // Invalidate cached filtered list so it rebuilds
+                                                    _lastPhotoTagsLength = -1;
+                                                    _cachedFilteredUrls.clear();
+
+                                                    // Reset ALL scan/validation state to allow fresh re-scan
                                                     _validationComplete = false;
+                                                    _validationCancelled =
+                                                        false;
+                                                    _validating = false;
+                                                    _scanning = false;
+                                                    _hasScannedAtLeastOneBatch =
+                                                        false;
+                                                    _scanProgress = 0.0;
+                                                    _scanProcessed = 0;
+                                                    _scanTotal = 0;
                                                     _scannedCountNotifier
                                                             .value =
                                                         0;
+                                                    _galleryReadyShown = false;
 
-                                                    // Update UI
+                                                    // Update UI to show cleared state
                                                     if (mounted) {
                                                       setState(() {});
                                                     }
 
+                                                    // Show snackbar
                                                     if (mounted) {
                                                       ScaffoldMessenger.of(
                                                         // ignore: use_build_context_synchronously
@@ -4748,18 +4973,58 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       ).showSnackBar(
                                                         SnackBar(
                                                           content: Text(
-                                                            'Removed $removed local + server tags',
+                                                            'Removed $removed local + server tags. Waiting 5s before rescan...',
                                                           ),
                                                         ),
                                                       );
                                                     }
 
-                                                    // Start fresh scan after clearing
+                                                    // Wait 5 seconds AFTER showing snackbar
                                                     developer.log(
-                                                      '🔄 Starting fresh scan after tag clear',
+                                                      '🔄 Waiting 5 seconds before starting fresh scan...',
                                                     );
-                                                    await _startAutoScanIfNeeded();
+                                                    await Future.delayed(
+                                                      const Duration(
+                                                        seconds: 5,
+                                                      ),
+                                                    );
+
+                                                    // Verify tags are still cleared before starting scan
+                                                    if (photoTags.isNotEmpty) {
+                                                      developer.log(
+                                                        '⚠️ Tags not empty after clear (${photoTags.length}). Aborting rescan.',
+                                                      );
+                                                      _clearingTags = false;
+                                                      return;
+                                                    }
+
+                                                    // NOTE: Keep _clearingTags = true until _manualScan completes
+                                                    // This prevents the retry timer from triggering validation
+                                                    // during the gap between now and when _manualScan sets _scanning = true
+
+                                                    if (mounted) {
+                                                      developer.log(
+                                                        '🔄 Starting fresh scan of ALL photos after tag clear',
+                                                      );
+                                                      // Use force scan to bypass TagStore checks
+                                                      // TagStore was just cleared so checks would be stale
+                                                      await _manualScan(
+                                                        force: true,
+                                                      );
+                                                    }
+
+                                                    // Now that scan has started (or completed), allow other operations
+                                                    _clearingTags = false;
+
+                                                    // Force validation state to false to prevent immediate validation
+                                                    _validating = false;
+                                                    _validationComplete = false;
+
+                                                    // Restart the retry timer in case scan failed or to continue retrying
+                                                    _startAutoScanRetryTimer();
                                                   } catch (e) {
+                                                    _clearingTags =
+                                                        false; // Reset flag on error
                                                     developer.log(
                                                       'Failed to remove tags: $e',
                                                     );
