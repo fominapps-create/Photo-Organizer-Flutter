@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
+import 'screens/intro_video_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'services/api_service.dart';
 
 void main() async {
@@ -63,11 +65,31 @@ class PhotoOrganizerApp extends StatefulWidget {
 
 class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
   bool _isDarkMode = false;
+  bool _isFirstLaunch = true;
+  bool _isCheckingFirstLaunch = true;
 
   @override
   void initState() {
     super.initState();
     _loadThemePreference();
+    _checkFirstLaunch();
+  }
+
+  Future<void> _checkFirstLaunch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+    setState(() {
+      _isFirstLaunch = !hasSeenOnboarding;
+      _isCheckingFirstLaunch = false;
+    });
+  }
+
+  Future<void> _markOnboardingComplete() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hasSeenOnboarding', true);
+    setState(() {
+      _isFirstLaunch = false;
+    });
   }
 
   Future<void> _loadThemePreference() async {
@@ -118,6 +140,16 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
 
   @override
   Widget build(BuildContext context) {
+    // Show loading while checking first launch status
+    if (_isCheckingFirstLaunch) {
+      return MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(child: CircularProgressIndicator(color: Colors.white)),
+        ),
+      );
+    }
+
     return MaterialApp(
       title: 'Photo Organizer',
       theme: ThemeData(
@@ -157,7 +189,67 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
         cardColor: const Color(0xFF1E1E1E),
       ),
       themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
-      home: HomeScreen(isDarkMode: _isDarkMode, onThemeChanged: _updateTheme),
+      home: _isFirstLaunch
+          ? _FirstLaunchFlow(
+              isDarkMode: _isDarkMode,
+              onThemeChanged: _updateTheme,
+              onComplete: _markOnboardingComplete,
+            )
+          : HomeScreen(isDarkMode: _isDarkMode, onThemeChanged: _updateTheme),
+    );
+  }
+}
+
+class _FirstLaunchFlow extends StatefulWidget {
+  final bool isDarkMode;
+  final Function(bool) onThemeChanged;
+  final VoidCallback onComplete;
+
+  const _FirstLaunchFlow({
+    required this.isDarkMode,
+    required this.onThemeChanged,
+    required this.onComplete,
+  });
+
+  @override
+  State<_FirstLaunchFlow> createState() => _FirstLaunchFlowState();
+}
+
+class _FirstLaunchFlowState extends State<_FirstLaunchFlow> {
+  bool _showVideo = true;
+  bool _showOnboarding = false;
+
+  void _onVideoFinished() {
+    setState(() {
+      _showVideo = false;
+      _showOnboarding = true;
+    });
+  }
+
+  void _onOnboardingComplete() {
+    widget.onComplete();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => HomeScreen(
+          isDarkMode: widget.isDarkMode,
+          onThemeChanged: widget.onThemeChanged,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showVideo) {
+      return IntroVideoScreen(onVideoFinished: _onVideoFinished);
+    } else if (_showOnboarding) {
+      return OnboardingScreen(onGetStarted: _onOnboardingComplete);
+    }
+
+    // Fallback (shouldn't reach here)
+    return const Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(child: CircularProgressIndicator(color: Colors.white)),
     );
   }
 }

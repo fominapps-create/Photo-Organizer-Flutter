@@ -64,10 +64,17 @@ class TagStore {
         )
         .toList();
 
-    // Remove them all in parallel for speed
-    await Future.wait(tagKeys.map((key) => prefs.remove(key)));
+    final count = tagKeys.length;
 
-    return tagKeys.length;
+    // Remove in smaller batches to avoid blocking the UI
+    // Process 100 keys at a time
+    for (var i = 0; i < tagKeys.length; i += 100) {
+      final end = (i + 100).clamp(0, tagKeys.length);
+      final batch = tagKeys.sublist(i, end);
+      await Future.wait(batch.map((key) => prefs.remove(key)));
+    }
+
+    return count;
   }
 
   /// Save multiple tags at once (faster than individual saves)

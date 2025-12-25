@@ -302,7 +302,8 @@ def classify_image_hybrid(image_path: str, yolo_model, clip_classifier_func,
         timing["clip_ms"] = round((t3 - t2) * 1000, 1)
         timing["total_ms"] = round((t3 - t_start) * 1000, 1)
         logger.error(f"CLIP error for {image_path}: {e}")
-        return [], timing
+        # Return "Other" instead of empty list - ensures every photo has at least one tag
+        return ["Other"], timing
 
 
 def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_func=None,
@@ -396,22 +397,22 @@ def classify_batch_hybrid(image_paths: List[str], yolo_model=None, clip_batch_fu
                 
         except Exception as e:
             logger.error(f"CLIP batch error: {e}")
-            # Fill failed images with empty tags
+            # Fill failed images with "Other" tag instead of empty
             for original_idx in clip_needed_indices:
                 if results[original_idx] is None:
-                    results[original_idx] = []
+                    results[original_idx] = ["Other"]
                 if all_detections[original_idx] is None:
-                    all_detections[original_idx] = []
+                    all_detections[original_idx] = ["Other"]
         
         t3 = time.time()
         stats["clip_time_ms"] = round((t3 - t2) * 1000, 1)
     
-    # Ensure no None values in results
+    # Ensure no None values in results - use "Other" for failed classifications
     for idx in range(len(results)):
-        if results[idx] is None:
-            results[idx] = []
-        if all_detections[idx] is None:
-            all_detections[idx] = []
+        if results[idx] is None or results[idx] == []:
+            results[idx] = ["Other"]
+        if all_detections[idx] is None or all_detections[idx] == []:
+            all_detections[idx] = ["Other"]
     
     # Calculate final stats
     t_end = time.time()
