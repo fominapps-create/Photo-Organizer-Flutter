@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'pricing_screen.dart';
+import 'trash_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -244,6 +245,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: Colors.grey,
               ),
             ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('Trash'),
+            subtitle: const Text('View and manage deleted photos'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const TrashScreen()),
+              );
+            },
           ),
           ListTile(
             leading: const Icon(Icons.info_outline),

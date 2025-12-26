@@ -58194,5 +58194,225 @@
     "all_detections": [
       "document"
     ]
+  },
+  "1000078285": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-26T13:36:59.443081Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078281": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T13:36:59.499813Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078279": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T13:36:59.714436Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078288": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-26T15:25:58.659817Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078290": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-26T15:25:58.610123Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078292": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-26T15:25:58.405879Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078294": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.354981Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078296": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.300154Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078304": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.057894Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078302": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.115049Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078298": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.175004Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078300": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.240134Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078306": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:58.007507Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078313": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.854324Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078310": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.906661Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078308": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.956722Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078320": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.615633Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078318": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.703244Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078316": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.754806Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078314": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.803480Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078322": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:25:57.379298Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078324": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-26T15:58:51.520828Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
   }
 }

@@ -113,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Icon(
                 icon,
                 color: isSelected
-                    ? Colors.lightBlue.shade300
+                    ? Colors.orange.shade400
                     : (widget.isDarkMode
                           ? Colors.white.withValues(alpha: 0.85)
                           : Colors.black87.withValues(alpha: 0.85)),
@@ -141,7 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 label,
                 style: TextStyle(
                   color: isSelected
-                      ? Colors.lightBlue.shade300
+                      ? Colors.orange.shade400
                       : (widget.isDarkMode
                             ? Colors.white.withValues(alpha: 0.85)
                             : Colors.black87.withValues(alpha: 0.85)),
