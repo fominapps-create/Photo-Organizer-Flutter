@@ -25,11 +25,21 @@ class GalleryScreen extends StatefulWidget {
   final VoidCallback? onSettingsTap;
   final VoidCallback? onAlbumCreated;
   final VoidCallback? onSearchChanged;
+  final ValueNotifier<bool>? showNavBar;
+  final ValueNotifier<int>? selectionCount;
+  final VoidCallback? onDeleteSelected;
+  final VoidCallback? onShareSelected;
+  final VoidCallback? onCreateAlbumSelected;
   const GalleryScreen({
     super.key,
     this.onSettingsTap,
     this.onAlbumCreated,
     this.onSearchChanged,
+    this.showNavBar,
+    this.selectionCount,
+    this.onDeleteSelected,
+    this.onShareSelected,
+    this.onCreateAlbumSelected,
   });
   @override
   GalleryScreenState createState() => GalleryScreenState();
@@ -76,9 +86,13 @@ class GalleryScreenState extends State<GalleryScreen>
   bool _galleryReadyShown = false;
   final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
   final ScrollController _scrollController = ScrollController();
+  double _lastScrollOffset = 0.0;
+  Timer? _navBarShowTimer;
   Timer? _fastScrollerHideTimer;
   ValueNotifier<bool> _showFastScrollerNotifier = ValueNotifier<bool>(false);
   bool _isDraggingScroller = false;
+  Timer? _actionButtonsHideTimer;
+  final ValueNotifier<bool> _showActionButtons = ValueNotifier<bool>(true);
   Timer? _autoScanRetryTimer;
   bool _showPerformanceMonitor = false;
   double _currentRamUsageMB = 0.0;
@@ -117,6 +131,235 @@ class GalleryScreenState extends State<GalleryScreen>
   List<Map<String, dynamic>> _validationChanges = [];
   String _currentScrollYear = '';
   bool _scanPaused = false;
+  Set<String> _trashedIds = {};
+
+  /// Refresh the trashed IDs cache - call this after restoring photos from trash
+  Future<void> refreshTrashedIds() async {
+    _trashedIds = await TrashStore.getTrashedIds();
+    _cachedFilteredUrls.clear();
+    _lastImageUrlsLength = -1; // Force recompute
+    if (mounted) setState(() {});
+  }
+
+  /// Update the selection count notifier for HomeScreen navbar
+  void _updateSelectionCount() {
+    final count = _selectedKeys.length;
+    debugPrint(
+      '🔢 Selection count updated: $count (notifier: ${widget.selectionCount != null})',
+    );
+    widget.selectionCount?.value = count;
+  }
+
+  /// Delete selected photos - called from HomeScreen navbar
+  void deleteSelected() {
+    if (_selectedKeys.isNotEmpty) {
+      _deleteSelectedPhotos(context);
+    }
+  }
+
+  /// Share selected photos - called from HomeScreen navbar
+  void shareSelected() {
+    if (_selectedKeys.isNotEmpty) {
+      _showSnackBar('Share ${_selectedKeys.length} photos');
+    }
+  }
+
+  /// Create album from selection - called from HomeScreen navbar
+  void createAlbumFromSelectionPublic() {
+    if (_selectedKeys.isNotEmpty) {
+      _createAlbumFromSelection();
+    }
+  }
+
+  /// Show album options - add to existing or create new
+  void showAlbumOptions() async {
+    if (_selectedKeys.isEmpty) return;
+
+    // Get existing albums
+    final prefs = await SharedPreferences.getInstance();
+    final albumsJson = prefs.getString('albums');
+    Map<String, dynamic> albumsMap = {};
+    if (albumsJson != null) {
+      try {
+        albumsMap = json.decode(albumsJson) as Map<String, dynamic>;
+      } catch (_) {
+        albumsMap = {};
+      }
+    }
+
+    final existingAlbums = albumsMap.keys.toList()..sort();
+
+    if (!mounted) return;
+
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Add ${_selectedKeys.length} photo${_selectedKeys.length > 1 ? 's' : ''} to album',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Create new album option
+              ListTile(
+                leading: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.add, color: Colors.green.shade700),
+                ),
+                title: const Text('Create new album'),
+                subtitle: const Text('Start a new album with selected photos'),
+                onTap: () => Navigator.pop(ctx, '_create_new_'),
+              ),
+              if (existingAlbums.isNotEmpty) ...[
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add to existing album',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+                ),
+                ...existingAlbums
+                    .take(5)
+                    .map(
+                      (albumName) => ListTile(
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.photo_album,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                        title: Text(albumName),
+                        subtitle: Text(
+                          '${(albumsMap[albumName] as List?)?.length ?? 0} photos',
+                        ),
+                        onTap: () => Navigator.pop(ctx, albumName),
+                      ),
+                    ),
+                if (existingAlbums.length > 5)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      '+${existingAlbums.length - 5} more albums',
+                      style: TextStyle(color: Colors.grey.shade500),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    if (result == '_create_new_') {
+      _createAlbumFromSelection();
+    } else {
+      _addToExistingAlbum(result);
+    }
+  }
+
+  /// Add selected photos to an existing album
+  Future<void> _addToExistingAlbum(String albumName) async {
+    if (_selectedKeys.isEmpty) return;
+
+    final selectedUrls = imageUrls
+        .where((u) => _selectedKeys.contains(p.basename(u)))
+        .toList();
+    if (selectedUrls.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final albumsJson = prefs.getString('albums');
+    Map<String, dynamic> albumsMap = {};
+    if (albumsJson != null) {
+      try {
+        albumsMap = json.decode(albumsJson) as Map<String, dynamic>;
+      } catch (_) {
+        albumsMap = {};
+      }
+    }
+
+    // Get existing photos in album
+    List<String> existingPhotos = [];
+    if (albumsMap[albumName] != null) {
+      existingPhotos = List<String>.from(albumsMap[albumName] as List);
+    }
+
+    // Add new photos (avoid duplicates)
+    int addedCount = 0;
+    for (final url in selectedUrls) {
+      if (!existingPhotos.contains(url)) {
+        existingPhotos.add(url);
+        addedCount++;
+      }
+    }
+
+    // Save updated album
+    albumsMap[albumName] = existingPhotos;
+    await prefs.setString('albums', json.encode(albumsMap));
+    await prefs.setString('album_$albumName', json.encode(existingPhotos));
+
+    if (!mounted) return;
+
+    if (addedCount > 0) {
+      _showSnackBar(
+        'Added $addedCount photo${addedCount > 1 ? 's' : ''} to "$albumName"',
+      );
+    } else {
+      _showSnackBar('Photos already in "$albumName"');
+    }
+
+    setState(() {
+      _isSelectMode = false;
+      _selectedKeys.clear();
+    });
+    _updateSelectionCount();
+    widget.onAlbumCreated?.call();
+  }
 
   void _showSnackBar(String message, {Duration? duration}) {
     if (!mounted) return;
@@ -460,6 +703,10 @@ class GalleryScreenState extends State<GalleryScreen>
   Future<void> _loadAllImages() async {
     developer.log('🚀 START: _loadAllImages called');
     setState(() => loading = true);
+
+    // Load trashed photo IDs for filtering
+    _trashedIds = await TrashStore.getTrashedIds();
+    developer.log('🗑️ Loaded ${_trashedIds.length} trashed photo IDs');
 
     // Clean up any empty tag entries from failed scans
     final cleanedCount = await TagStore.cleanEmptyTags();
@@ -3048,8 +3295,11 @@ class GalleryScreenState extends State<GalleryScreen>
       return; // No changes, use cached version
     }
 
-    // Recompute filtered list
+    // Recompute filtered list - filter out trashed photos first
     _cachedFilteredUrls = imageUrls.where((u) {
+      // Skip trashed photos
+      if (_trashedIds.contains(u)) return false;
+
       final key = p.basename(u);
       final tags = photoTags[key] ?? [];
       final allDetections = photoAllDetections[key] ?? [];
@@ -3323,6 +3573,7 @@ class GalleryScreenState extends State<GalleryScreen>
         _isSelectMode = false;
         _selectedKeys.clear();
       });
+      _updateSelectionCount();
       widget.onAlbumCreated?.call();
     }
   }
@@ -3365,12 +3616,14 @@ class GalleryScreenState extends State<GalleryScreen>
       // Move to trash (soft delete)
       for (final url in selectedUrls) {
         await TrashStore.moveToTrash(url);
+        _trashedIds.add(url); // Add to local cache immediately
         developer.log('🗑️ Moved to trash: $url');
       }
 
       // Update UI state - remove from gallery
       setState(() {
-        imageUrls.removeWhere((url) => selectedUrls.contains(url));
+        // Don't remove from imageUrls - they'll be filtered by _trashedIds
+        // This prevents them from reappearing on reload
         for (final key in _selectedKeys) {
           photoTags.remove(key);
           photoAllDetections.remove(key);
@@ -3386,7 +3639,9 @@ class GalleryScreenState extends State<GalleryScreen>
         _selectedKeys.clear();
         _isSelectMode = false;
         _cachedFilteredUrls.clear(); // Invalidate filter cache
+        _lastImageUrlsLength = -1; // Force recompute of filtered list
       });
+      _updateSelectionCount();
 
       // Show feedback
       _showSnackBar('Moved $count photo${count > 1 ? 's' : ''} to trash');
@@ -3693,6 +3948,8 @@ class GalleryScreenState extends State<GalleryScreen>
     _progressRefreshTimer?.cancel();
     _smoothProgressTimer?.cancel();
     _fastScrollerHideTimer?.cancel();
+    _actionButtonsHideTimer?.cancel();
+    _navBarShowTimer?.cancel();
     _longPressTimer?.cancel();
     _tooltipTimer?.cancel();
     _starAnimationController.dispose();
@@ -3704,18 +3961,21 @@ class GalleryScreenState extends State<GalleryScreen>
     _searchFocusNode.dispose();
     _showScrollToTop.dispose();
     _showFastScrollerNotifier.dispose();
+    _showActionButtons.dispose();
     super.dispose();
   }
 
   void _scrollListener() {
-    if (_scrollController.offset >= 200 && !_showScrollToTop.value) {
+    final currentOffset = _scrollController.offset;
+
+    if (currentOffset >= 200 && !_showScrollToTop.value) {
       _showScrollToTop.value = true;
-    } else if (_scrollController.offset < 200 && _showScrollToTop.value) {
+    } else if (currentOffset < 200 && _showScrollToTop.value) {
       _showScrollToTop.value = false;
     }
 
     // Show fast scroller when scrolling (if not already dragging it)
-    if (!_isDraggingScroller && _scrollController.offset > 0) {
+    if (!_isDraggingScroller && currentOffset > 0) {
       // Update notifier instead of setState - only the scroller rebuilds
       _showFastScrollerNotifier.value = true;
       // Reset hide timer
@@ -3726,6 +3986,40 @@ class GalleryScreenState extends State<GalleryScreen>
         }
       });
     }
+
+    // Hide action buttons during scroll
+    _showActionButtons.value = false;
+    _actionButtonsHideTimer?.cancel();
+    _actionButtonsHideTimer = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        _showActionButtons.value = true;
+      }
+    });
+
+    // Hide navbar when scrolling down, show when scrolling up
+    if (widget.showNavBar != null) {
+      final scrollingDown =
+          currentOffset > _lastScrollOffset && currentOffset > 50;
+      final scrollingUp = currentOffset < _lastScrollOffset;
+
+      if (scrollingDown) {
+        widget.showNavBar!.value = false;
+        _navBarShowTimer?.cancel();
+      } else if (scrollingUp) {
+        widget.showNavBar!.value = true;
+        _navBarShowTimer?.cancel();
+      }
+
+      // Also show navbar when scrolling stops
+      _navBarShowTimer?.cancel();
+      _navBarShowTimer = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) {
+          widget.showNavBar!.value = true;
+        }
+      });
+    }
+
+    _lastScrollOffset = currentOffset;
   }
 
   void _scrollToTop() {
@@ -4458,6 +4752,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                       children: [
                                         GestureDetector(
                                           onTap: () {
+                                            final wasSelectMode = _isSelectMode;
                                             setState(() {
                                               // Toggle select mode
                                               _isSelectMode = !_isSelectMode;
@@ -4466,6 +4761,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 _selectedKeys.clear();
                                               }
                                             });
+                                            if (wasSelectMode) {
+                                              _updateSelectionCount();
+                                            }
                                           },
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
@@ -4633,6 +4931,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                           );
                                                         }
                                                       });
+                                                      _updateSelectionCount();
                                                       return;
                                                     }
 
@@ -4662,6 +4961,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       _isSelectMode = true;
                                                       _selectedKeys.add(key);
                                                     });
+                                                    _updateSelectionCount();
                                                   },
                                                   child: ClipRRect(
                                                     borderRadius:
@@ -5446,264 +5746,6 @@ class GalleryScreenState extends State<GalleryScreen>
                                   ),
                                 );
                               },
-                            ),
-                          ),
-                        ),
-
-                        // Action buttons for selected photos
-                        Positioned(
-                          top: 224,
-                          right: 16,
-                          child: SizedBox(
-                            width: 180,
-                            height: 240,
-                            child: Stack(
-                              alignment: Alignment.bottomRight,
-                              children: [
-                                // Button 3 - Create Album (highest)
-                                AnimatedPositioned(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeOutCubic,
-                                  bottom: _selectedKeys.isNotEmpty ? 160 : 0,
-                                  right: 0,
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 300),
-                                    opacity: _selectedKeys.isNotEmpty
-                                        ? 1.0
-                                        : 0.0,
-                                    child: IgnorePointer(
-                                      ignoring: _selectedKeys.isEmpty,
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: _createAlbumFromSelection,
-                                          borderRadius: BorderRadius.circular(
-                                            21,
-                                          ),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.end,
-                                            children: [
-                                              Container(
-                                                width: 42,
-                                                height: 42,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey.shade100,
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black
-                                                          .withValues(
-                                                            alpha: 0.2,
-                                                          ),
-                                                      blurRadius: 6,
-                                                      offset: const Offset(
-                                                        0,
-                                                        3,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Icon(
-                                                  Icons.create_new_folder,
-                                                  color: Colors.green,
-                                                  size: 18,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.6),
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
-                                                ),
-                                                child: const Text(
-                                                  'Create album',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                // Button 2 - Share (middle)
-                                AnimatedPositioned(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeOutCubic,
-                                  bottom: _selectedKeys.isNotEmpty ? 80 : 0,
-                                  right: 0,
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 300),
-                                    opacity: _selectedKeys.isNotEmpty
-                                        ? 1.0
-                                        : 0.0,
-                                    child: IgnorePointer(
-                                      ignoring: _selectedKeys.isEmpty,
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: () {
-                                            _showSnackBar(
-                                              'Share ${_selectedKeys.length} photos',
-                                            );
-                                          },
-                                          borderRadius: BorderRadius.circular(
-                                            21,
-                                          ),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.end,
-                                            children: [
-                                              Container(
-                                                width: 42,
-                                                height: 42,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey.shade100,
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black
-                                                          .withValues(
-                                                            alpha: 0.2,
-                                                          ),
-                                                      blurRadius: 6,
-                                                      offset: const Offset(
-                                                        0,
-                                                        3,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Icon(
-                                                  Icons.share,
-                                                  color: Colors.blue,
-                                                  size: 18,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.6),
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
-                                                ),
-                                                child: const Text(
-                                                  'Share',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                // Button 1 - Delete (lowest of the 3)
-                                AnimatedPositioned(
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeOutCubic,
-                                  bottom: 0,
-                                  right: 0,
-                                  child: AnimatedOpacity(
-                                    duration: const Duration(milliseconds: 300),
-                                    opacity: _selectedKeys.isNotEmpty
-                                        ? 1.0
-                                        : 0.0,
-                                    child: IgnorePointer(
-                                      ignoring: _selectedKeys.isEmpty,
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: () {
-                                            _deleteSelectedPhotos(context);
-                                          },
-                                          borderRadius: BorderRadius.circular(
-                                            21,
-                                          ),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.end,
-                                            children: [
-                                              Container(
-                                                width: 42,
-                                                height: 42,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey.shade100,
-                                                  shape: BoxShape.circle,
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black
-                                                          .withValues(
-                                                            alpha: 0.2,
-                                                          ),
-                                                      blurRadius: 6,
-                                                      offset: const Offset(
-                                                        0,
-                                                        3,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: const Icon(
-                                                  Icons.delete,
-                                                  color: Colors.red,
-                                                  size: 18,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.6),
-                                                  borderRadius:
-                                                      BorderRadius.circular(10),
-                                                ),
-                                                child: const Text(
-                                                  'Delete',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
                             ),
                           ),
                         ),

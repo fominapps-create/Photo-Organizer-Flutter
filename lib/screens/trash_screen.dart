@@ -7,7 +7,9 @@ import '../utils/snackbar_helper.dart';
 import 'dart:developer' as developer;
 
 class TrashScreen extends StatefulWidget {
-  const TrashScreen({super.key});
+  final VoidCallback? onRestored;
+
+  const TrashScreen({super.key, this.onRestored});
 
   @override
   State<TrashScreen> createState() => _TrashScreenState();
@@ -67,6 +69,9 @@ class _TrashScreenState extends State<TrashScreen> {
 
     setState(() => _selectedIds.clear());
     await _loadTrash();
+
+    // Notify parent to refresh gallery
+    widget.onRestored?.call();
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

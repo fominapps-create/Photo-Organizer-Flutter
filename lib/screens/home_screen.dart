@@ -30,6 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<GalleryScreenState> _galleryKey =
       GlobalKey<GalleryScreenState>();
   final GlobalKey<AlbumScreenState> _albumKey = GlobalKey<AlbumScreenState>();
+  final ValueNotifier<bool> _showNavBar = ValueNotifier<bool>(true);
+  final ValueNotifier<int> _selectionCount = ValueNotifier<int>(0);
 
   late final List<Widget> _screens;
 
@@ -40,6 +42,10 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) => SettingsScreen(
           isDarkMode: widget.isDarkMode,
           onThemeChanged: widget.onThemeChanged,
+          onTrashRestored: () {
+            // Refresh gallery's trashed IDs when photos are restored from trash
+            _galleryKey.currentState?.refreshTrashedIds();
+          },
         ),
       ),
     );
@@ -60,9 +66,18 @@ class _HomeScreenState extends State<HomeScreen> {
         onSearchChanged: () {
           setState(() {}); // Rebuild to show/hide + button
         },
+        showNavBar: _showNavBar,
+        selectionCount: _selectionCount,
       ),
       AlbumScreen(key: _albumKey),
     ];
+  }
+
+  @override
+  void dispose() {
+    _showNavBar.dispose();
+    _selectionCount.dispose();
+    super.dispose();
   }
 
   void _onItemTapped(int index) {
@@ -165,6 +180,81 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildActionButton(
+    IconData icon,
+    String label,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 80,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.rectangle,
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [
+              Colors.white.withValues(alpha: 0.05),
+              Colors.white.withValues(alpha: 0.02),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: widget.isDarkMode
+                ? Colors.white.withValues(alpha: 0.2)
+                : Colors.black.withValues(alpha: 0.2),
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: color,
+                size: 18,
+                shadows: widget.isDarkMode
+                    ? [
+                        const Shadow(
+                          color: Colors.black26,
+                          offset: Offset(0, 1),
+                          blurRadius: 3,
+                        ),
+                      ]
+                    : null,
+              ),
+              const SizedBox(height: 1),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  shadows: widget.isDarkMode
+                      ? [
+                          const Shadow(
+                            color: Colors.black54,
+                            offset: Offset(0, 1),
+                            blurRadius: 3,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Sparks-by-album flow moved into the Gallery screen.
 
   @override
@@ -196,46 +286,123 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Stack(
         children: [
           IndexedStack(index: _selectedIndex, children: _screens),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: widget.isDarkMode
-                        ? Colors.black.withValues(alpha: 0.85)
-                        : Colors.white.withValues(alpha: 0.85),
-                    border: Border(
-                      top: BorderSide(
+          // Bottom blur background - animates height on scroll
+          ValueListenableBuilder<bool>(
+            valueListenable: _showNavBar,
+            builder: (context, showNavBar, _) {
+              return Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
                         color: widget.isDarkMode
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.1),
-                        width: 0.5,
+                            ? Colors.black.withValues(alpha: 0.85)
+                            : Colors.white.withValues(alpha: 0.85),
+                        border: Border(
+                          top: BorderSide(
+                            color: widget.isDarkMode
+                                ? Colors.white.withValues(alpha: 0.1)
+                                : Colors.black.withValues(alpha: 0.1),
+                            width: 0.5,
+                          ),
+                        ),
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          height: showNavBar ? 48 : 0,
+                        ),
                       ),
                     ),
                   ),
-                  child: SafeArea(top: false, child: Container(height: 48)),
                 ),
-              ),
-            ),
+              );
+            },
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 48,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 1, left: 6, right: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildNavItem(0, Icons.folder_outlined, 'Gallery'),
-                  _buildNavItem(1, Icons.photo_album_outlined, 'Albums'),
-                ],
-              ),
-            ),
+          // Nav items / Action buttons - switch based on selection
+          ValueListenableBuilder<bool>(
+            valueListenable: _showNavBar,
+            builder: (context, showNavBar, _) {
+              return ValueListenableBuilder<int>(
+                valueListenable: _selectionCount,
+                builder: (context, selectionCount, _) {
+                  final hasSelection = selectionCount > 0;
+                  return Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 48,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: showNavBar ? 1.0 : 0.0,
+                      child: IgnorePointer(
+                        ignoring: !showNavBar,
+                        child: Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: 1,
+                            left: 6,
+                            right: 6,
+                          ),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: hasSelection
+                                ? Row(
+                                    key: const ValueKey('action_buttons'),
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      _buildActionButton(
+                                        Icons.photo_album,
+                                        'Album',
+                                        Colors.green,
+                                        () => _galleryKey.currentState
+                                            ?.showAlbumOptions(),
+                                      ),
+                                      _buildActionButton(
+                                        Icons.share,
+                                        'Share',
+                                        Colors.blue,
+                                        () => _galleryKey.currentState
+                                            ?.shareSelected(),
+                                      ),
+                                      _buildActionButton(
+                                        Icons.delete,
+                                        'Delete',
+                                        Colors.red,
+                                        () => _galleryKey.currentState
+                                            ?.deleteSelected(),
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    key: const ValueKey('nav_buttons'),
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      _buildNavItem(
+                                        0,
+                                        Icons.folder_outlined,
+                                        'Gallery',
+                                      ),
+                                      _buildNavItem(
+                                        1,
+                                        Icons.photo_album_outlined,
+                                        'Albums',
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
           ),
           // Floating search button
           Positioned(

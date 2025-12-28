@@ -7,11 +7,13 @@ import 'trash_screen.dart';
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
   final Function(bool) onThemeChanged;
+  final VoidCallback? onTrashRestored;
 
   const SettingsScreen({
     super.key,
     required this.isDarkMode,
     required this.onThemeChanged,
+    this.onTrashRestored,
   });
 
   @override
@@ -254,7 +256,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const TrashScreen()),
+                MaterialPageRoute(
+                  builder: (_) =>
+                      TrashScreen(onRestored: widget.onTrashRestored),
+                ),
               );
             },
           ),
