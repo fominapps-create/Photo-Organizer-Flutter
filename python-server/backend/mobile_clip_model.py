@@ -170,7 +170,7 @@ class MobileCLIPPhotoClassifier:
             
             if not results:
                 logger.warning(f"No categories matched for {image_path}. Top scores: {all_scores[:3]}")
-                results.append(("unknown", 0.0))
+                results.append(("other", 0.0))
             
             results.sort(key=lambda x: x[1], reverse=True)
             results = results[:max_tags]

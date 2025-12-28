@@ -83,6 +83,8 @@ class GalleryScreenState extends State<GalleryScreen>
   final ValueNotifier<int> _scannedCountNotifier = ValueNotifier<int>(0);
   int _cachedLocalPhotoCount = 0;
   DateTime? _reached100At;
+  Timer? _finalTouchesTimer;
+  bool _showFinalTouches = false;
   bool _galleryReadyShown = false;
   final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
   final ScrollController _scrollController = ScrollController();
@@ -168,6 +170,222 @@ class GalleryScreenState extends State<GalleryScreen>
   void createAlbumFromSelectionPublic() {
     if (_selectedKeys.isNotEmpty) {
       _createAlbumFromSelection();
+    }
+  }
+
+  /// Delete a single photo from the viewer
+  void _deletePhotoFromViewer(String photoUrl) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Photo'),
+        content: const Text(
+          'This photo will be moved to trash and deleted after 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await TrashStore.moveToTrash(photoUrl);
+      _trashedIds.add(photoUrl);
+
+      final key = p.basename(photoUrl);
+      setState(() {
+        photoTags.remove(key);
+        photoAllDetections.remove(key);
+        _cachedFilteredUrls.clear();
+        _lastImageUrlsLength = -1;
+      });
+
+      if (mounted) {
+        Navigator.pop(context); // Close viewer
+        _showSnackBar('Photo moved to trash');
+      }
+    } catch (e) {
+      _showSnackBar('Failed to delete: $e');
+    }
+  }
+
+  /// Share a single photo from the viewer
+  void _sharePhotoFromViewer(String photoUrl) {
+    _showSnackBar('Share photo');
+    // TODO: Implement actual share functionality
+  }
+
+  /// Add a single photo to album from the viewer
+  void _addPhotoToAlbumFromViewer(String photoUrl) async {
+    // Get existing albums
+    final prefs = await SharedPreferences.getInstance();
+    final albumsJson = prefs.getString('albums');
+    Map<String, dynamic> albumsMap = {};
+    if (albumsJson != null) {
+      try {
+        albumsMap = json.decode(albumsJson) as Map<String, dynamic>;
+      } catch (_) {
+        albumsMap = {};
+      }
+    }
+
+    final existingAlbums = albumsMap.keys.toList()..sort();
+
+    if (!mounted) return;
+
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Add photo to album',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              // Create new album option
+              ListTile(
+                leading: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.add, color: Colors.green.shade700),
+                ),
+                title: const Text('Create new album'),
+                onTap: () => Navigator.pop(ctx, '_create_new_'),
+              ),
+              if (existingAlbums.isNotEmpty) ...[
+                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add to existing album',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+                ),
+                ...existingAlbums
+                    .take(5)
+                    .map(
+                      (albumName) => ListTile(
+                        leading: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.photo_album,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                        title: Text(albumName),
+                        subtitle: Text(
+                          '${(albumsMap[albumName] as List?)?.length ?? 0} photos',
+                        ),
+                        onTap: () => Navigator.pop(ctx, albumName),
+                      ),
+                    ),
+              ],
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    if (result == '_create_new_') {
+      // Create new album with this single photo
+      final controller = TextEditingController(text: 'Album');
+      final name = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Create Album'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Album Name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted || name == null || name.isEmpty) return;
+
+      albumsMap[name] = [photoUrl];
+      await prefs.setString('albums', json.encode(albumsMap));
+      await prefs.setString('album_$name', json.encode([photoUrl]));
+      _showSnackBar('Created album "$name"');
+      widget.onAlbumCreated?.call();
+    } else {
+      // Add to existing album
+      List<String> existingPhotos = [];
+      if (albumsMap[result] != null) {
+        existingPhotos = List<String>.from(albumsMap[result] as List);
+      }
+
+      if (existingPhotos.contains(photoUrl)) {
+        _showSnackBar('Photo already in "$result"');
+        return;
+      }
+
+      existingPhotos.add(photoUrl);
+      albumsMap[result] = existingPhotos;
+      await prefs.setString('albums', json.encode(albumsMap));
+      await prefs.setString('album_$result', json.encode(existingPhotos));
+      _showSnackBar('Added to "$result"');
+      widget.onAlbumCreated?.call();
     }
   }
 
@@ -438,9 +656,11 @@ class GalleryScreenState extends State<GalleryScreen>
     final List<double> chipWidths = [];
 
     for (var t in visibleTags) {
+      // Normalize tag to Title Case
+      final displayTag = _capitalizeTag(t);
       // Calculate text width at default size
       final defaultStyle = baseStyle.copyWith(fontSize: defaultFontSize);
-      final textWidth = _measureTextWidth(t, defaultStyle);
+      final textWidth = _measureTextWidth(displayTag, defaultStyle);
       double chipWidth = textWidth + horizontalPadding;
       double fontSize = defaultFontSize;
 
@@ -464,7 +684,7 @@ class GalleryScreenState extends State<GalleryScreen>
         chipWidths.add(chipWidth);
         chips.add(
           GestureDetector(
-            onTap: () => _showTagMenu(t),
+            onTap: () => _showTagMenu(displayTag),
             child: Container(
               constraints: BoxConstraints(maxWidth: maxChipWidth),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -482,7 +702,7 @@ class GalleryScreenState extends State<GalleryScreen>
                 ],
               ),
               child: Text(
-                t,
+                displayTag,
                 style: finalStyle,
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
@@ -881,7 +1101,7 @@ class GalleryScreenState extends State<GalleryScreen>
                     Widget? icon;
 
                     if (_scanning && stuckAt100) {
-                      liveMessage = 'Final touches';
+                      liveMessage = '100% - $scannedCount/$_cachedLocalPhotoCount photos scanned';
                       icon = AnimatedBuilder(
                         animation: _starRotation,
                         builder: (context, child) {
@@ -1217,14 +1437,23 @@ class GalleryScreenState extends State<GalleryScreen>
     widget.onSearchChanged?.call();
   }
 
-  /// Get all unique tags from currently loaded photos
+  /// Capitalize the first letter of a tag, and convert 'unknown' to 'Other'
+  String _capitalizeTag(String tag) {
+    if (tag.isEmpty) return tag;
+    // Treat 'unknown' as 'other'
+    if (tag.toLowerCase() == 'unknown') return 'Other';
+    return tag[0].toUpperCase() + tag.substring(1).toLowerCase();
+  }
+
+  /// Get all unique tags from currently loaded photos (normalized to Title Case)
   Set<String> getAllCurrentTags() {
     final allTags = <String>{};
     // Only include tags from photos that actually exist in imageUrls
     for (final url in imageUrls) {
       final key = p.basename(url);
       final tags = photoTags[key] ?? [];
-      allTags.addAll(tags);
+      // Normalize tags to have consistent capitalization
+      allTags.addAll(tags.map(_capitalizeTag));
     }
     return allTags;
   }
@@ -3952,6 +4181,7 @@ class GalleryScreenState extends State<GalleryScreen>
     _navBarShowTimer?.cancel();
     _longPressTimer?.cancel();
     _tooltipTimer?.cancel();
+    _finalTouchesTimer?.cancel();
     _starAnimationController.dispose();
     _dotIndexNotifier.dispose();
     _scanProgressNotifier.dispose();
@@ -4033,25 +4263,37 @@ class GalleryScreenState extends State<GalleryScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Theme.of(context).scaffoldBackgroundColor,
-              Theme.of(context).brightness == Brightness.dark
-                  ? Colors.grey.shade900
-                  : Colors.grey.shade300,
-            ],
+    return PopScope(
+      canPop: searchQuery.isEmpty,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && searchQuery.isNotEmpty) {
+          // Clear the filter instead of going back
+          setState(() {
+            searchQuery = '';
+            _searchController.text = '';
+          });
+          widget.onSearchChanged?.call();
+        }
+      },
+      child: Scaffold(
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Theme.of(context).scaffoldBackgroundColor,
+                Theme.of(context).brightness == Brightness.dark
+                    ? Colors.grey.shade900
+                    : Colors.grey.shade300,
+              ],
+            ),
           ),
-        ),
-        child: loading
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
+          child: loading
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
                     SizedBox(
                       width: 250,
                       height: 250,
@@ -4254,12 +4496,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                       ),
                                     ),
                                     // Hide loading dots during "final touches" to avoid redundancy
-                                    if ((_scanning || _validating) &&
-                                        !(_reached100At != null &&
-                                            DateTime.now()
-                                                    .difference(_reached100At!)
-                                                    .inSeconds >
-                                                3))
+                                    if ((_scanning || _validating) && !_showFinalTouches)
                                       Padding(
                                         padding: const EdgeInsets.only(
                                           top: 4,
@@ -4297,21 +4534,23 @@ class GalleryScreenState extends State<GalleryScreen>
                                             if (isAt100 &&
                                                 _reached100At == null) {
                                               _reached100At = DateTime.now();
+                                              // Schedule a rebuild after 3 seconds to show "Final touches"
+                                              _finalTouchesTimer?.cancel();
+                                              _finalTouchesTimer = Timer(const Duration(seconds: 3), () {
+                                                if (mounted && _scanning) {
+                                                  setState(() {
+                                                    _showFinalTouches = true;
+                                                  });
+                                                }
+                                              });
                                             } else if (!isAt100) {
                                               _reached100At = null;
+                                              _finalTouchesTimer?.cancel();
+                                              _showFinalTouches = false;
                                             }
 
-                                            // Show "Final touches" if stuck at 100% for more than 3 seconds
-                                            final stuckAt100 =
-                                                _reached100At != null &&
-                                                DateTime.now()
-                                                        .difference(
-                                                          _reached100At!,
-                                                        )
-                                                        .inSeconds >
-                                                    3;
-
-                                            if (stuckAt100) {
+                                            // Show "Final touches" if flag is set
+                                            if (_showFinalTouches) {
                                               // Show Final touches with rotating star
                                               return Row(
                                                 mainAxisSize: MainAxisSize.min,
@@ -4379,22 +4618,22 @@ class GalleryScreenState extends State<GalleryScreen>
                                               );
                                             }
 
-                                            // Only show percentage if >= 75%
+                                            // Hide percentage at 100%, show just dots
                                             final pctNum =
                                                 int.tryParse(pct) ?? 0;
-                                            if (pctNum >= 75) {
-                                              return Text(
-                                                '$pct%',
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  color: Colors.orange.shade700,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              );
+                                            if (pctNum >= 100) {
+                                              return const SizedBox.shrink();
                                             }
 
-                                            // Below 75%, show nothing (just dots visible above)
-                                            return const SizedBox.shrink();
+                                            // Always show percentage during scanning (except at 100%)
+                                            return Text(
+                                              '$pct%',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.orange.shade700,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            );
                                           },
                                         ),
                                       ),
@@ -4495,7 +4734,7 @@ class GalleryScreenState extends State<GalleryScreen>
                     ),
                   ),
 
-                  // Active search filters
+                  // Active search filters with counts
                   if (searchQuery.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -4509,8 +4748,31 @@ class GalleryScreenState extends State<GalleryScreen>
                                   ...searchQuery
                                       .split(' ')
                                       .where((tag) => tag.isNotEmpty)
-                                      .map(
-                                        (tag) => Padding(
+                                      .map((tag) {
+                                        // Count photos matching this specific tag
+                                        final tagLower = tag.toLowerCase();
+                                        final int count;
+                                        
+                                        // Special handling for "none" filter
+                                        if (tagLower == 'none') {
+                                          count = imageUrls.where((u) {
+                                            if (_trashedIds.contains(u)) return false;
+                                            final key = p.basename(u);
+                                            final tags = photoTags[key] ?? [];
+                                            return tags.isEmpty;
+                                          }).length;
+                                        } else {
+                                          count = imageUrls.where((u) {
+                                            if (_trashedIds.contains(u)) return false;
+                                            final key = p.basename(u);
+                                            final tags = photoTags[key] ?? [];
+                                            final allDetections = photoAllDetections[key] ?? [];
+                                            return tags.any((t) => t.toLowerCase().contains(tagLower)) ||
+                                                allDetections.any((d) => d.toLowerCase().contains(tagLower));
+                                          }).length;
+                                        }
+                                        
+                                        return Padding(
                                           padding: const EdgeInsets.only(
                                             right: 8,
                                           ),
@@ -4551,7 +4813,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
                                                 Text(
-                                                  tag,
+                                                  '$tag ($count)',
                                                   style: TextStyle(
                                                     color:
                                                         Theme.of(
@@ -4602,8 +4864,8 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ],
                                             ),
                                           ),
-                                        ),
-                                      ),
+                                        );
+                                      }),
                                 ],
                               ),
                             ),
@@ -4945,14 +5207,24 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     Navigator.push(
                                                       context,
                                                       MaterialPageRoute(
-                                                        builder: (_) =>
-                                                            PhotoViewer(
-                                                              heroTag: key,
-                                                              allPhotos:
-                                                                  allPhotos,
-                                                              initialIndex:
-                                                                  index,
-                                                            ),
+                                                        builder: (_) => PhotoViewer(
+                                                          heroTag: key,
+                                                          allPhotos: allPhotos,
+                                                          initialIndex: index,
+                                                          onDelete: (photoUrl) =>
+                                                              _deletePhotoFromViewer(
+                                                                photoUrl,
+                                                              ),
+                                                          onShare: (photoUrl) =>
+                                                              _sharePhotoFromViewer(
+                                                                photoUrl,
+                                                              ),
+                                                          onAddToAlbum:
+                                                              (photoUrl) =>
+                                                                  _addPhotoToAlbumFromViewer(
+                                                                    photoUrl,
+                                                                  ),
+                                                        ),
                                                       ),
                                                     );
                                                   },
@@ -5913,6 +6185,7 @@ class GalleryScreenState extends State<GalleryScreen>
               ),
             )
           : null,
+      ),
     );
   }
 }

@@ -40,6 +40,11 @@ class PhotoViewer extends StatefulWidget {
   /// Initial index when using allPhotos
   final int initialIndex;
 
+  /// Callbacks for action buttons
+  final void Function(String url)? onDelete;
+  final void Function(String url)? onShare;
+  final void Function(String url)? onAddToAlbum;
+
   const PhotoViewer({
     super.key,
     this.filePath,
@@ -49,17 +54,29 @@ class PhotoViewer extends StatefulWidget {
     this.allDetections = const [],
     this.allPhotos,
     this.initialIndex = 0,
+    this.onDelete,
+    this.onShare,
+    this.onAddToAlbum,
   });
 
   @override
   State<PhotoViewer> createState() => _PhotoViewerState();
 }
 
-class _PhotoViewerState extends State<PhotoViewer> {
+class _PhotoViewerState extends State<PhotoViewer>
+    with TickerProviderStateMixin {
   bool _showInfo = true;
   bool _showControls = true;
   late PageController _pageController;
   late int _currentIndex;
+
+  /// Capitalize the first letter of a tag, and convert 'unknown' to 'Other'
+  String _capitalizeTag(String tag) {
+    if (tag.isEmpty) return tag;
+    // Treat 'unknown' as 'other'
+    if (tag.toLowerCase() == 'unknown') return 'Other';
+    return tag[0].toUpperCase() + tag.substring(1).toLowerCase();
+  }
 
   /// Cache loaded files to prevent flickering when swiping
   final Map<int, File> _fileCache = {};
@@ -69,6 +86,22 @@ class _PhotoViewerState extends State<PhotoViewer> {
 
   /// Track if user is zoomed in (to disable PageView swiping)
   bool _isZoomed = false;
+
+  /// Track scale at interaction start to detect intentional pinch
+  double _scaleAtStart = 1.0;
+
+  /// Minimum scale change required before zoom is applied (gives time for 2nd finger)
+  static const double _scaleThreshold = 0.08;
+
+  /// Track number of pointers to detect pinch vs swipe
+  int _pointerCount = 0;
+
+  /// Whether we're currently in a pinch gesture
+  bool _isPinching = false;
+
+  /// Animation controller for double-tap zoom
+  AnimationController? _zoomAnimationController;
+  Animation<Matrix4>? _zoomAnimation;
 
   @override
   void initState() {
@@ -120,6 +153,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
   @override
   void dispose() {
     _pageController.dispose();
+    _zoomAnimationController?.dispose();
     // Dispose all transform controllers
     for (final controller in _transformControllers.values) {
       controller.dispose();
@@ -196,36 +230,133 @@ class _PhotoViewerState extends State<PhotoViewer> {
         children: [
           // Photo(s) with PageView for swiping
           if (hasMultiplePhotos)
-            PageView.builder(
-              controller: _pageController,
-              itemCount: widget.allPhotos!.length,
-              // Disable swiping when zoomed in
-              physics: _isZoomed
-                  ? const NeverScrollableScrollPhysics()
-                  : const PageScrollPhysics(),
-              onPageChanged: (index) {
-                setState(() {
-                  _currentIndex = index;
-                  _isZoomed = false; // Reset zoom when changing pages
-                });
-                // Preload adjacent photos
-                _preloadPhotos(index);
+            Listener(
+              onPointerDown: (_) {
+                _pointerCount++;
+                if (_pointerCount >= 2 && !_isPinching) {
+                  setState(() => _isPinching = true);
+                }
               },
-              itemBuilder: (context, index) {
-                final photo = widget.allPhotos![index];
-                return _buildZoomablePhoto(
-                  photo,
-                  index,
-                  index == widget.initialIndex,
-                );
+              onPointerUp: (_) {
+                _pointerCount = (_pointerCount - 1).clamp(0, 10);
+                if (_pointerCount < 2 && _isPinching) {
+                  // Reset immediately - no delay needed
+                  setState(() => _isPinching = false);
+                }
               },
+              onPointerCancel: (_) {
+                _pointerCount = (_pointerCount - 1).clamp(0, 10);
+                if (_pointerCount < 2 && _isPinching) {
+                  setState(() => _isPinching = false);
+                }
+              },
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: widget.allPhotos!.length,
+                // Disable swiping when zoomed in OR when pinching (2+ fingers)
+                physics: (_isZoomed || _isPinching)
+                    ? const NeverScrollableScrollPhysics()
+                    : const PageScrollPhysics(),
+                onPageChanged: (index) {
+                  // Reset pointer state when page changes
+                  _pointerCount = 0;
+                  _isPinching = false;
+                  setState(() {
+                    _currentIndex = index;
+                    _isZoomed = false; // Reset zoom when changing pages
+                  });
+                  // Preload adjacent photos
+                  _preloadPhotos(index);
+                },
+                itemBuilder: (context, index) {
+                  final photo = widget.allPhotos![index];
+                  return _buildZoomablePhoto(
+                    photo,
+                    index,
+                    index == widget.initialIndex,
+                  );
+                },
+              ),
             )
           else
             _buildZoomablePhoto(_currentPhoto, 0, true),
 
           // Tags overlay at bottom
           if (_showInfo && _showControls) _buildTagsOverlay(_currentPhoto),
+
+          // Action buttons at bottom
+          if (_showControls) _buildActionButtons(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final hasCallbacks =
+        widget.onDelete != null ||
+        widget.onShare != null ||
+        widget.onAddToAlbum != null;
+
+    if (!hasCallbacks) return const SizedBox.shrink();
+
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: bottomPadding + 16,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          if (widget.onAddToAlbum != null)
+            _buildActionButton(Icons.photo_album, 'Album', Colors.green, () {
+              widget.onAddToAlbum?.call(_currentPhoto.url);
+            }),
+          if (widget.onShare != null)
+            _buildActionButton(Icons.share, 'Share', Colors.blue, () {
+              widget.onShare?.call(_currentPhoto.url);
+            }),
+          if (widget.onDelete != null)
+            _buildActionButton(Icons.delete, 'Delete', Colors.red, () {
+              widget.onDelete?.call(_currentPhoto.url);
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    IconData icon,
+    String label,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.2),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -307,13 +438,92 @@ class _PhotoViewerState extends State<PhotoViewer> {
     // Use cached TransformationController to track zoom state
     final transformController = _getTransformController(index);
 
+    // Animated double tap handler for zoom toggle
+    void handleDoubleTap() {
+      final currentScale = transformController.value.getMaxScaleOnAxis();
+      
+      // Cancel any existing animation
+      _zoomAnimationController?.dispose();
+      
+      // Create new animation controller
+      _zoomAnimationController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 250),
+      );
+      
+      final Matrix4 targetMatrix;
+      final bool willBeZoomed;
+      
+      if (currentScale > 1.05) {
+        // Zoomed in - animate back to original
+        targetMatrix = Matrix4.identity();
+        willBeZoomed = false;
+      } else {
+        // Not zoomed - animate to 2x at center
+        final center = MediaQuery.of(context).size.center(Offset.zero);
+        targetMatrix = Matrix4.identity()
+          ..translate(center.dx, center.dy)
+          ..scale(2.0)
+          ..translate(-center.dx, -center.dy);
+        willBeZoomed = true;
+      }
+      
+      // Create the animation
+      _zoomAnimation = Matrix4Tween(
+        begin: transformController.value,
+        end: targetMatrix,
+      ).animate(CurvedAnimation(
+        parent: _zoomAnimationController!,
+        curve: Curves.easeOutCubic,
+      ));
+      
+      // Update transform controller on each frame
+      _zoomAnimation!.addListener(() {
+        transformController.value = _zoomAnimation!.value;
+      });
+      
+      // Update zoom state when animation completes
+      _zoomAnimationController!.addStatusListener((status) {
+        if (status == AnimationStatus.completed) {
+          setState(() => _isZoomed = willBeZoomed);
+        }
+      });
+      
+      // Start the animation
+      _zoomAnimationController!.forward();
+    }
+
     final viewer = GestureDetector(
       onTap: () => setState(() => _showControls = !_showControls),
+      onDoubleTap: handleDoubleTap,
       child: InteractiveViewer(
         transformationController: transformController,
         panEnabled: true,
+        // Allow panning only within the scaled image bounds
+        boundaryMargin: EdgeInsets.zero,
+        constrained: true,
+        clipBehavior: Clip.hardEdge,
         minScale: 1.0,
-        maxScale: 8.0,
+        // 2 pinches worth of zoom (1.0 -> 1.7 -> 3.0)
+        maxScale: 3.0,
+        // Require a meaningful scale change before zooming starts
+        // This gives users time to place their second finger
+        scaleEnabled: true,
+        onInteractionStart: (details) {
+          _scaleAtStart = transformController.value.getMaxScaleOnAxis();
+        },
+        onInteractionUpdate: (details) {
+          // If just starting to scale (from 1.0), ignore small changes
+          // This prevents accidental zoom when placing second finger
+          if (_scaleAtStart == 1.0 && details.pointerCount == 2) {
+            final currentScale = transformController.value.getMaxScaleOnAxis();
+            final scaleChange = (currentScale - _scaleAtStart).abs();
+            if (scaleChange < _scaleThreshold) {
+              // Reset to prevent micro-zooms while placing fingers
+              transformController.value = Matrix4.identity();
+            }
+          }
+        },
         onInteractionEnd: (_) {
           // Only update state if zoom status changed
           final scale = transformController.value.getMaxScaleOnAxis();
@@ -322,6 +532,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
             setState(() => _isZoomed = isNowZoomed);
           }
         },
+        // Image fills viewport, constrained prevents panning outside
         child: Center(child: imageWidget),
       ),
     );
@@ -363,7 +574,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
             ],
           ),
         ),
-        padding: EdgeInsets.fromLTRB(16, 48, 16, 32 + bottomPadding),
+        padding: EdgeInsets.fromLTRB(16, 48, 16, 128 + 32 + bottomPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -383,26 +594,27 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 spacing: 8,
                 runSpacing: 8,
                 children: photo.tags.map((tag) {
+                  final displayTag = _capitalizeTag(tag);
                   return Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: _getCategoryColor(tag),
+                      color: _getCategoryColor(displayTag),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          _getCategoryIcon(tag),
+                          _getCategoryIcon(displayTag),
                           size: 16,
                           color: Colors.white,
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          tag,
+                          displayTag,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 14,
@@ -431,6 +643,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
                 spacing: 6,
                 runSpacing: 6,
                 children: extraDetections.map((obj) {
+                  final displayObj = _capitalizeTag(obj);
                   return Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -444,7 +657,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
                       ),
                     ),
                     child: Text(
-                      obj,
+                      displayObj,
                       style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
                   );
