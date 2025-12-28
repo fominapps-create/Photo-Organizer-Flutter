@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../utils/snackbar_helper.dart';
 import 'dart:io';
 
 class OrganizeProgressScreen extends StatefulWidget {
@@ -236,7 +237,7 @@ class _OrganizeProgressScreenState extends State<OrganizeProgressScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Organization cancelled')));
+      ).showSnackBar(createStyledSnackBar('Organization cancelled'));
       Navigator.of(context).pop();
       return;
     }
@@ -290,13 +291,13 @@ class _OrganizeProgressScreenState extends State<OrganizeProgressScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Organization complete')));
+      ).showSnackBar(createStyledSnackBar('Organization complete'));
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save organized albums')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(createStyledSnackBar('Failed to save organized albums'));
       Navigator.of(context).pop();
     }
   }

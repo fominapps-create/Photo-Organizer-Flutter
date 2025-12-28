@@ -137,9 +137,9 @@ class TrashStore {
   static Future<bool> emptyTrash() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_trashKey);
-      developer.log('🗑️ Emptied trash');
-      return true;
+      final removed = await prefs.remove(_trashKey);
+      developer.log('🗑️ Emptied trash (removed: $removed)');
+      return removed;
     } catch (e) {
       developer.log('❌ Error emptying trash: $e');
       return false;

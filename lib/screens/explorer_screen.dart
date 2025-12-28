@@ -15,6 +15,7 @@ import '../services/photo_id.dart';
 import '../services/network_utils.dart';
 import '../services/settings_utils.dart';
 import '../services/api_service.dart'; // adjust path if needed
+import '../utils/snackbar_helper.dart';
 import 'custom_image_picker.dart';
 
 // Helper to get current memory usage (best effort, platform-dependent)
@@ -151,10 +152,7 @@ class ExplorerScreenState extends State<ExplorerScreen>
                       });
                       widget.onImagesChanged?.call();
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Cleared selected images'),
-                          behavior: SnackBarBehavior.floating,
-                        ),
+                        createStyledSnackBar('Cleared selected images'),
                       );
                     },
                     icon: const Icon(Icons.cancel, color: Color(0xFFD32F2F)),
@@ -300,20 +298,18 @@ class ExplorerScreenState extends State<ExplorerScreen>
                           final messenger = ScaffoldMessenger.of(context);
                           if (uploading) {
                             messenger.showSnackBar(
-                              const SnackBar(
-                                content: Text('Stopping upload…'),
-                                behavior: SnackBarBehavior.floating,
-                                duration: Duration(milliseconds: 800),
+                              createStyledSnackBar(
+                                'Stopping upload…',
+                                duration: const Duration(milliseconds: 800),
                               ),
                             );
                             stopUpload();
                           } else {
                             stopUpload();
                             messenger.showSnackBar(
-                              const SnackBar(
-                                content: Text('Cleared selected images'),
-                                behavior: SnackBarBehavior.floating,
-                                duration: Duration(seconds: 1),
+                              createStyledSnackBar(
+                                'Cleared selected images',
+                                duration: const Duration(seconds: 1),
                               ),
                             );
                           }
@@ -802,11 +798,8 @@ class ExplorerScreenState extends State<ExplorerScreen>
       // Check if user requested pause or cancellation
       if (paused) {
         messenger.showSnackBar(
-          SnackBar(
-            content: Text('Upload paused ($processedCount/$total processed)'),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
-            duration: const Duration(seconds: 2),
+          createStyledSnackBar(
+            'Upload paused ($processedCount/$total processed)',
           ),
         );
         setState(() {
@@ -817,13 +810,8 @@ class ExplorerScreenState extends State<ExplorerScreen>
 
       if (cancelUpload) {
         messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Upload stopped by user ($processedCount/$total processed)',
-            ),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
-            duration: const Duration(seconds: 2),
+          createStyledSnackBar(
+            'Upload stopped by user ($processedCount/$total processed)',
           ),
         );
         setState(() {
@@ -1217,14 +1205,7 @@ class ExplorerScreenState extends State<ExplorerScreen>
 
     // Use mounted check before showing SnackBar
     if (mounted) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('All images uploaded!'),
-          behavior: SnackBarBehavior.floating,
-          margin: EdgeInsets.only(bottom: 80, left: 16, right: 16),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      messenger.showSnackBar(createStyledSnackBar('All images uploaded!'));
     }
   }
 

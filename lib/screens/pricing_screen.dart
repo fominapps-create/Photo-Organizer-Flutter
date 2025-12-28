@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/snackbar_helper.dart';
 
 class PricingScreen extends StatefulWidget {
   const PricingScreen({super.key});
@@ -55,7 +56,7 @@ class _PricingScreenState extends State<PricingScreen> {
     if (prefs.getBool('trial_used') ?? false) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Trial already used')));
+      ).showSnackBar(createStyledSnackBar('Trial already used'));
       return;
     }
     final expires = DateTime.now().add(const Duration(days: _kTrialDays));
@@ -71,8 +72,9 @@ class _PricingScreenState extends State<PricingScreen> {
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Free trial started — enjoy 14 days and 50 credits!'),
+        createStyledSnackBar(
+          'Free trial started — enjoy 14 days and 50 credits!',
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -101,9 +103,9 @@ class _PricingScreenState extends State<PricingScreen> {
         _trialCredits = 0;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Trial credits exhausted')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(createStyledSnackBar('Trial credits exhausted'));
       }
       return;
     }
@@ -281,10 +283,9 @@ class _PricingScreenState extends State<PricingScreen> {
                         ),
                       ),
                       TextButton(
-                        onPressed: () =>
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Trial info')),
-                            ),
+                        onPressed: () => ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(createStyledSnackBar('Trial info')),
                         child: const Text('Details'),
                       ),
                     ],
@@ -332,9 +333,9 @@ class _PricingScreenState extends State<PricingScreen> {
                   'Local face enrollment (private)',
                 ],
                 color: Colors.blueAccent,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('You are on Free plan')),
-                ),
+                onTap: () => ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(createStyledSnackBar('You are on Free plan')),
               ),
               const SizedBox(height: 12),
 
@@ -349,9 +350,9 @@ class _PricingScreenState extends State<PricingScreen> {
                   'Keep Pro forever (fair‑use applies)',
                 ],
                 color: Colors.deepPurple,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Pro unlock simulated')),
-                ),
+                onTap: () => ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(createStyledSnackBar('Pro unlock simulated')),
               ),
               const SizedBox(height: 12),
 
@@ -368,7 +369,7 @@ class _PricingScreenState extends State<PricingScreen> {
                 ],
                 color: Colors.teal,
                 onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Subscription flow simulated')),
+                  createStyledSnackBar('Subscription flow simulated'),
                 ),
               ),
 
@@ -408,9 +409,7 @@ class _PricingScreenState extends State<PricingScreen> {
                   }
                 }
                 scaffoldMessenger.showSnackBar(
-                  const SnackBar(
-                    content: Text('Bought 10 credits (simulated)'),
-                  ),
+                  createStyledSnackBar('Bought 10 credits (simulated)'),
                 );
               }),
               const SizedBox(height: 8),
@@ -424,9 +423,7 @@ class _PricingScreenState extends State<PricingScreen> {
                     return;
                   }
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Bought 50 credits (simulated)'),
-                    ),
+                    createStyledSnackBar('Bought 50 credits (simulated)'),
                   );
                 },
               ),
@@ -441,9 +438,7 @@ class _PricingScreenState extends State<PricingScreen> {
                     return;
                   }
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Bought 200 credits (simulated)'),
-                    ),
+                    createStyledSnackBar('Bought 200 credits (simulated)'),
                   );
                 },
               ),

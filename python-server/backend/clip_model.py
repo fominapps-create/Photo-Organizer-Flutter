@@ -113,7 +113,7 @@ class CLIPPhotoClassifier:
                 "food": 0.80,
                 "document": 0.70,
                 "animals": 0.70,
-                "people": 0.80,
+                "people": 0.60,  # Lowered from 0.80 - profiles and partial faces still count
                 "scenery": 0.70,
                 "illustration": 0.60,  # Lower threshold for cartoon/mascot detection
             }

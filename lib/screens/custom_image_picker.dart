@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../utils/snackbar_helper.dart';
 
 class CustomImagePicker extends StatefulWidget {
   const CustomImagePicker({super.key});
@@ -143,9 +144,9 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
 
   Future<void> _confirmSelection() async {
     if (_selectedMedia.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select at least one image')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(createStyledSnackBar('Please select at least one image'));
       return;
     }
 

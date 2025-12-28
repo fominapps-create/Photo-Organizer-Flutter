@@ -6,14 +6,17 @@ import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:ui';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/photo_id.dart';
 import '../services/tag_store.dart';
 import '../services/trash_store.dart';
-import 'dart:io';
-import 'package:path/path.dart' as p;
 import '../services/api_service.dart';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:path/path.dart' as p;
+import 'album_screen.dart';
 import 'photo_viewer.dart';
 import 'intro_video_screen.dart';
 import 'onboarding_screen.dart';
@@ -33,115 +36,102 @@ class GalleryScreen extends StatefulWidget {
 }
 
 class GalleryScreenState extends State<GalleryScreen>
-    with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
-
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
-  Map<String, List<String>> photoAllDetections =
-      {}; // All detections including small objects
+  Map<String, List<String>> photoAllDetections = {};
   bool loading = true;
-  // Device-local asset storage and thumbnail cache for local view
   final Map<String, AssetEntity> _localAssets = {};
   final Map<String, Uint8List> _thumbCache = {};
-  Set<String> _trashedIds = {}; // Cached set of trashed photo IDs
   Map<String, List<String>> albums = {};
   String searchQuery = '';
   bool showDebug = false;
   bool _showSearchBar = true;
-  bool _sortNewestFirst = true; // true = newest first, false = oldest first
-  bool _showTags =
-      true; // Toggle to show/hide photo tags (always true for live updates)
+  bool _showTags = true;
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
   int _crossAxisCount = 4;
   bool _isSelectMode = false;
   final Set<String> _selectedKeys = {};
   final Map<String, double> _textWidthCache = {};
-  // Auto-scan state
   bool _scanning = false;
-  bool _clearingTags = false; // Block scans during tag clearing
-  bool _hasScannedAtLeastOneBatch = false; // Must scan before validating
-  bool _galleryReadyShown =
-      false; // Prevent duplicate 'gallery ready' snackbars
+  bool _clearingTags = false;
+  bool _hasScannedAtLeastOneBatch = false;
+  bool _validating = false;
+  bool _validationComplete = false;
+  final Map<String, DateTime> _recentlyValidated = {};
+  double _scanProgress = 0.0;
+  int _scanTotal = 0;
+  int _scanProcessed = 0;
+  double _lastScale = 1.0;
+  List<String> _cachedFilteredUrls = [];
+  String _lastSearchQuery = '';
+  int _lastPhotoTagsLength = 0;
+  int _lastImageUrlsLength = 0;
+  final ValueNotifier<int> _scannedCountNotifier = ValueNotifier<int>(0);
+  int _cachedLocalPhotoCount = 0;
+  DateTime? _reached100At;
+  bool _galleryReadyShown = false;
+  final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
+  final ScrollController _scrollController = ScrollController();
+  Timer? _fastScrollerHideTimer;
+  ValueNotifier<bool> _showFastScrollerNotifier = ValueNotifier<bool>(false);
+  bool _isDraggingScroller = false;
+  Timer? _autoScanRetryTimer;
+  bool _showPerformanceMonitor = false;
+  double _currentRamUsageMB = 0.0;
+  double _peakRamUsageMB = 0.0;
+  int _currentBatchSize = 20;
+  double _avgBatchTimeMs = 0.0;
+  double _imagesPerSecond = 0.0;
+  late AnimationController _starAnimationController;
+  late Animation<double> _starRotation;
+  StreamSubscription<dynamic>? _photoChangesSubscription;
+  static const _photoChangesChannel = EventChannel(
+    'com.example.photo_organizer/photo_changes',
+  );
+
+  // Additional state variables
+  final ValueNotifier<int> _dotIndexNotifier = ValueNotifier<int>(0);
+  Timer? _dotAnimationTimer;
+  final Map<String, Future<Uint8List?>> _thumbFutureCache = {};
+  bool _sortNewestFirstCached = true;
+  bool _sortNewestFirst = true;
+  Timer? _progressRefreshTimer;
+  Timer? _smoothProgressTimer;
+  Timer? _longPressTimer;
   final ValueNotifier<double> _scanProgressNotifier = ValueNotifier<double>(
     0.0,
-  ); // Use notifier to avoid rebuilding whole tree
-  final ValueNotifier<int> _scannedCountNotifier = ValueNotifier<int>(
-    0,
-  ); // Track scanned photos count
-  double _scanProgress = 0.0; // 0.0-1.0
-  int _scanTotal = 0;
-  final bool _scanPaused = false;
-  final ScrollController _scrollController = ScrollController();
-  final ValueNotifier<bool> _showScrollToTop = ValueNotifier<bool>(false);
-  int _scanProcessed = 0;
-  double _lastScale = 1.0; // Track last scale for incremental pinch zoom
-
-  // Performance monitoring
-  bool _showPerformanceMonitor = false;
-  double _currentRamUsageMB = 0;
-  double _peakRamUsageMB = 0;
-  int _currentBatchSize = 0;
-  int _avgBatchTimeMs = 0;
-  double _imagesPerSecond = 0;
-
-  // Background CLIP validation state
-  bool _validating = false;
+  );
   bool _validationCancelled = false;
+  double _estimatedMsPerPhoto = 100.0;
+  double _targetProgress = 0.0;
+  double _displayProgress = 0.0;
   bool _validationPaused = false;
   int _validationTotal = 0;
   int _validationAgreements = 0;
   int _validationDisagreements = 0;
   int _validationOverrides = 0;
-  bool _validationComplete = false; // Track if full validation is done
-  bool _hasCheckedForUnscannedPhotos =
-      false; // Track if we've checked for new photos on startup
-
-  // Track changed images for detailed view
-  final List<Map<String, dynamic>> _validationChanges = [];
-  // Track recently updated photos for animation (photoID -> timestamp)
-  final Map<String, DateTime> _recentlyValidated = {};
-
-  // Dot animation state - use ValueNotifier to avoid full rebuilds
-  final ValueNotifier<int> _dotIndexNotifier = ValueNotifier<int>(0);
-  Timer? _dotAnimationTimer;
-  Timer? _autoScanRetryTimer;
-  Timer? _progressRefreshTimer; // Refresh progress display periodically
-
-  // Smooth progress animation state
-  Timer? _smoothProgressTimer;
-  double _displayProgress = 0.0; // Smoothly animated progress for display
-  double _targetProgress = 0.0; // Actual progress to animate towards
-  double _estimatedMsPerPhoto = 300.0; // Adaptive estimate, starts at 300ms
-
-  // Final touches animation state (when stuck at 100%)
-  DateTime? _reached100At;
-  late AnimationController _starAnimationController;
-
-  // Cached filtered list to avoid recomputing on every build
-  List<String> _cachedFilteredUrls = [];
-  String _lastSearchQuery = '';
-  int _lastImageUrlsLength = 0;
-  int _lastPhotoTagsLength = 0;
-  bool _sortNewestFirstCached = true;
-
-  // Cached local photo count
-  int _cachedLocalPhotoCount = 0;
-
-  // Fast scroller state
-  bool _showFastScroller = false;
-  Timer? _fastScrollerHideTimer;
-  Timer? _longPressTimer;
-  bool _isDraggingScroller = false;
+  List<Map<String, dynamic>> _validationChanges = [];
   String _currentScrollYear = '';
+  bool _scanPaused = false;
 
-  // Thumbnail future cache to prevent recreating futures on rebuild
-  final Map<String, Future<Uint8List?>> _thumbFutureCache = {};
+  void _showSnackBar(String message, {Duration? duration}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 48, left: 16, right: 16),
+        duration: duration ?? const Duration(seconds: 4),
+      ),
+    );
+  }
 
   double _measureTextWidth(String text, TextStyle style) {
-    final key = text; // style is constant here, so text is fine as cache key
+    final key = text;
     if (_textWidthCache.containsKey(key)) return _textWidthCache[key]!;
     final textPainter = TextPainter(
       text: TextSpan(text: text, style: style),
@@ -155,16 +145,14 @@ class GalleryScreenState extends State<GalleryScreen>
 
   Widget _buildPerfStat(String label, String value, IconData icon) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Icon(icon, color: Colors.white70, size: 14),
+          Icon(icon, color: Colors.lightBlue.shade300, size: 14),
           const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 11),
-            ),
+          Text(
+            '$label: ',
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
           ),
           Text(
             value,
@@ -387,6 +375,9 @@ class GalleryScreenState extends State<GalleryScreen>
       vsync: this,
       duration: const Duration(seconds: 4), // Twice as slow
     )..repeat();
+    _starRotation = Tween<double>(begin: 0, end: 2 * 3.14159).animate(
+      CurvedAnimation(parent: _starAnimationController, curve: Curves.linear),
+    );
 
     _scrollController.addListener(_scrollListener);
     _searchController = TextEditingController(text: searchQuery);
@@ -402,17 +393,16 @@ class GalleryScreenState extends State<GalleryScreen>
     _loadAllImages();
     _loadAlbums();
 
-    // Start periodic photo refresh (every 30 seconds) to detect new/deleted photos
-    Timer.periodic(const Duration(seconds: 30), (timer) async {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      // Only check if not actively scanning to avoid conflicts
-      if (!_scanning && !_validating) {
-        await _checkForGalleryChanges();
-      }
-    });
+    // Listen to native photo changes instead of polling
+    _photoChangesSubscription = _photoChangesChannel
+        .receiveBroadcastStream()
+        .listen((event) async {
+          developer.log('📸 Photo library changed (native event)');
+          // Only check if not actively scanning to avoid conflicts
+          if (!_scanning && !_validating) {
+            await _checkForGalleryChanges();
+          }
+        });
   }
 
   @override
@@ -420,20 +410,6 @@ class GalleryScreenState extends State<GalleryScreen>
     super.didChangeDependencies();
     // Update system UI when theme changes
     _updateSystemUI();
-  }
-
-  /// Load trash filter (called on init and after deleting photos)
-  Future<void> _loadTrashFilter({bool forceUpdate = false}) async {
-    _trashedIds = await TrashStore.getTrashedIds();
-    developer.log('🗑️ Loaded trash filter: ${_trashedIds.length} items');
-    // Force cache invalidation by clearing cached values
-    if (forceUpdate) {
-      _lastImageUrlsLength = -1; // Force recompute
-    }
-    // Update filtered list
-    _updateCachedFilteredList();
-    // Trigger UI update after filtering
-    if (mounted) setState(() {});
   }
 
   Future<void> _loadAlbums() async {
@@ -499,11 +475,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
     await _loadTags();
     developer.log('Total photos in gallery: ${imageUrls.length}');
-
     setState(() => loading = false);
-
-    // Load trash filter asynchronously (don't block gallery display)
-    _loadTrashFilter();
 
     // Sync tags from server in background (non-blocking) if available
     _syncTagsFromServerInBackground();
@@ -611,9 +583,9 @@ class GalleryScreenState extends State<GalleryScreen>
     _badgeTooltipEntry = OverlayEntry(
       builder: (context) => Positioned(
         top: MediaQuery.of(context).padding.top + 64, // 4px rule
-        left: 0,
-        right: 0,
-        child: Center(
+        right: 208, // 4px rule
+        child: FractionalTranslation(
+          translation: const Offset(0.5, 0),
           child: GestureDetector(
             onTap: _dismissTooltip, // Tap on tooltip itself to dismiss
             child: Material(
@@ -653,25 +625,64 @@ class GalleryScreenState extends State<GalleryScreen>
                       _reached100At = null;
                     }
 
-                    String liveMessage;
+                    // Show "Final touches" if stuck at 100% for more than 3 seconds
+                    final stuckAt100 =
+                        _reached100At != null &&
+                        DateTime.now().difference(_reached100At!).inSeconds > 3;
 
-                    if ((_scanning && isAt100) || _validating) {
-                      liveMessage = 'Scanning...';
+                    String liveMessage;
+                    Widget? icon;
+
+                    if (_scanning && stuckAt100) {
+                      liveMessage = 'Final touches';
+                      icon = AnimatedBuilder(
+                        animation: _starRotation,
+                        builder: (context, child) {
+                          return Transform.rotate(
+                            angle: _starRotation.value,
+                            child: ShaderMask(
+                              shaderCallback: (bounds) => const LinearGradient(
+                                colors: [
+                                  Colors.yellow,
+                                  Colors.orange,
+                                  Colors.pink,
+                                  Colors.purple,
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ).createShader(bounds),
+                              child: const Icon(
+                                Icons.star,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          );
+                        },
+                      );
                     } else if (_scanning) {
                       liveMessage =
                           'Scanning $scannedCount/$_cachedLocalPhotoCount ($pct%)';
+                    } else if (_validationComplete) {
+                      liveMessage = '✓ All $scannedCount photos scanned';
                     } else {
                       liveMessage = message;
                     }
 
-                    return Text(
-                      liveMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (icon != null) ...[icon, const SizedBox(width: 6)],
+                        Text(
+                          liveMessage,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        if (icon != null) ...[const SizedBox(width: 6), icon],
+                      ],
                     );
                   },
                 ),
@@ -798,121 +809,141 @@ class GalleryScreenState extends State<GalleryScreen>
   /// Get current scroll position as fraction
   double _getCurrentScrollFraction() {
     if (!_scrollController.hasClients) return 0.0;
-    final maxExtent = _scrollController.position.maxScrollExtent;
-    if (maxExtent <= 0) return 0.0;
-    return (_scrollController.offset / maxExtent).clamp(0.0, 1.0);
+    try {
+      final maxExtent = _scrollController.position.maxScrollExtent;
+      if (maxExtent <= 0) return 0.0;
+      return (_scrollController.offset / maxExtent).clamp(0.0, 1.0);
+    } catch (_) {
+      return 0.0;
+    }
   }
 
   /// Build the fast scroller widget
   Widget _buildFastScroller(List<String> filtered, double height) {
-    final yearMarkers = _buildYearMarkers(filtered);
-    final scrollFraction = _getCurrentScrollFraction();
     final scrollerHeight = height - 140; // Account for bottom offset
 
-    return Positioned(
-      right: 4,
-      top: 0,
-      bottom: 140, // End above floating buttons
-      child: AnimatedOpacity(
-        opacity: _showFastScroller ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 200),
-        child: IgnorePointer(
-          ignoring: !_showFastScroller,
-          child: GestureDetector(
-            onVerticalDragStart: (details) {
-              setState(() {
-                _isDraggingScroller = true;
-              });
-              final fraction = details.localPosition.dy / scrollerHeight;
-              _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
-            },
-            onVerticalDragUpdate: (details) {
-              final fraction = details.localPosition.dy / scrollerHeight;
-              _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
-            },
-            onVerticalDragEnd: (details) {
-              setState(() {
-                _isDraggingScroller = false;
-                _currentScrollYear = '';
-              });
-              // Hide after 2 seconds
-              _fastScrollerHideTimer?.cancel();
-              _fastScrollerHideTimer = Timer(const Duration(seconds: 2), () {
-                if (mounted && !_isDraggingScroller) {
-                  setState(() => _showFastScroller = false);
-                }
-              });
-            },
-            child: Container(
-              width: 22,
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Stack(
-                children: [
-                  // Year markers
-                  ...yearMarkers.map(
-                    (marker) => Positioned(
-                      top: marker.key * scrollerHeight,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Text(
-                          "'${marker.value.toString().substring(2)}",
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Scroll indicator thumb
-                  Positioned(
-                    top: scrollFraction * (scrollerHeight - 24),
-                    left: 2,
-                    right: 2,
+    return ValueListenableBuilder<bool>(
+      valueListenable: _showFastScrollerNotifier,
+      builder: (context, showScroller, child) {
+        return AnimatedBuilder(
+          animation: _scrollController,
+          builder: (context, child) {
+            final yearMarkers = _buildYearMarkers(filtered);
+            final scrollFraction = _getCurrentScrollFraction();
+
+            return Positioned(
+              right: 4,
+              top: 0,
+              bottom: 140, // End above floating buttons
+              child: AnimatedOpacity(
+                opacity: showScroller ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !showScroller,
+                  child: GestureDetector(
+                    onVerticalDragStart: (details) {
+                      _isDraggingScroller = true;
+                      final fraction =
+                          details.localPosition.dy / scrollerHeight;
+                      _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
+                    },
+                    onVerticalDragUpdate: (details) {
+                      final fraction =
+                          details.localPosition.dy / scrollerHeight;
+                      _scrollToPosition(fraction.clamp(0.0, 1.0), filtered);
+                    },
+                    onVerticalDragEnd: (details) {
+                      _isDraggingScroller = false;
+                      setState(() {
+                        _currentScrollYear = '';
+                      });
+                      // Hide after 2 seconds
+                      _fastScrollerHideTimer?.cancel();
+                      _fastScrollerHideTimer = Timer(
+                        const Duration(seconds: 2),
+                        () {
+                          if (mounted && !_isDraggingScroller) {
+                            _showFastScrollerNotifier.value = false;
+                          }
+                        },
+                      );
+                    },
                     child: Container(
-                      height: 24,
+                      width: 22,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(6),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 4,
+                        color: Colors.black.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Stack(
+                        children: [
+                          // Year markers
+                          ...yearMarkers.map(
+                            (marker) => Positioned(
+                              top: marker.key * scrollerHeight,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Text(
+                                  "'${marker.value.toString().substring(2)}",
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Scroll indicator thumb
+                          Positioned(
+                            top: scrollFraction * (scrollerHeight - 24),
+                            left: 2,
+                            right: 2,
+                            child: Container(
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(6),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: _currentScrollYear.isNotEmpty
+                                    ? Text(
+                                        _currentScrollYear,
+                                        style: const TextStyle(
+                                          color: Colors.black87,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : Container(
+                                        width: 8,
+                                        height: 3,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade400,
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                      child: Center(
-                        child: _currentScrollYear.isNotEmpty
-                            ? Text(
-                                _currentScrollYear,
-                                style: const TextStyle(
-                                  color: Colors.black87,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              )
-                            : Container(
-                                width: 8,
-                                height: 3,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade400,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                      ),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -968,13 +999,8 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log('📊 Total local photos: ${localUrls.length}');
     if (localUrls.isEmpty) {
       developer.log('⚠️ No local photos found, returning');
-      // Mark that we've checked (even though no photos exist)
-      _hasCheckedForUnscannedPhotos = true;
       return;
     }
-
-    // Update cached local photo count for accurate progress display
-    _cachedLocalPhotoCount = localUrls.length;
 
     // Check server connectivity before scanning
     developer.log(
@@ -988,8 +1014,6 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log(
         '⚠️ Server not available at ${ApiService.baseUrl}, skipping auto-scan (will retry automatically)',
       );
-      // Mark that we've checked so UI can show proper status
-      _hasCheckedForUnscannedPhotos = true;
       // Silent - auto-retry timer will check again in 30 seconds
       return;
     }
@@ -1018,9 +1042,6 @@ class GalleryScreenState extends State<GalleryScreen>
     }).toList();
 
     developer.log('🔍 Photos needing scan: ${missing.length}');
-
-    // Mark that we've completed the check for unscanned photos
-    _hasCheckedForUnscannedPhotos = true;
 
     // If there are photos to scan, reset validation state
     if (missing.isNotEmpty && _validationComplete) {
@@ -1205,9 +1226,7 @@ class GalleryScreenState extends State<GalleryScreen>
     }
     if (toScan.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No images to scan')));
+      _showSnackBar('No images to scan');
       return;
     }
 
@@ -1435,13 +1454,9 @@ class GalleryScreenState extends State<GalleryScreen>
         _dotAnimationTimer = null;
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'No YOLO-classified images found to validate.\nOnly people/animals/food photos can be validated.',
-          ),
-          duration: Duration(seconds: 4),
-        ),
+      _showSnackBar(
+        'No YOLO-classified images found to validate.\nOnly people/animals/food photos can be validated.',
+        duration: const Duration(seconds: 4),
       );
       return;
     }
@@ -1842,7 +1857,7 @@ class GalleryScreenState extends State<GalleryScreen>
         _scanProgressNotifier.value = _displayProgress;
 
         developer.log('📊 PROGRESS UPDATE: $_scanProcessed / $_scanTotal');
-        _avgBatchTimeMs = batchDuration;
+        _avgBatchTimeMs = batchDuration.toDouble();
         _imagesPerSecond = elapsedSeconds > 0
             ? _scanProcessed / elapsedSeconds.toDouble()
             : 0;
@@ -2209,14 +2224,9 @@ class GalleryScreenState extends State<GalleryScreen>
     final totalPhotos = imageUrls
         .where((u) => u.startsWith('local:') || u.startsWith('file:'))
         .length;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '✅ Gallery ready: $totalPhotos photos scanned & verified',
-        ),
-        backgroundColor: Colors.blue.shade700,
-        duration: const Duration(seconds: 3),
-      ),
+    _showSnackBar(
+      '✅ Gallery ready: $totalPhotos photos scanned & verified',
+      duration: const Duration(seconds: 3),
     );
   }
 
@@ -2947,14 +2957,11 @@ class GalleryScreenState extends State<GalleryScreen>
       final urls = <String>[];
       _localAssets.clear();
       _thumbCache.clear();
-
-      // Load all photos instantly (no file I/O)
       for (final a in uniqueAssets) {
         final id = a.id;
         _localAssets[id] = a;
         urls.add('local:$id');
       }
-
       developer.log('✅ Loaded ${urls.length} photo URLs');
       setState(() {
         _setImageUrls(urls);
@@ -3041,11 +3048,8 @@ class GalleryScreenState extends State<GalleryScreen>
       return; // No changes, use cached version
     }
 
-    // Recompute filtered list (excluding trashed photos)
+    // Recompute filtered list
     _cachedFilteredUrls = imageUrls.where((u) {
-      // Filter out trashed photos
-      if (_trashedIds.contains(u)) return false;
-
       final key = p.basename(u);
       final tags = photoTags[key] ?? [];
       final allDetections = photoAllDetections[key] ?? [];
@@ -3267,81 +3271,6 @@ class GalleryScreenState extends State<GalleryScreen>
     }
   }
 
-  /// Delete selected photos (move to trash)
-  Future<void> _deleteSelectedPhotos() async {
-    if (_selectedKeys.isEmpty) return;
-
-    final count = _selectedKeys.length;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Move to Trash?'),
-        content: Text(
-          'Move $count photo${count > 1 ? 's' : ''} to trash? They will be permanently deleted after 30 days.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Move to Trash'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    // Get selected photo URLs
-    final selectedUrls = imageUrls
-        .where((u) => _selectedKeys.contains(p.basename(u)))
-        .toList();
-
-    developer.log('🗑️ Deleting ${selectedUrls.length} photos...');
-
-    // Move each to trash (store URL directly, no file I/O needed)
-    for (final url in selectedUrls) {
-      await TrashStore.moveToTrash(url);
-      developer.log('🗑️ Moved to trash: $url');
-    }
-
-    developer.log('🗑️ Reloading trash filter...');
-    // Reload trash filter to hide deleted photos
-    await _loadTrashFilter(forceUpdate: true);
-
-    developer.log(
-      '🗑️ Trash filter loaded. _trashedIds count: ${_trashedIds.length}',
-    );
-    developer.log('🗑️ Selected URLs: $selectedUrls');
-    developer.log(
-      '🗑️ _trashedIds contains first URL: ${_trashedIds.contains(selectedUrls.first)}',
-    );
-
-    // Exit select mode and refresh UI
-    setState(() {
-      _selectedKeys.clear();
-      _isSelectMode = false;
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Moved $count photo${count > 1 ? 's' : ''} to trash'),
-          action: SnackBarAction(
-            label: 'View Trash',
-            onPressed: () {
-              // Navigate to settings to access trash
-              widget.onSettingsTap?.call();
-            },
-          ),
-        ),
-      );
-    }
-  }
-
   Future<void> _createAlbumFromSelection() async {
     if (_selectedKeys.isEmpty) return;
     final selectedUrls = imageUrls
@@ -3389,19 +3318,81 @@ class GalleryScreenState extends State<GalleryScreen>
         '📁 Album created from selection: $name (${selectedUrls.length} images)',
       );
       if (!mounted) return;
-      final scaffoldMessenger = ScaffoldMessenger.of(context);
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Album "$name" created with ${selectedUrls.length} images',
-          ),
-        ),
-      );
+      _showSnackBar('Album "$name" created with ${selectedUrls.length} images');
       setState(() {
         _isSelectMode = false;
         _selectedKeys.clear();
       });
       widget.onAlbumCreated?.call();
+    }
+  }
+
+  Future<void> _deleteSelectedPhotos(BuildContext context) async {
+    if (_selectedKeys.isEmpty) return;
+
+    final count = _selectedKeys.length;
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $count photo${count > 1 ? 's' : ''}?'),
+        content: const Text(
+          'Photos will be moved to trash and permanently deleted after 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      // Get selected URLs
+      final selectedUrls = imageUrls
+          .where((u) => _selectedKeys.contains(p.basename(u)))
+          .toList();
+
+      // Move to trash (soft delete)
+      for (final url in selectedUrls) {
+        await TrashStore.moveToTrash(url);
+        developer.log('🗑️ Moved to trash: $url');
+      }
+
+      // Update UI state - remove from gallery
+      setState(() {
+        imageUrls.removeWhere((url) => selectedUrls.contains(url));
+        for (final key in _selectedKeys) {
+          photoTags.remove(key);
+          photoAllDetections.remove(key);
+        }
+        // Clear asset cache for deleted items
+        for (final url in selectedUrls) {
+          if (url.startsWith('local:')) {
+            final id = url.substring('local:'.length);
+            _localAssets.remove(id);
+            _thumbCache.remove(id);
+          }
+        }
+        _selectedKeys.clear();
+        _isSelectMode = false;
+        _cachedFilteredUrls.clear(); // Invalidate filter cache
+      });
+
+      // Show feedback
+      _showSnackBar('Moved $count photo${count > 1 ? 's' : ''} to trash');
+    } catch (e) {
+      developer.log('❌ Error deleting photos: $e');
+      _showSnackBar('Failed to delete: $e');
     }
   }
 
@@ -3498,6 +3489,51 @@ class GalleryScreenState extends State<GalleryScreen>
                   )
                   .toList(),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAddFilterMenu() {
+    final allTags = getAllCurrentTags().toList()..sort();
+    final current = searchQuery.split(' ').where((t) => t.isNotEmpty).toSet();
+    final available = allTags.where((t) => !current.contains(t)).toList();
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No more filters available')),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: available.length,
+            itemBuilder: (context, index) {
+              final tag = available[index];
+              return ListTile(
+                leading: const Icon(Icons.add_circle_outline),
+                title: Text(tag),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    final tags = searchQuery
+                        .split(' ')
+                        .where((t) => t.isNotEmpty)
+                        .toList();
+                    tags.add(tag);
+                    searchQuery = tags.join(' ');
+                    _searchController.text = searchQuery;
+                  });
+                  widget.onSearchChanged?.call();
+                },
+              );
+            },
           ),
         );
       },
@@ -3651,6 +3687,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
   @override
   void dispose() {
+    _photoChangesSubscription?.cancel();
     _dotAnimationTimer?.cancel();
     _autoScanRetryTimer?.cancel();
     _progressRefreshTimer?.cancel();
@@ -3666,6 +3703,7 @@ class GalleryScreenState extends State<GalleryScreen>
     _searchController.dispose();
     _searchFocusNode.dispose();
     _showScrollToTop.dispose();
+    _showFastScrollerNotifier.dispose();
     super.dispose();
   }
 
@@ -3678,15 +3716,13 @@ class GalleryScreenState extends State<GalleryScreen>
 
     // Show fast scroller when scrolling (if not already dragging it)
     if (!_isDraggingScroller && _scrollController.offset > 0) {
-      // Always setState to update the scroller thumb position
-      setState(() {
-        _showFastScroller = true;
-      });
+      // Update notifier instead of setState - only the scroller rebuilds
+      _showFastScrollerNotifier.value = true;
       // Reset hide timer
       _fastScrollerHideTimer?.cancel();
       _fastScrollerHideTimer = Timer(const Duration(seconds: 2), () {
         if (mounted && !_isDraggingScroller) {
-          setState(() => _showFastScroller = false);
+          _showFastScrollerNotifier.value = false;
         }
       });
     }
@@ -3795,11 +3831,7 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
                           // Validation badge - centered horizontally
                           // Only show blue badge when BOTH scanning and validation are complete
-                          // AND we've actually checked for unscanned photos (not just on startup)
-                          if (_validationComplete &&
-                              !_validating &&
-                              !_scanning &&
-                              _hasCheckedForUnscannedPhotos)
+                          if (_validationComplete && !_validating && !_scanning)
                             Positioned(
                               left: 0,
                               right: 0,
@@ -3845,11 +3877,7 @@ class GalleryScreenState extends State<GalleryScreen>
                               ),
                             ),
                           // Show grey/orange badge when scanning or validation is in progress
-                          // OR when we haven't checked for unscanned photos yet
-                          if (!_validationComplete ||
-                              _scanning ||
-                              _validating ||
-                              !_hasCheckedForUnscannedPhotos)
+                          if (!_validationComplete || _scanning || _validating)
                             Positioned(
                               left: 0,
                               right: 0,
@@ -3865,53 +3893,26 @@ class GalleryScreenState extends State<GalleryScreen>
                                           _dismissTooltip();
                                           return;
                                         }
-
-                                        String status;
-                                        Color statusColor;
-
-                                        if (_scanning) {
-                                          // Orange: actively scanning - show progress out of _scanTotal (unscanned photos)
-                                          final scannedSoFar = _scanProcessed;
-                                          final totalToScan = _scanTotal;
-                                          final scanPct = totalToScan > 0
-                                              ? (scannedSoFar /
-                                                        totalToScan *
-                                                        100)
-                                                    .toStringAsFixed(0)
-                                              : '0';
-                                          final remaining =
-                                              totalToScan - scannedSoFar;
-                                          status =
-                                              'Scanning: $remaining photos left ($scanPct%)';
-                                          statusColor = Colors.orange.shade700;
-                                        } else if (_validating) {
-                                          // Orange: validating - show as final touches
-                                          status = 'Final touches';
-                                          statusColor = Colors.orange.shade700;
-                                        } else if (!_hasCheckedForUnscannedPhotos) {
-                                          // Grey: still checking
-                                          status = 'Checking photos...';
-                                          statusColor = Colors.grey.shade700;
-                                        } else if (_validationComplete) {
-                                          // Green: all done
-                                          status =
-                                              '✓ All $_cachedLocalPhotoCount photos scanned';
-                                          statusColor = Colors.green.shade700;
-                                        } else {
-                                          // Grey: server offline or has unscanned photos
-                                          final unscanned =
-                                              _cachedLocalPhotoCount -
-                                              photoTags.length;
-                                          status = unscanned > 0
-                                              ? '$unscanned photos need scan\nServer offline'
-                                              : 'Server offline';
-                                          statusColor = Colors.grey.shade700;
-                                        }
-
+                                        final pct = _cachedLocalPhotoCount > 0
+                                            ? (photoTags.length /
+                                                      _cachedLocalPhotoCount *
+                                                      100)
+                                                  .toStringAsFixed(0)
+                                            : '0';
+                                        final status =
+                                            (_scanning || _validating)
+                                            ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
+                                            : photoTags.isNotEmpty
+                                            ? '${photoTags.length} photos scanned ($pct%)'
+                                            : 'No photos scanned yet';
                                         _showBadgeTooltip(
                                           context,
                                           status,
-                                          statusColor,
+                                          (_scanning || _validating)
+                                              ? Colors.orange.shade700
+                                              : photoTags.isNotEmpty
+                                              ? Colors.green.shade700
+                                              : Colors.grey.shade700,
                                         );
                                       },
                                       child: Container(
@@ -3922,8 +3923,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                           color: (_scanning || _validating)
                                               ? Colors.orange.shade100
                                                     .withValues(alpha: 0.3)
-                                              : (_validationComplete &&
-                                                    _hasCheckedForUnscannedPhotos)
+                                              : photoTags.isNotEmpty
                                               ? Colors.green.shade100
                                                     .withValues(alpha: 0.3)
                                               : Colors.grey.shade400.withValues(
@@ -3933,8 +3933,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                           border: Border.all(
                                             color: (_scanning || _validating)
                                                 ? Colors.orange.shade600
-                                                : (_validationComplete &&
-                                                      _hasCheckedForUnscannedPhotos)
+                                                : photoTags.isNotEmpty
                                                 ? Colors.green.shade600
                                                 : Colors.grey.shade600,
                                             width: 2,
@@ -3953,18 +3952,20 @@ class GalleryScreenState extends State<GalleryScreen>
                                           Icons.verified_outlined,
                                           color: (_scanning || _validating)
                                               ? Colors.orange.shade600
-                                              : (_validationComplete &&
-                                                    _hasCheckedForUnscannedPhotos)
+                                              : photoTags.isNotEmpty
                                               ? Colors.green.shade600
                                               : Colors.grey.shade600,
                                           size: 16, // 4px rule - smaller
                                         ),
                                       ),
                                     ),
-                                    // Show loading dots only when actively scanning/validating but not at 100%
-                                    if ((_scanning &&
-                                            !(_reached100At != null)) ||
-                                        (_validating && false))
+                                    // Hide loading dots during "final touches" to avoid redundancy
+                                    if ((_scanning || _validating) &&
+                                        !(_reached100At != null &&
+                                            DateTime.now()
+                                                    .difference(_reached100At!)
+                                                    .inSeconds >
+                                                3))
                                       Padding(
                                         padding: const EdgeInsets.only(
                                           top: 4,
@@ -4006,8 +4007,17 @@ class GalleryScreenState extends State<GalleryScreen>
                                               _reached100At = null;
                                             }
 
-                                            // Show "Final touches" as soon as we reach 100%
-                                            if (isAt100) {
+                                            // Show "Final touches" if stuck at 100% for more than 3 seconds
+                                            final stuckAt100 =
+                                                _reached100At != null &&
+                                                DateTime.now()
+                                                        .difference(
+                                                          _reached100At!,
+                                                        )
+                                                        .inSeconds >
+                                                    3;
+
+                                            if (stuckAt100) {
                                               // Show Final touches with rotating star
                                               return Row(
                                                 mainAxisSize: MainAxisSize.min,
@@ -4075,78 +4085,23 @@ class GalleryScreenState extends State<GalleryScreen>
                                               );
                                             }
 
-                                            return Text(
-                                              '$pct%',
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: Colors.orange.shade700,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    // Show "Final touches" with sparkles during validation
-                                    if (_validating && !_scanning)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              'Final touches',
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: Colors.orange.shade700,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            AnimatedBuilder(
-                                              animation:
-                                                  _starAnimationController,
-                                              builder: (context, child) {
-                                                // Slow color animation
-                                                final colorValue =
-                                                    (_starAnimationController
-                                                            .value *
-                                                        4) %
-                                                    4;
-                                                Color starColor;
-                                                if (colorValue < 1) {
-                                                  starColor = Color.lerp(
-                                                    Colors.yellow,
-                                                    Colors.orange,
-                                                    colorValue,
-                                                  )!;
-                                                } else if (colorValue < 2) {
-                                                  starColor = Color.lerp(
-                                                    Colors.orange,
-                                                    Colors.pink,
-                                                    colorValue - 1,
-                                                  )!;
-                                                } else if (colorValue < 3) {
-                                                  starColor = Color.lerp(
-                                                    Colors.pink,
-                                                    Colors.purple,
-                                                    colorValue - 2,
-                                                  )!;
-                                                } else {
-                                                  starColor = Color.lerp(
-                                                    Colors.purple,
-                                                    Colors.yellow,
-                                                    colorValue - 3,
-                                                  )!;
-                                                }
+                                            // Only show percentage if >= 75%
+                                            final pctNum =
+                                                int.tryParse(pct) ?? 0;
+                                            if (pctNum >= 75) {
+                                              return Text(
+                                                '$pct%',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  color: Colors.orange.shade700,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              );
+                                            }
 
-                                                return Icon(
-                                                  Icons.auto_awesome,
-                                                  color: starColor,
-                                                  size: 12,
-                                                );
-                                              },
-                                            ),
-                                          ],
+                                            // Below 75%, show nothing (just dots visible above)
+                                            return const SizedBox.shrink();
+                                          },
                                         ),
                                       ),
                                   ],
@@ -4394,6 +4349,28 @@ class GalleryScreenState extends State<GalleryScreen>
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                  // Add filter button under the magnifying glass/search area
+                  if (searchQuery.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _showAddFilterMenu,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Add filter'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.lightBlue.shade300,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
                       ),
                     ), // Show album chips (horizontal) when albums exist.
                   // Re-enable album chips when needed
@@ -4820,32 +4797,6 @@ class GalleryScreenState extends State<GalleryScreen>
                                                               ),
                                                             ),
                                                           ),
-                                                        // Show red flag for deleted photos
-                                                        if (_trashedIds
-                                                            .contains(url))
-                                                          Positioned(
-                                                            top: 8,
-                                                            right: 8,
-                                                            child: Container(
-                                                              decoration:
-                                                                  BoxDecoration(
-                                                                    shape: BoxShape
-                                                                        .circle,
-                                                                    color: Colors
-                                                                        .red,
-                                                                  ),
-                                                              padding:
-                                                                  const EdgeInsets.all(
-                                                                    6,
-                                                                  ),
-                                                              child: Icon(
-                                                                Icons.flag,
-                                                                color: Colors
-                                                                    .white,
-                                                                size: 18,
-                                                              ),
-                                                            ),
-                                                          ),
                                                         if (_showTags)
                                                           Positioned(
                                                             left: 8,
@@ -5020,7 +4971,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
                         // Floating controls overlay - bottom right (menu buttons)
                         Positioned(
-                          bottom: 80,
+                          top: 56,
                           right: 8,
                           child: Container(
                             decoration: BoxDecoration(
@@ -5227,19 +5178,8 @@ class GalleryScreenState extends State<GalleryScreen>
 
                                                       // Show snackbar
                                                       if (mounted) {
-                                                        ScaffoldMessenger.of(
-                                                          // ignore: use_build_context_synchronously
-                                                          context,
-                                                        ).showSnackBar(
-                                                          SnackBar(
-                                                            content: Text(
-                                                              'Removed $removed local tags. Starting fresh scan...',
-                                                            ),
-                                                            duration:
-                                                                const Duration(
-                                                                  seconds: 2,
-                                                                ),
-                                                          ),
+                                                        _showSnackBar(
+                                                          'Removed $removed local tags. Starting fresh scan...',
                                                         );
                                                       }
 
@@ -5295,15 +5235,8 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         'Failed to remove tags: $e',
                                                       );
                                                       if (mounted) {
-                                                        ScaffoldMessenger.of(
-                                                          // ignore: use_build_context_synchronously
-                                                          context,
-                                                        ).showSnackBar(
-                                                          const SnackBar(
-                                                            content: Text(
-                                                              'Failed to remove tags',
-                                                            ),
-                                                          ),
+                                                        _showSnackBar(
+                                                          'Failed to remove tags',
                                                         );
                                                       }
                                                     }
@@ -5517,6 +5450,264 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
                         ),
 
+                        // Action buttons for selected photos
+                        Positioned(
+                          top: 224,
+                          right: 16,
+                          child: SizedBox(
+                            width: 180,
+                            height: 240,
+                            child: Stack(
+                              alignment: Alignment.bottomRight,
+                              children: [
+                                // Button 3 - Create Album (highest)
+                                AnimatedPositioned(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOutCubic,
+                                  bottom: _selectedKeys.isNotEmpty ? 160 : 0,
+                                  right: 0,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 300),
+                                    opacity: _selectedKeys.isNotEmpty
+                                        ? 1.0
+                                        : 0.0,
+                                    child: IgnorePointer(
+                                      ignoring: _selectedKeys.isEmpty,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: _createAlbumFromSelection,
+                                          borderRadius: BorderRadius.circular(
+                                            21,
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Container(
+                                                width: 42,
+                                                height: 42,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey.shade100,
+                                                  shape: BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.2,
+                                                          ),
+                                                      blurRadius: 6,
+                                                      offset: const Offset(
+                                                        0,
+                                                        3,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Icon(
+                                                  Icons.create_new_folder,
+                                                  color: Colors.green,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.6),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: const Text(
+                                                  'Create album',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // Button 2 - Share (middle)
+                                AnimatedPositioned(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOutCubic,
+                                  bottom: _selectedKeys.isNotEmpty ? 80 : 0,
+                                  right: 0,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 300),
+                                    opacity: _selectedKeys.isNotEmpty
+                                        ? 1.0
+                                        : 0.0,
+                                    child: IgnorePointer(
+                                      ignoring: _selectedKeys.isEmpty,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            _showSnackBar(
+                                              'Share ${_selectedKeys.length} photos',
+                                            );
+                                          },
+                                          borderRadius: BorderRadius.circular(
+                                            21,
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Container(
+                                                width: 42,
+                                                height: 42,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey.shade100,
+                                                  shape: BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.2,
+                                                          ),
+                                                      blurRadius: 6,
+                                                      offset: const Offset(
+                                                        0,
+                                                        3,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Icon(
+                                                  Icons.share,
+                                                  color: Colors.blue,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.6),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: const Text(
+                                                  'Share',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // Button 1 - Delete (lowest of the 3)
+                                AnimatedPositioned(
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeOutCubic,
+                                  bottom: 0,
+                                  right: 0,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 300),
+                                    opacity: _selectedKeys.isNotEmpty
+                                        ? 1.0
+                                        : 0.0,
+                                    child: IgnorePointer(
+                                      ignoring: _selectedKeys.isEmpty,
+                                      child: Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () {
+                                            _deleteSelectedPhotos(context);
+                                          },
+                                          borderRadius: BorderRadius.circular(
+                                            21,
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Container(
+                                                width: 42,
+                                                height: 42,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey.shade100,
+                                                  shape: BoxShape.circle,
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.2,
+                                                          ),
+                                                      blurRadius: 6,
+                                                      offset: const Offset(
+                                                        0,
+                                                        3,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: const Icon(
+                                                  Icons.delete,
+                                                  color: Colors.red,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black
+                                                      .withValues(alpha: 0.6),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: const Text(
+                                                  'Delete',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
                         // Performance Monitor Overlay
                         if (_scanning && _showPerformanceMonitor)
                           Positioned(
@@ -5625,63 +5816,6 @@ class GalleryScreenState extends State<GalleryScreen>
               ),
       ),
       // Pricing moved to Settings screen; FAB removed.
-      // Floating action buttons for select mode (above navigation bar)
-      floatingActionButton: _isSelectMode && _selectedKeys.isNotEmpty
-          ? Padding(
-              padding: const EdgeInsets.only(bottom: 80),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Selected count
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      '${_selectedKeys.length} selected',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Delete button
-                  FloatingActionButton.extended(
-                    heroTag: 'delete',
-                    onPressed: _deleteSelectedPhotos,
-                    backgroundColor: Colors.red,
-                    icon: const Icon(Icons.delete, size: 20),
-                    label: const Text('Delete'),
-                  ),
-                  const SizedBox(width: 8),
-                  // Create Album button
-                  FloatingActionButton.extended(
-                    heroTag: 'album',
-                    onPressed: _createAlbumFromSelection,
-                    backgroundColor: Colors.blue,
-                    icon: const Icon(Icons.create_new_folder, size: 20),
-                    label: const Text('Album'),
-                  ),
-                ],
-              ),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      bottomNavigationBar: null,
       bottomSheet: showDebug
           ? Container(
               color: Colors.black87,
@@ -5702,6 +5836,10 @@ class GalleryScreenState extends State<GalleryScreen>
                         IconButton(
                           icon: const Icon(Icons.refresh, color: Colors.white),
                           onPressed: _loadAllImages,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => setState(() => showDebug = false),
                         ),
                       ],
                     ),

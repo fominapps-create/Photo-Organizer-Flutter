@@ -58414,5 +58414,275 @@
     "all_detections": [
       "animals"
     ]
+  },
+  "1000078371": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-28T07:18:44.609371Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078339": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-28T07:18:44.693019Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078334": {
+    "tags": [
+      "people"
+    ],
+    "last_updated": "2025-12-28T07:18:45.013824Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078388": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T08:15:57.763854Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078390": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T08:20:26.864465Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078393": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T08:20:26.924761Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078395": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:20:56.592806Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078397": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:23:56.642402Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078399": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:24:58.437751Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078401": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:27:56.493056Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078403": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:31:38.442771Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078409": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:31:57.204761Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078407": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:31:57.296617Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078405": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T08:31:57.385938Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078411": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T09:10:30.016837Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078413": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T09:33:14.709133Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078415": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T09:33:43.087820Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078417": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T09:36:13.602008Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078419": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T09:56:42.886989Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078421": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T09:58:12.911010Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078423": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T09:58:43.344984Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078425": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-28T10:00:43.666447Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078427": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T10:26:53.745533Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078429": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T10:39:30.000879Z",
+    "source": "classifier",
+    "all_detections": [
+      "animals"
+    ]
+  },
+  "1000078435": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T10:45:57.647233Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078431": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T10:45:57.704221Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078433": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-28T10:45:57.754920Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
   }
 }

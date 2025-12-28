@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'package:photo_manager/photo_manager.dart';
 import '../utils/app_colors.dart';
+import '../utils/snackbar_helper.dart';
 
 import '../services/api_service.dart';
 import '../services/network_utils.dart';
@@ -112,7 +113,7 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
         final total = localAlbums.values.fold<int>(0, (p, e) => p + e.length);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Found $total device photos')));
+        ).showSnackBar(createStyledSnackBar('Found $total device photos'));
       }
     } finally {
       if (mounted) {
@@ -207,9 +208,9 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
         if (!mounted) {
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Scan complete (placeholder)')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(createStyledSnackBar('Scan complete (placeholder)'));
         await _loadAlbums();
       }
     } catch (_) {}
@@ -958,10 +959,8 @@ class FolderGalleryScreenState extends State<FolderGalleryScreen>
                       if (items.isEmpty) {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'No photos found in selected folders',
-                            ),
+                          createStyledSnackBar(
+                            'No photos found in selected folders',
                           ),
                         );
                         return;
