@@ -5,7 +5,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
-import 'dart:developer' as developer;
 import 'gallery_screen.dart';
 import 'settings_screen.dart';
 import 'album_screen.dart';
@@ -408,51 +407,89 @@ class _HomeScreenState extends State<HomeScreen> {
           Positioned(
             right: 16,
             bottom: 135,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: widget.isDarkMode ? Colors.grey.shade900 : Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                icon: Icon(
-                  Icons.search,
-                  color: widget.isDarkMode
-                      ? Colors.lightBlue.shade300
-                      : Colors.blue.shade700,
-                  size: 28,
-                ),
-                onPressed: () {
-                  // Get actual tags from photos
-                  final currentTags =
-                      _galleryKey.currentState?.getAllCurrentTags() ??
-                      <String>{};
-                  final availableTags = currentTags.toList()..sort();
+            child: GestureDetector(
+              onTap: () {
+                // Get actual tags from photos
+                final currentTags =
+                    _galleryKey.currentState?.getAllCurrentTags() ?? <String>{};
+                final availableTags = currentTags.toList()..sort();
 
-                  // Open search screen with actual photo tags
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SearchScreen(
-                        recommendedTags: availableTags,
-                        onTagSelected: (tag) {
-                          // Apply search filter in gallery
-                          if (_selectedIndex == 0) {
-                            _galleryKey.currentState?.searchByTag(tag);
-                          }
-                        },
+                // Open search screen with actual photo tags
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SearchScreen(
+                      recommendedTags: availableTags,
+                      onTagSelected: (tag) {
+                        // Apply search filter in gallery
+                        if (_selectedIndex == 0) {
+                          _galleryKey.currentState?.searchByTag(tag);
+                        }
+                      },
+                    ),
+                  ),
+                );
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Background button circle
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: widget.isDarkMode
+                              ? Colors.grey.shade900
+                              : Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Omni button icon on top
+                      Image.asset(
+                        'assets/omni-button.png',
+                        width: 72,
+                        height: 72,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  // Floating label with white bg and orange text
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Ask Filto',
+                      style: TextStyle(
+                        color: Colors.orange.shade700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 2,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
                       ),
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ),
           ),

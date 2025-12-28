@@ -441,19 +441,19 @@ class _PhotoViewerState extends State<PhotoViewer>
     // Animated double tap handler for zoom toggle
     void handleDoubleTap() {
       final currentScale = transformController.value.getMaxScaleOnAxis();
-      
+
       // Cancel any existing animation
       _zoomAnimationController?.dispose();
-      
+
       // Create new animation controller
       _zoomAnimationController = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 250),
       );
-      
+
       final Matrix4 targetMatrix;
       final bool willBeZoomed;
-      
+
       if (currentScale > 1.05) {
         // Zoomed in - animate back to original
         targetMatrix = Matrix4.identity();
@@ -467,28 +467,31 @@ class _PhotoViewerState extends State<PhotoViewer>
           ..translate(-center.dx, -center.dy);
         willBeZoomed = true;
       }
-      
+
       // Create the animation
-      _zoomAnimation = Matrix4Tween(
-        begin: transformController.value,
-        end: targetMatrix,
-      ).animate(CurvedAnimation(
-        parent: _zoomAnimationController!,
-        curve: Curves.easeOutCubic,
-      ));
-      
+      _zoomAnimation =
+          Matrix4Tween(
+            begin: transformController.value,
+            end: targetMatrix,
+          ).animate(
+            CurvedAnimation(
+              parent: _zoomAnimationController!,
+              curve: Curves.easeOutCubic,
+            ),
+          );
+
       // Update transform controller on each frame
       _zoomAnimation!.addListener(() {
         transformController.value = _zoomAnimation!.value;
       });
-      
+
       // Update zoom state when animation completes
       _zoomAnimationController!.addStatusListener((status) {
         if (status == AnimationStatus.completed) {
           setState(() => _isZoomed = willBeZoomed);
         }
       });
-      
+
       // Start the animation
       _zoomAnimationController!.forward();
     }

@@ -91,7 +91,9 @@ class GalleryScreenState extends State<GalleryScreen>
   double _lastScrollOffset = 0.0;
   Timer? _navBarShowTimer;
   Timer? _fastScrollerHideTimer;
-  ValueNotifier<bool> _showFastScrollerNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _showFastScrollerNotifier = ValueNotifier<bool>(
+    false,
+  );
   bool _isDraggingScroller = false;
   Timer? _actionButtonsHideTimer;
   final ValueNotifier<bool> _showActionButtons = ValueNotifier<bool>(true);
@@ -130,9 +132,9 @@ class GalleryScreenState extends State<GalleryScreen>
   int _validationAgreements = 0;
   int _validationDisagreements = 0;
   int _validationOverrides = 0;
-  List<Map<String, dynamic>> _validationChanges = [];
+  final List<Map<String, dynamic>> _validationChanges = [];
   String _currentScrollYear = '';
-  bool _scanPaused = false;
+  final bool _scanPaused = false;
   Set<String> _trashedIds = {};
 
   /// Refresh the trashed IDs cache - call this after restoring photos from trash
@@ -1101,7 +1103,8 @@ class GalleryScreenState extends State<GalleryScreen>
                     Widget? icon;
 
                     if (_scanning && stuckAt100) {
-                      liveMessage = '100% - $scannedCount/$_cachedLocalPhotoCount photos scanned';
+                      liveMessage =
+                          '100% - $scannedCount/$_cachedLocalPhotoCount photos scanned';
                       icon = AnimatedBuilder(
                         animation: _starRotation,
                         builder: (context, child) {
@@ -4294,1897 +4297,1940 @@ class GalleryScreenState extends State<GalleryScreen>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                    SizedBox(
-                      width: 250,
-                      height: 250,
-                      child: Lottie.asset(
-                        'assets/animations/fox-loading.json',
-                        fit: BoxFit.contain,
-                        repeat: true,
-                        animate: true,
-                        onLoaded: (composition) {
-                          developer.log(
-                            '✅ Lottie loaded: ${composition.duration}',
-                          );
-                        },
+                      SizedBox(
+                        width: 250,
+                        height: 250,
+                        child: Lottie.asset(
+                          'assets/animations/fox-loading.json',
+                          fit: BoxFit.contain,
+                          repeat: true,
+                          animate: true,
+                          onLoaded: (composition) {
+                            developer.log(
+                              '✅ Lottie loaded: ${composition.duration}',
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      'Loading your photos...',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: 18,
-                        fontWeight: FontWeight.w500,
+                      const SizedBox(height: 20),
+                      Text(
+                        'Loading your photos...',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              )
-            : imageUrls.isEmpty
-            ? const Center(
-                child: Text(
-                  'No photos found in gallery.',
-                  style: TextStyle(color: Colors.white, fontSize: 18),
-                ),
-              )
-            : Column(
-                children: [
-                  // Add top padding for status bar
-                  SizedBox(height: MediaQuery.of(context).padding.top),
-                  // Gallery title and Credits
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      16,
-                      0,
-                      16,
-                      8,
-                    ), // 4px rule
-                    child: SizedBox(
-                      height: 96, // 4px rule (divisible by 8)
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          // Three dots menu on the left at credits height
-                          Positioned(
-                            left: -12, // 4px rule
-                            top: 0,
-                            child: IconButton(
-                              icon: Icon(
-                                Icons.more_vert,
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.white
-                                    : Colors.black87,
-                                size: 28,
-                              ),
-                              onPressed: widget.onSettingsTap,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ),
-                          // Validation badge - centered horizontally
-                          // Only show blue badge when BOTH scanning and validation are complete
-                          if (_validationComplete && !_validating && !_scanning)
+                    ],
+                  ),
+                )
+              : imageUrls.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No photos found in gallery.',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
+                )
+              : Column(
+                  children: [
+                    // Add top padding for status bar
+                    SizedBox(height: MediaQuery.of(context).padding.top),
+                    // Gallery title and Credits
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        16,
+                        0,
+                        16,
+                        8,
+                      ), // 4px rule
+                      child: SizedBox(
+                        height: 96, // 4px rule (divisible by 8)
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          alignment: Alignment.centerLeft,
+                          children: [
+                            // Three dots menu on the left at credits height
                             Positioned(
-                              left: 0,
-                              right: 0,
-                              top: 4, // 4px rule
-                              child: Center(
-                                child: GestureDetector(
-                                  onTap: () {
-                                    // Toggle tooltip - dismiss if already showing
-                                    if (_badgeTooltipEntry != null) {
-                                      _dismissTooltip();
-                                    } else {
-                                      _showBadgeTooltip(
-                                        context,
-                                        '✓ All ${photoTags.length} photos scanned',
-                                        Colors.blue.shade700,
-                                      );
-                                    }
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(
-                                      4,
-                                    ), // 4px rule - smaller
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue.shade600,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.2,
+                              left: -12, // 4px rule
+                              top: 0,
+                              child: IconButton(
+                                icon: Icon(
+                                  Icons.more_vert,
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Colors.black87,
+                                  size: 28,
+                                ),
+                                onPressed: widget.onSettingsTap,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                            // Validation badge - centered horizontally
+                            // Only show blue badge when BOTH scanning and validation are complete
+                            if (_validationComplete &&
+                                !_validating &&
+                                !_scanning)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: 4, // 4px rule
+                                child: Center(
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      // Toggle tooltip - dismiss if already showing
+                                      if (_badgeTooltipEntry != null) {
+                                        _dismissTooltip();
+                                      } else {
+                                        _showBadgeTooltip(
+                                          context,
+                                          '✓ All ${photoTags.length} photos scanned',
+                                          Colors.blue.shade700,
+                                        );
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(
+                                        4,
+                                      ), // 4px rule - smaller
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade600,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(
+                                              alpha: 0.2,
+                                            ),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2),
                                           ),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Icon(
-                                      Icons.verified,
-                                      color: Colors.white,
-                                      size: 16, // 4px rule - smaller
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.verified,
+                                        color: Colors.white,
+                                        size: 16, // 4px rule - smaller
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          // Show grey/orange badge when scanning or validation is in progress
-                          if (!_validationComplete || _scanning || _validating)
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              top: 4, // 4px rule
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () {
-                                        // Toggle tooltip - dismiss if already showing
-                                        if (_badgeTooltipEntry != null) {
-                                          _dismissTooltip();
-                                          return;
-                                        }
-                                        final pct = _cachedLocalPhotoCount > 0
-                                            ? (photoTags.length /
-                                                      _cachedLocalPhotoCount *
-                                                      100)
-                                                  .toStringAsFixed(0)
-                                            : '0';
-                                        final status =
+                            // Show grey/orange badge when scanning or validation is in progress
+                            if (!_validationComplete ||
+                                _scanning ||
+                                _validating)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: 4, // 4px rule
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () {
+                                          // Toggle tooltip - dismiss if already showing
+                                          if (_badgeTooltipEntry != null) {
+                                            _dismissTooltip();
+                                            return;
+                                          }
+                                          final pct = _cachedLocalPhotoCount > 0
+                                              ? (photoTags.length /
+                                                        _cachedLocalPhotoCount *
+                                                        100)
+                                                    .toStringAsFixed(0)
+                                              : '0';
+                                          final status =
+                                              (_scanning || _validating)
+                                              ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
+                                              : photoTags.isNotEmpty
+                                              ? '${photoTags.length} photos scanned ($pct%)'
+                                              : 'No photos scanned yet';
+                                          _showBadgeTooltip(
+                                            context,
+                                            status,
                                             (_scanning || _validating)
-                                            ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
-                                            : photoTags.isNotEmpty
-                                            ? '${photoTags.length} photos scanned ($pct%)'
-                                            : 'No photos scanned yet';
-                                        _showBadgeTooltip(
-                                          context,
-                                          status,
-                                          (_scanning || _validating)
-                                              ? Colors.orange.shade700
-                                              : photoTags.isNotEmpty
-                                              ? Colors.green.shade700
-                                              : Colors.grey.shade700,
-                                        );
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.all(
-                                          4,
-                                        ), // 4px rule - smaller
-                                        decoration: BoxDecoration(
-                                          color: (_scanning || _validating)
-                                              ? Colors.orange.shade100
-                                                    .withValues(alpha: 0.3)
-                                              : photoTags.isNotEmpty
-                                              ? Colors.green.shade100
-                                                    .withValues(alpha: 0.3)
-                                              : Colors.grey.shade400.withValues(
-                                                  alpha: 0.3,
+                                                ? Colors.orange.shade700
+                                                : photoTags.isNotEmpty
+                                                ? Colors.green.shade700
+                                                : Colors.grey.shade700,
+                                          );
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(
+                                            4,
+                                          ), // 4px rule - smaller
+                                          decoration: BoxDecoration(
+                                            color: (_scanning || _validating)
+                                                ? Colors.orange.shade100
+                                                      .withValues(alpha: 0.3)
+                                                : photoTags.isNotEmpty
+                                                ? Colors.green.shade100
+                                                      .withValues(alpha: 0.3)
+                                                : Colors.grey.shade400
+                                                      .withValues(alpha: 0.3),
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: (_scanning || _validating)
+                                                  ? Colors.orange.shade600
+                                                  : photoTags.isNotEmpty
+                                                  ? Colors.green.shade600
+                                                  : Colors.grey.shade600,
+                                              width: 2,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(
+                                                  alpha: 0.1,
                                                 ),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
+                                                blurRadius: 4,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Icon(
+                                            Icons.verified_outlined,
                                             color: (_scanning || _validating)
                                                 ? Colors.orange.shade600
                                                 : photoTags.isNotEmpty
                                                 ? Colors.green.shade600
                                                 : Colors.grey.shade600,
-                                            width: 2,
+                                            size: 16, // 4px rule - smaller
                                           ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withValues(
-                                                alpha: 0.1,
-                                              ),
-                                              blurRadius: 4,
-                                              offset: const Offset(0, 2),
-                                            ),
-                                          ],
                                         ),
-                                        child: Icon(
-                                          Icons.verified_outlined,
-                                          color: (_scanning || _validating)
-                                              ? Colors.orange.shade600
-                                              : photoTags.isNotEmpty
-                                              ? Colors.green.shade600
-                                              : Colors.grey.shade600,
-                                          size: 16, // 4px rule - smaller
+                                      ),
+                                      // Hide loading dots during "final touches" to avoid redundancy
+                                      if ((_scanning || _validating) &&
+                                          !_showFinalTouches)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ), // 4px rule
+                                          child: _buildLoadingDots(),
+                                        ),
+                                      // Show scan progress percentage during scanning
+                                      if (_scanning)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 4,
+                                          ), // 4px rule
+                                          child: ValueListenableBuilder<int>(
+                                            valueListenable:
+                                                _scannedCountNotifier,
+                                            builder: (context, scannedCount, _) {
+                                              // Use _cachedLocalPhotoCount if available, otherwise fall back to _scanTotal
+                                              final totalPhotos =
+                                                  _cachedLocalPhotoCount > 0
+                                                  ? _cachedLocalPhotoCount
+                                                  : (_scanTotal > 0
+                                                        ? _scanTotal
+                                                        : 1);
+                                              final pct = totalPhotos > 0
+                                                  ? (scannedCount /
+                                                            totalPhotos *
+                                                            100)
+                                                        .toStringAsFixed(0)
+                                                  : '0';
+
+                                              // Track when we reach 100%
+                                              final isAt100 =
+                                                  scannedCount >= totalPhotos &&
+                                                  totalPhotos > 0;
+                                              if (isAt100 &&
+                                                  _reached100At == null) {
+                                                _reached100At = DateTime.now();
+                                                // Schedule a rebuild after 3 seconds to show "Final touches"
+                                                _finalTouchesTimer?.cancel();
+                                                _finalTouchesTimer = Timer(
+                                                  const Duration(seconds: 3),
+                                                  () {
+                                                    if (mounted && _scanning) {
+                                                      setState(() {
+                                                        _showFinalTouches =
+                                                            true;
+                                                      });
+                                                    }
+                                                  },
+                                                );
+                                              } else if (!isAt100) {
+                                                _reached100At = null;
+                                                _finalTouchesTimer?.cancel();
+                                                _showFinalTouches = false;
+                                              }
+
+                                              // Show "Final touches" if flag is set
+                                              if (_showFinalTouches) {
+                                                // Show Final touches with rotating star
+                                                return Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      'Final touches',
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        color: Colors
+                                                            .orange
+                                                            .shade700,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    AnimatedBuilder(
+                                                      animation:
+                                                          _starAnimationController,
+                                                      builder: (context, child) {
+                                                        // Slow color animation
+                                                        final colorValue =
+                                                            (_starAnimationController
+                                                                    .value *
+                                                                4) %
+                                                            4;
+                                                        Color starColor;
+                                                        if (colorValue < 1) {
+                                                          starColor =
+                                                              Color.lerp(
+                                                                Colors.yellow,
+                                                                Colors.orange,
+                                                                colorValue,
+                                                              )!;
+                                                        } else if (colorValue <
+                                                            2) {
+                                                          starColor =
+                                                              Color.lerp(
+                                                                Colors.orange,
+                                                                Colors.pink,
+                                                                colorValue - 1,
+                                                              )!;
+                                                        } else if (colorValue <
+                                                            3) {
+                                                          starColor =
+                                                              Color.lerp(
+                                                                Colors.pink,
+                                                                Colors.purple,
+                                                                colorValue - 2,
+                                                              )!;
+                                                        } else {
+                                                          starColor =
+                                                              Color.lerp(
+                                                                Colors.purple,
+                                                                Colors.yellow,
+                                                                colorValue - 3,
+                                                              )!;
+                                                        }
+
+                                                        return Icon(
+                                                          Icons
+                                                              .auto_awesome, // 4-pointed star, no rotation
+                                                          color: starColor,
+                                                          size: 12,
+                                                        );
+                                                      },
+                                                    ),
+                                                  ],
+                                                );
+                                              }
+
+                                              // Hide percentage at 100%, show just dots
+                                              final pctNum =
+                                                  int.tryParse(pct) ?? 0;
+                                              if (pctNum >= 100) {
+                                                return const SizedBox.shrink();
+                                              }
+
+                                              // Always show percentage during scanning (except at 100%)
+                                              return Text(
+                                                '$pct%',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  color: Colors.orange.shade700,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            Positioned(
+                              right: 120, // 4px rule
+                              top: 0, // 4px rule
+                              child: IconButton(
+                                icon: Icon(
+                                  _showTags ? Icons.label_off : Icons.label,
+                                  color:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white
+                                      : Colors.black,
+                                  size: 22,
+                                ),
+                                tooltip: _showTags ? 'Hide tags' : 'Show tags',
+                                onPressed: () =>
+                                    setState(() => _showTags = !_showTags),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                            // Credits on the right
+                            Positioned(
+                              right: 4, // 4px rule
+                              top: 0,
+                              child: Container(
+                                padding: const EdgeInsets.only(
+                                  left: 12, // 4px rule
+                                  right: 4, // 4px rule
+                                  top: 8, // 4px rule
+                                  bottom: 8, // 4px rule
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(
+                                    24,
+                                  ), // 4px rule
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 80,
+                                      ),
+                                      child: ShaderMask(
+                                        shaderCallback: (bounds) =>
+                                            const LinearGradient(
+                                              begin: Alignment.centerLeft,
+                                              end: Alignment.centerRight,
+                                              colors: [
+                                                Colors.black87,
+                                                Color(0xFFC0C0C0),
+                                                Colors.black87,
+                                              ],
+                                              stops: [0.1, 0.5, 0.93],
+                                            ).createShader(bounds),
+                                        child: Text(
+                                          '1,000',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 0.5,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ),
-                                    // Hide loading dots during "final touches" to avoid redundancy
-                                    if ((_scanning || _validating) && !_showFinalTouches)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          top: 4,
-                                        ), // 4px rule
-                                        child: _buildLoadingDots(),
+                                    const SizedBox(width: 4),
+                                    Transform.scale(
+                                      scale: 1.8,
+                                      child: Image.asset(
+                                        'assets/T Creadit Icon.png',
+                                        width: 30,
+                                        height: 30,
                                       ),
-                                    // Show scan progress percentage during scanning
-                                    if (_scanning)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          top: 4,
-                                        ), // 4px rule
-                                        child: ValueListenableBuilder<int>(
-                                          valueListenable:
-                                              _scannedCountNotifier,
-                                          builder: (context, scannedCount, _) {
-                                            // Use _cachedLocalPhotoCount if available, otherwise fall back to _scanTotal
-                                            final totalPhotos =
-                                                _cachedLocalPhotoCount > 0
-                                                ? _cachedLocalPhotoCount
-                                                : (_scanTotal > 0
-                                                      ? _scanTotal
-                                                      : 1);
-                                            final pct = totalPhotos > 0
-                                                ? (scannedCount /
-                                                          totalPhotos *
-                                                          100)
-                                                      .toStringAsFixed(0)
-                                                : '0';
-
-                                            // Track when we reach 100%
-                                            final isAt100 =
-                                                scannedCount >= totalPhotos &&
-                                                totalPhotos > 0;
-                                            if (isAt100 &&
-                                                _reached100At == null) {
-                                              _reached100At = DateTime.now();
-                                              // Schedule a rebuild after 3 seconds to show "Final touches"
-                                              _finalTouchesTimer?.cancel();
-                                              _finalTouchesTimer = Timer(const Duration(seconds: 3), () {
-                                                if (mounted && _scanning) {
-                                                  setState(() {
-                                                    _showFinalTouches = true;
-                                                  });
-                                                }
-                                              });
-                                            } else if (!isAt100) {
-                                              _reached100At = null;
-                                              _finalTouchesTimer?.cancel();
-                                              _showFinalTouches = false;
-                                            }
-
-                                            // Show "Final touches" if flag is set
-                                            if (_showFinalTouches) {
-                                              // Show Final touches with rotating star
-                                              return Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Text(
-                                                    'Final touches',
-                                                    style: TextStyle(
-                                                      fontSize: 9,
-                                                      color: Colors
-                                                          .orange
-                                                          .shade700,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  AnimatedBuilder(
-                                                    animation:
-                                                        _starAnimationController,
-                                                    builder: (context, child) {
-                                                      // Slow color animation
-                                                      final colorValue =
-                                                          (_starAnimationController
-                                                                  .value *
-                                                              4) %
-                                                          4;
-                                                      Color starColor;
-                                                      if (colorValue < 1) {
-                                                        starColor = Color.lerp(
-                                                          Colors.yellow,
-                                                          Colors.orange,
-                                                          colorValue,
-                                                        )!;
-                                                      } else if (colorValue <
-                                                          2) {
-                                                        starColor = Color.lerp(
-                                                          Colors.orange,
-                                                          Colors.pink,
-                                                          colorValue - 1,
-                                                        )!;
-                                                      } else if (colorValue <
-                                                          3) {
-                                                        starColor = Color.lerp(
-                                                          Colors.pink,
-                                                          Colors.purple,
-                                                          colorValue - 2,
-                                                        )!;
-                                                      } else {
-                                                        starColor = Color.lerp(
-                                                          Colors.purple,
-                                                          Colors.yellow,
-                                                          colorValue - 3,
-                                                        )!;
-                                                      }
-
-                                                      return Icon(
-                                                        Icons
-                                                            .auto_awesome, // 4-pointed star, no rotation
-                                                        color: starColor,
-                                                        size: 12,
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              );
-                                            }
-
-                                            // Hide percentage at 100%, show just dots
-                                            final pctNum =
-                                                int.tryParse(pct) ?? 0;
-                                            if (pctNum >= 100) {
-                                              return const SizedBox.shrink();
-                                            }
-
-                                            // Always show percentage during scanning (except at 100%)
-                                            return Text(
-                                              '$pct%',
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: Colors.orange.shade700,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
-                          Positioned(
-                            right: 120, // 4px rule
-                            top: 0, // 4px rule
-                            child: IconButton(
-                              icon: Icon(
-                                _showTags ? Icons.label_off : Icons.label,
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Active search filters with counts
+                    if (searchQuery.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  children: [
+                                    ...searchQuery
+                                        .split(' ')
+                                        .where((tag) => tag.isNotEmpty)
+                                        .map((tag) {
+                                          // Count photos matching this specific tag
+                                          final tagLower = tag.toLowerCase();
+                                          final int count;
+
+                                          // Special handling for "none" filter
+                                          if (tagLower == 'none') {
+                                            count = imageUrls.where((u) {
+                                              if (_trashedIds.contains(u))
+                                                return false;
+                                              final key = p.basename(u);
+                                              final tags = photoTags[key] ?? [];
+                                              return tags.isEmpty;
+                                            }).length;
+                                          } else {
+                                            count = imageUrls.where((u) {
+                                              if (_trashedIds.contains(u))
+                                                return false;
+                                              final key = p.basename(u);
+                                              final tags = photoTags[key] ?? [];
+                                              final allDetections =
+                                                  photoAllDetections[key] ?? [];
+                                              return tags.any(
+                                                    (t) => t
+                                                        .toLowerCase()
+                                                        .contains(tagLower),
+                                                  ) ||
+                                                  allDetections.any(
+                                                    (d) => d
+                                                        .toLowerCase()
+                                                        .contains(tagLower),
+                                                  );
+                                            }).length;
+                                          }
+
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 8,
+                                            ),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8, // 4px rule
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                gradient: LinearGradient(
+                                                  colors: [
+                                                    Colors.lightBlue.shade400,
+                                                    Colors.lightBlue.shade600,
+                                                  ],
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
+                                                  color:
+                                                      Colors.lightBlue.shade300,
+                                                  width: 1.5,
+                                                ),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.2),
+                                                    blurRadius: 8,
+                                                    offset: const Offset(
+                                                      0,
+                                                      4,
+                                                    ), // 4px rule
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    '$tag ($count)',
+                                                    style: TextStyle(
+                                                      color:
+                                                          Theme.of(
+                                                                context,
+                                                              ).brightness ==
+                                                              Brightness.dark
+                                                          ? Colors.white
+                                                          : Colors.black87,
+                                                      fontSize: 15,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(
+                                                    width: 8,
+                                                  ), // 4px rule
+                                                  GestureDetector(
+                                                    onTap: () {
+                                                      setState(() {
+                                                        final tags = searchQuery
+                                                            .split(' ')
+                                                            .where(
+                                                              (t) =>
+                                                                  t != tag &&
+                                                                  t.isNotEmpty,
+                                                            )
+                                                            .toList();
+                                                        searchQuery = tags.join(
+                                                          ' ',
+                                                        );
+                                                        _searchController.text =
+                                                            searchQuery;
+                                                      });
+                                                      widget.onSearchChanged
+                                                          ?.call();
+                                                    },
+                                                    child: Icon(
+                                                      Icons.close,
+                                                      size: 16,
+                                                      color:
+                                                          Theme.of(
+                                                                context,
+                                                              ).brightness ==
+                                                              Brightness.dark
+                                                          ? Colors.white
+                                                          : Colors.black87,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(
+                              width: 8,
+                            ), // 4px rule - gap before Clear
+                            // Clear button on the right
+                            Container(
+                              decoration: BoxDecoration(
                                 color:
                                     Theme.of(context).brightness ==
                                         Brightness.dark
-                                    ? Colors.white
-                                    : Colors.black,
-                                size: 22,
+                                    ? Colors.grey.shade800
+                                    : Colors.grey.shade300,
+                                borderRadius: BorderRadius.circular(20),
                               ),
-                              tooltip: _showTags ? 'Hide tags' : 'Show tags',
-                              onPressed: () =>
-                                  setState(() => _showTags = !_showTags),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          ),
-                          // Credits on the right
-                          Positioned(
-                            right: 4, // 4px rule
-                            top: 0,
-                            child: Container(
-                              padding: const EdgeInsets.only(
-                                left: 12, // 4px rule
-                                right: 4, // 4px rule
-                                top: 8, // 4px rule
-                                bottom: 8, // 4px rule
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(
-                                  24,
-                                ), // 4px rule
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.1),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    searchQuery = '';
+                                    _searchController.text = '';
+                                  });
+                                  widget.onSearchChanged?.call();
+                                },
+                                icon: const Icon(Icons.clear_all, size: 16),
+                                label: const Text('Clear'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.lightBlue.shade300,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, // 4px rule
+                                    vertical: 8, // 4px rule
                                   ),
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ConstrainedBox(
-                                    constraints: const BoxConstraints(
-                                      maxWidth: 80,
-                                    ),
-                                    child: ShaderMask(
-                                      shaderCallback: (bounds) =>
-                                          const LinearGradient(
-                                            begin: Alignment.centerLeft,
-                                            end: Alignment.centerRight,
-                                            colors: [
-                                              Colors.black87,
-                                              Color(0xFFC0C0C0),
-                                              Colors.black87,
-                                            ],
-                                            stops: [0.1, 0.5, 0.93],
-                                          ).createShader(bounds),
-                                      child: Text(
-                                        '1,000',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 0.5,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Transform.scale(
-                                    scale: 1.8,
-                                    child: Image.asset(
-                                      'assets/T Creadit Icon.png',
-                                      width: 30,
-                                      height: 30,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // Active search filters with counts
-                  if (searchQuery.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(
-                                children: [
-                                  ...searchQuery
-                                      .split(' ')
-                                      .where((tag) => tag.isNotEmpty)
-                                      .map((tag) {
-                                        // Count photos matching this specific tag
-                                        final tagLower = tag.toLowerCase();
-                                        final int count;
-                                        
-                                        // Special handling for "none" filter
-                                        if (tagLower == 'none') {
-                                          count = imageUrls.where((u) {
-                                            if (_trashedIds.contains(u)) return false;
-                                            final key = p.basename(u);
-                                            final tags = photoTags[key] ?? [];
-                                            return tags.isEmpty;
-                                          }).length;
-                                        } else {
-                                          count = imageUrls.where((u) {
-                                            if (_trashedIds.contains(u)) return false;
-                                            final key = p.basename(u);
-                                            final tags = photoTags[key] ?? [];
-                                            final allDetections = photoAllDetections[key] ?? [];
-                                            return tags.any((t) => t.toLowerCase().contains(tagLower)) ||
-                                                allDetections.any((d) => d.toLowerCase().contains(tagLower));
-                                          }).length;
-                                        }
-                                        
-                                        return Padding(
-                                          padding: const EdgeInsets.only(
-                                            right: 8,
-                                          ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8, // 4px rule
-                                            ),
-                                            decoration: BoxDecoration(
-                                              gradient: LinearGradient(
-                                                colors: [
-                                                  Colors.lightBlue.shade400,
-                                                  Colors.lightBlue.shade600,
-                                                ],
-                                                begin: Alignment.topLeft,
-                                                end: Alignment.bottomRight,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              border: Border.all(
-                                                color:
-                                                    Colors.lightBlue.shade300,
-                                                width: 1.5,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.2),
-                                                  blurRadius: 8,
-                                                  offset: const Offset(
-                                                    0,
-                                                    4,
-                                                  ), // 4px rule
-                                                ),
-                                              ],
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  '$tag ($count)',
-                                                  style: TextStyle(
-                                                    color:
-                                                        Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
-                                                ),
-                                                const SizedBox(
-                                                  width: 8,
-                                                ), // 4px rule
-                                                GestureDetector(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      final tags = searchQuery
-                                                          .split(' ')
-                                                          .where(
-                                                            (t) =>
-                                                                t != tag &&
-                                                                t.isNotEmpty,
-                                                          )
-                                                          .toList();
-                                                      searchQuery = tags.join(
-                                                        ' ',
-                                                      );
-                                                      _searchController.text =
-                                                          searchQuery;
-                                                    });
-                                                    widget.onSearchChanged
-                                                        ?.call();
-                                                  },
-                                                  child: Icon(
-                                                    Icons.close,
-                                                    size: 16,
-                                                    color:
-                                                        Theme.of(
-                                                              context,
-                                                            ).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      }),
-                                ],
-                              ),
-                            ),
-                          ),
-                          const SizedBox(
-                            width: 8,
-                          ), // 4px rule - gap before Clear
-                          // Clear button on the right
-                          Container(
-                            decoration: BoxDecoration(
-                              color:
-                                  Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? Colors.grey.shade800
-                                  : Colors.grey.shade300,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: TextButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  searchQuery = '';
-                                  _searchController.text = '';
-                                });
-                                widget.onSearchChanged?.call();
-                              },
-                              icon: const Icon(Icons.clear_all, size: 16),
-                              label: const Text('Clear'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.lightBlue.shade300,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, // 4px rule
-                                  vertical: 8, // 4px rule
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                 ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  // Add filter button under the magnifying glass/search area
-                  if (searchQuery.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: _showAddFilterMenu,
-                          icon: const Icon(Icons.add, size: 16),
-                          label: const Text('Add filter'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.lightBlue.shade300,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
+                          ],
                         ),
                       ),
-                    ), // Show album chips (horizontal) when albums exist.
-                  // Re-enable album chips when needed
-                  // if (albums.isNotEmpty)
-                  //   SizedBox(
-                  //     height: 64,
-                  //     child: ListView.separated(
-                  //       padding: const EdgeInsets.symmetric(horizontal: 12),
-                  //       scrollDirection: Axis.horizontal,
-                  //       itemBuilder: (ctx, idx) {
-                  //         final name = albums.keys.elementAt(idx);
-                  //         final count = albums[name]?.length ?? 0;
-                  //         return ActionChip(
-                  //           label: Text('$name ($count)'),
-                  //           onPressed: () {
-                  //             // Open AlbumScreen to show album contents
-                  //             Navigator.push(
-                  //               context,
-                  //               MaterialPageRoute(
-                  //                 builder: (c) => const AlbumScreen(),
-                  //               ),
-                  //             );
-                  //           },
-                  //         );
-                  //       },
-                  //       separatorBuilder: (context, index) =>
-                  //           const SizedBox(width: 8),
-                  //       itemCount: albums.length,
-                  //     ),
-                  //   ),
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        GestureDetector(
-                          onScaleStart: (details) {
-                            _lastScale = 1.0;
-                          },
-                          onScaleUpdate: (details) {
-                            // Only trigger zoom when 2+ fingers are on screen (true pinch gesture)
-                            if (details.pointerCount < 2) return;
+                    // Add filter button under the magnifying glass/search area
+                    if (searchQuery.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _showAddFilterMenu,
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Add filter'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.lightBlue.shade300,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                        ),
+                      ), // Show album chips (horizontal) when albums exist.
+                    // Re-enable album chips when needed
+                    // if (albums.isNotEmpty)
+                    //   SizedBox(
+                    //     height: 64,
+                    //     child: ListView.separated(
+                    //       padding: const EdgeInsets.symmetric(horizontal: 12),
+                    //       scrollDirection: Axis.horizontal,
+                    //       itemBuilder: (ctx, idx) {
+                    //         final name = albums.keys.elementAt(idx);
+                    //         final count = albums[name]?.length ?? 0;
+                    //         return ActionChip(
+                    //           label: Text('$name ($count)'),
+                    //           onPressed: () {
+                    //             // Open AlbumScreen to show album contents
+                    //             Navigator.push(
+                    //               context,
+                    //               MaterialPageRoute(
+                    //                 builder: (c) => const AlbumScreen(),
+                    //               ),
+                    //             );
+                    //           },
+                    //         );
+                    //       },
+                    //       separatorBuilder: (context, index) =>
+                    //           const SizedBox(width: 8),
+                    //       itemCount: albums.length,
+                    //     ),
+                    //   ),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          GestureDetector(
+                            onScaleStart: (details) {
+                              _lastScale = 1.0;
+                            },
+                            onScaleUpdate: (details) {
+                              // Only trigger zoom when 2+ fingers are on screen (true pinch gesture)
+                              if (details.pointerCount < 2) return;
 
-                            // Detect scale changes more reliably with lower threshold for immediate response
-                            final scaleDiff = details.scale - _lastScale;
+                              // Detect scale changes more reliably with lower threshold for immediate response
+                              final scaleDiff = details.scale - _lastScale;
 
-                            if (scaleDiff.abs() > 0.05) {
-                              if (scaleDiff > 0) {
-                                // Pinch out - zoom in (fewer columns)
-                                setState(() {
-                                  if (_crossAxisCount > 1) _crossAxisCount--;
-                                });
-                              } else {
-                                // Pinch in - zoom out (more columns)
-                                setState(() {
-                                  if (_crossAxisCount < 5) _crossAxisCount++;
-                                });
+                              if (scaleDiff.abs() > 0.05) {
+                                if (scaleDiff > 0) {
+                                  // Pinch out - zoom in (fewer columns)
+                                  setState(() {
+                                    if (_crossAxisCount > 1) _crossAxisCount--;
+                                  });
+                                } else {
+                                  // Pinch in - zoom out (more columns)
+                                  setState(() {
+                                    if (_crossAxisCount < 5) _crossAxisCount++;
+                                  });
+                                }
+                                _lastScale = details.scale;
                               }
-                              _lastScale = details.scale;
-                            }
-                          },
-                          onScaleEnd: (details) {
-                            _lastScale = 1.0;
-                          },
-                          child: Builder(
-                            builder: (context) {
-                              // Use cached filtered list for performance
-                              _updateCachedFilteredList();
-                              final filtered = _cachedFilteredUrls;
+                            },
+                            onScaleEnd: (details) {
+                              _lastScale = 1.0;
+                            },
+                            child: Builder(
+                              builder: (context) {
+                                // Use cached filtered list for performance
+                                _updateCachedFilteredList();
+                                final filtered = _cachedFilteredUrls;
 
-                              // Adjust spacing based on column count - fewer columns = more spacing
-                              final spacing = _crossAxisCount <= 2
-                                  ? 4.0
-                                  : (_crossAxisCount == 3 ? 3.0 : 2.0);
+                                // Adjust spacing based on column count - fewer columns = more spacing
+                                final spacing = _crossAxisCount <= 2
+                                    ? 4.0
+                                    : (_crossAxisCount == 3 ? 3.0 : 2.0);
 
-                              return Column(
-                                children: [
-                                  // Select button row
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      8, // 4px rule - reduced
-                                      16,
-                                      8, // 4px rule
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        GestureDetector(
-                                          onTap: () {
-                                            final wasSelectMode = _isSelectMode;
-                                            setState(() {
-                                              // Toggle select mode
-                                              _isSelectMode = !_isSelectMode;
-                                              if (!_isSelectMode) {
-                                                // Exit select mode and clear selections
-                                                _selectedKeys.clear();
+                                return Column(
+                                  children: [
+                                    // Select button row
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8, // 4px rule - reduced
+                                        16,
+                                        8, // 4px rule
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () {
+                                              final wasSelectMode =
+                                                  _isSelectMode;
+                                              setState(() {
+                                                // Toggle select mode
+                                                _isSelectMode = !_isSelectMode;
+                                                if (!_isSelectMode) {
+                                                  // Exit select mode and clear selections
+                                                  _selectedKeys.clear();
+                                                }
+                                              });
+                                              if (wasSelectMode) {
+                                                _updateSelectionCount();
                                               }
-                                            });
-                                            if (wasSelectMode) {
-                                              _updateSelectionCount();
-                                            }
-                                          },
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _isSelectMode
-                                                  ? Colors.blue.shade50
-                                                  : Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              border: Border.all(
+                                            },
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
                                                 color: _isSelectMode
-                                                    ? Colors.blue.shade400
-                                                    : Colors.grey.shade300,
-                                                width: 2,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.1),
-                                                  blurRadius: 4,
-                                                  offset: const Offset(0, 2),
-                                                ),
-                                              ],
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  _isSelectMode
-                                                      ? Icons.check_box
-                                                      : Icons
-                                                            .check_box_outline_blank,
+                                                    ? Colors.blue.shade50
+                                                    : Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
                                                   color: _isSelectMode
-                                                      ? Colors.blue.shade700
-                                                      : Colors.grey.shade600,
-                                                  size: 20,
+                                                      ? Colors.blue.shade400
+                                                      : Colors.grey.shade300,
+                                                  width: 2,
                                                 ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  'Select',
-                                                  style: TextStyle(
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.1),
+                                                    blurRadius: 4,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    _isSelectMode
+                                                        ? Icons.check_box
+                                                        : Icons
+                                                              .check_box_outline_blank,
                                                     color: _isSelectMode
                                                         ? Colors.blue.shade700
-                                                        : Colors.grey.shade800,
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w600,
+                                                        : Colors.grey.shade600,
+                                                    size: 20,
                                                   ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        if (_isSelectMode &&
-                                            _selectedKeys.isNotEmpty) ...[
-                                          const SizedBox(width: 12),
-                                          Text(
-                                            '${_selectedKeys.length} selected',
-                                            style: TextStyle(
-                                              color: Colors.grey.shade600,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ],
-                                        const Spacer(),
-                                        // Refresh button
-                                        IconButton(
-                                          icon: Icon(
-                                            Icons.refresh,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 24,
-                                          ),
-                                          onPressed: () async {
-                                            await _loadAllImages();
-                                          },
-                                          tooltip: 'Refresh gallery',
-                                        ),
-                                        // Sort button on the right
-                                        IconButton(
-                                          icon: Icon(
-                                            _sortNewestFirst
-                                                ? Icons.arrow_downward
-                                                : Icons.arrow_upward,
-                                            color:
-                                                Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 24,
-                                          ),
-                                          onPressed: () {
-                                            setState(() {
-                                              _sortNewestFirst =
-                                                  !_sortNewestFirst;
-                                            });
-                                          },
-                                          tooltip: _sortNewestFirst
-                                              ? 'Newest first'
-                                              : 'Oldest first',
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  // Photo Grid with Fast Scroller
-                                  Expanded(
-                                    child: LayoutBuilder(
-                                      builder: (context, constraints) {
-                                        final gridHeight =
-                                            constraints.maxHeight;
-                                        return Stack(
-                                          children: [
-                                            // Grid (refresh via button instead of pull-to-refresh)
-                                            GridView.builder(
-                                              controller: _scrollController,
-                                              padding: const EdgeInsets.only(
-                                                left: 12,
-                                                right: 12,
-                                                top: 12,
-                                                bottom:
-                                                    100, // Extra space for navbar
-                                              ),
-                                              gridDelegate:
-                                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                                    crossAxisCount:
-                                                        _crossAxisCount,
-                                                    mainAxisSpacing: spacing,
-                                                    crossAxisSpacing: spacing,
-                                                    childAspectRatio: 1.0,
-                                                  ),
-                                              itemCount: filtered.length,
-                                              itemBuilder: (context, index) {
-                                                final url = filtered[index];
-                                                final key = p.basename(url);
-                                                final fullTags =
-                                                    photoTags[key] ?? [];
-                                                // Show the first tag (highest priority from server)
-                                                final visibleTags = fullTags
-                                                    .take(1)
-                                                    .toList();
-
-                                                final isSelected = _selectedKeys
-                                                    .contains(key);
-                                                // Key based on photo+tags for proper rebuild
-                                                return GestureDetector(
-                                                  key: ValueKey(
-                                                    '$key-${fullTags.join(",")}',
-                                                  ),
-                                                  onTap: () async {
-                                                    if (_isSelectMode) {
-                                                      setState(() {
-                                                        if (isSelected) {
-                                                          _selectedKeys.remove(
-                                                            key,
-                                                          );
-                                                        } else {
-                                                          _selectedKeys.add(
-                                                            key,
-                                                          );
-                                                        }
-                                                      });
-                                                      _updateSelectionCount();
-                                                      return;
-                                                    }
-
-                                                    // Build list of all photos for swipe navigation (instant, no file loading)
-                                                    final allPhotos =
-                                                        _buildPhotoDataList(
-                                                          filtered,
-                                                        );
-
-                                                    // Navigate to photo viewer with swipe support
-                                                    Navigator.push(
-                                                      context,
-                                                      MaterialPageRoute(
-                                                        builder: (_) => PhotoViewer(
-                                                          heroTag: key,
-                                                          allPhotos: allPhotos,
-                                                          initialIndex: index,
-                                                          onDelete: (photoUrl) =>
-                                                              _deletePhotoFromViewer(
-                                                                photoUrl,
-                                                              ),
-                                                          onShare: (photoUrl) =>
-                                                              _sharePhotoFromViewer(
-                                                                photoUrl,
-                                                              ),
-                                                          onAddToAlbum:
-                                                              (photoUrl) =>
-                                                                  _addPhotoToAlbumFromViewer(
-                                                                    photoUrl,
-                                                                  ),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  },
-                                                  onLongPress: () {
-                                                    setState(() {
-                                                      _isSelectMode = true;
-                                                      _selectedKeys.add(key);
-                                                    });
-                                                    _updateSelectionCount();
-                                                  },
-                                                  child: ClipRRect(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          6,
-                                                        ),
-                                                    child: Stack(
-                                                      fit: StackFit.expand,
-                                                      children: [
-                                                        // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
-                                                        Hero(
-                                                          tag: key,
-                                                          child:
-                                                              url.startsWith(
-                                                                'local:',
-                                                              )
-                                                              ? FutureBuilder<
-                                                                  Uint8List?
-                                                                >(
-                                                                  future: _getCachedThumbFuture(
-                                                                    url.substring(
-                                                                      6,
-                                                                    ),
-                                                                  ),
-                                                                  builder: (context, snap) {
-                                                                    if (snap.hasData &&
-                                                                        snap.data !=
-                                                                            null) {
-                                                                      return Image.memory(
-                                                                        snap.data!,
-                                                                        fit: BoxFit
-                                                                            .cover,
-                                                                      );
-                                                                    }
-                                                                    if (snap.connectionState ==
-                                                                        ConnectionState
-                                                                            .waiting) {
-                                                                      return Container(
-                                                                        color: Colors
-                                                                            .black26,
-                                                                      );
-                                                                    }
-                                                                    return Container(
-                                                                      color: Colors
-                                                                          .black26,
-                                                                      child: const Icon(
-                                                                        Icons
-                                                                            .broken_image,
-                                                                        color: Colors
-                                                                            .white54,
-                                                                      ),
-                                                                    );
-                                                                  },
-                                                                )
-                                                              : (url.startsWith(
-                                                                      'file:',
-                                                                    )
-                                                                    ? (() {
-                                                                        final path = url.substring(
-                                                                          'file:'
-                                                                              .length,
-                                                                        );
-                                                                        return ClipRRect(
-                                                                          borderRadius:
-                                                                              BorderRadius.circular(
-                                                                                6,
-                                                                              ),
-                                                                          child: Image.file(
-                                                                            File(
-                                                                              path,
-                                                                            ),
-                                                                            fit:
-                                                                                BoxFit.cover,
-                                                                          ),
-                                                                        );
-                                                                      })()
-                                                                    : Image.network(
-                                                                        ApiService.resolveImageUrl(
-                                                                          url,
-                                                                        ),
-                                                                        fit: BoxFit
-                                                                            .cover,
-                                                                        // Show a neutral placeholder instead of the
-                                                                        // engine's red X when the server returns 404
-                                                                        // or other network errors.
-                                                                        errorBuilder:
-                                                                            (
-                                                                              context,
-                                                                              error,
-                                                                              stackTrace,
-                                                                            ) {
-                                                                              return Container(
-                                                                                color: Colors.black26,
-                                                                                child: const Center(
-                                                                                  child: Icon(
-                                                                                    Icons.broken_image,
-                                                                                    color: Colors.white54,
-                                                                                    size: 36,
-                                                                                  ),
-                                                                                ),
-                                                                              );
-                                                                            },
-                                                                      )),
-                                                        ),
-                                                        if (_isSelectMode)
-                                                          Positioned(
-                                                            top: 8,
-                                                            left: 8,
-                                                            child: Container(
-                                                              decoration: BoxDecoration(
-                                                                shape: BoxShape
-                                                                    .circle,
-                                                                color:
-                                                                    isSelected
-                                                                    ? Colors
-                                                                          .blueAccent
-                                                                    : Colors
-                                                                          .black54,
-                                                              ),
-                                                              padding:
-                                                                  const EdgeInsets.all(
-                                                                    6,
-                                                                  ),
-                                                              child: Icon(
-                                                                isSelected
-                                                                    ? Icons
-                                                                          .check_box
-                                                                    : Icons
-                                                                          .crop_square,
-                                                                color: Colors
-                                                                    .white,
-                                                                size: 18,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        if (_showTags)
-                                                          Positioned(
-                                                            left: 8,
-                                                            right: 8,
-                                                            bottom: 8,
-                                                            child: LayoutBuilder(
-                                                              builder:
-                                                                  (
-                                                                    context,
-                                                                    constraints,
-                                                                  ) {
-                                                                    final chips = _buildTagChipsForWidth(
-                                                                      visibleTags,
-                                                                      fullTags,
-                                                                      constraints
-                                                                          .maxWidth,
-                                                                    );
-
-                                                                    // Check if this photo was recently validated (within last 10 seconds)
-                                                                    final photoID =
-                                                                        PhotoId.canonicalId(
-                                                                          url,
-                                                                        );
-                                                                    final recentlyValidated =
-                                                                        _recentlyValidated.containsKey(
-                                                                          photoID,
-                                                                        ) &&
-                                                                        DateTime.now()
-                                                                                .difference(
-                                                                                  _recentlyValidated[photoID]!,
-                                                                                )
-                                                                                .inSeconds <
-                                                                            10;
-
-                                                                    return Row(
-                                                                      mainAxisSize:
-                                                                          MainAxisSize
-                                                                              .min,
-                                                                      children: [
-                                                                        Expanded(
-                                                                          child: AnimatedOpacity(
-                                                                            opacity:
-                                                                                1.0,
-                                                                            duration: const Duration(
-                                                                              milliseconds: 300,
-                                                                            ),
-                                                                            child: Wrap(
-                                                                              spacing: 4,
-                                                                              children: chips,
-                                                                            ),
-                                                                          ),
-                                                                        ),
-                                                                        if (recentlyValidated)
-                                                                          Padding(
-                                                                            padding: const EdgeInsets.only(
-                                                                              left: 4,
-                                                                            ),
-                                                                            child: Container(
-                                                                              padding: const EdgeInsets.all(
-                                                                                4,
-                                                                              ),
-                                                                              decoration: BoxDecoration(
-                                                                                color: Colors.green.withValues(
-                                                                                  alpha: 0.9,
-                                                                                ),
-                                                                                shape: BoxShape.circle,
-                                                                                boxShadow: [
-                                                                                  BoxShadow(
-                                                                                    color: Colors.black.withValues(
-                                                                                      alpha: 0.3,
-                                                                                    ),
-                                                                                    offset: const Offset(
-                                                                                      0,
-                                                                                      0.5,
-                                                                                    ),
-                                                                                    blurRadius: 2,
-                                                                                  ),
-                                                                                ],
-                                                                              ),
-                                                                              child: const Icon(
-                                                                                Icons.auto_awesome,
-                                                                                size: 14,
-                                                                                color: Colors.white,
-                                                                              ),
-                                                                            ),
-                                                                          ),
-                                                                      ],
-                                                                    );
-                                                                  },
-                                                            ),
-                                                          ),
-                                                        // When tags are hidden, show scan status indicator
-                                                        if (!_showTags)
-                                                          Positioned(
-                                                            right: 6,
-                                                            bottom: 6,
-                                                            child:
-                                                                fullTags
-                                                                    .isNotEmpty
-                                                                // Green sparkles = scanned
-                                                                ? Container(
-                                                                    padding:
-                                                                        const EdgeInsets.all(
-                                                                          4,
-                                                                        ),
-                                                                    decoration: BoxDecoration(
-                                                                      color: Colors
-                                                                          .green
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.9,
-                                                                          ),
-                                                                      shape: BoxShape
-                                                                          .circle,
-                                                                      boxShadow: [
-                                                                        BoxShadow(
-                                                                          color: Colors.black.withValues(
-                                                                            alpha:
-                                                                                0.3,
-                                                                          ),
-                                                                          blurRadius:
-                                                                              2,
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                    child: const Icon(
-                                                                      Icons
-                                                                          .auto_awesome,
-                                                                      size: 12,
-                                                                      color: Colors
-                                                                          .white,
-                                                                    ),
-                                                                  )
-                                                                // Grey circle outline = not scanned
-                                                                : Container(
-                                                                    width: 20,
-                                                                    height: 20,
-                                                                    decoration: BoxDecoration(
-                                                                      shape: BoxShape
-                                                                          .circle,
-                                                                      border: Border.all(
-                                                                        color: Colors
-                                                                            .grey
-                                                                            .shade400,
-                                                                        width:
-                                                                            2,
-                                                                      ),
-                                                                    ),
-                                                                  ),
-                                                          ),
-                                                      ],
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    'Select',
+                                                    style: TextStyle(
+                                                      color: _isSelectMode
+                                                          ? Colors.blue.shade700
+                                                          : Colors
+                                                                .grey
+                                                                .shade800,
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.w600,
                                                     ),
                                                   ),
-                                                );
-                                              },
+                                                ],
+                                              ),
                                             ),
-                                            // Fast Scroller overlay
-                                            _buildFastScroller(
-                                              filtered,
-                                              gridHeight,
+                                          ),
+                                          if (_isSelectMode &&
+                                              _selectedKeys.isNotEmpty) ...[
+                                            const SizedBox(width: 12),
+                                            Text(
+                                              '${_selectedKeys.length} selected',
+                                              style: TextStyle(
+                                                color: Colors.grey.shade600,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
                                           ],
-                                        );
-                                      },
+                                          const Spacer(),
+                                          // Refresh button
+                                          IconButton(
+                                            icon: Icon(
+                                              Icons.refresh,
+                                              color:
+                                                  Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                              size: 24,
+                                            ),
+                                            onPressed: () async {
+                                              await _loadAllImages();
+                                            },
+                                            tooltip: 'Refresh gallery',
+                                          ),
+                                          // Sort button on the right
+                                          IconButton(
+                                            icon: Icon(
+                                              _sortNewestFirst
+                                                  ? Icons.arrow_downward
+                                                  : Icons.arrow_upward,
+                                              color:
+                                                  Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                              size: 24,
+                                            ),
+                                            onPressed: () {
+                                              setState(() {
+                                                _sortNewestFirst =
+                                                    !_sortNewestFirst;
+                                              });
+                                            },
+                                            tooltip: _sortNewestFirst
+                                                ? 'Newest first'
+                                                : 'Oldest first',
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-
-                        // Floating controls overlay - bottom right (menu buttons)
-                        Positioned(
-                          top: 56,
-                          right: 8,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(
-                                    showDebug
-                                        ? Icons.bug_report_sharp
-                                        : Icons.bug_report,
-                                    color: Colors.white,
-                                  ),
-                                  onPressed: () =>
-                                      setState(() => showDebug = !showDebug),
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.camera_alt,
-                                    color: Colors.white,
-                                  ),
-                                  tooltip: 'Scan now',
-                                  onPressed: () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      builder: (ctx) {
-                                        return SafeArea(
-                                          child: SingleChildScrollView(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.photo_library,
-                                                  ),
-                                                  title: const Text(
-                                                    'Scan missing images',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    _manualScan(force: false);
-                                                  },
+                                    // Photo Grid with Fast Scroller
+                                    Expanded(
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final gridHeight =
+                                              constraints.maxHeight;
+                                          return Stack(
+                                            children: [
+                                              // Grid (refresh via button instead of pull-to-refresh)
+                                              GridView.builder(
+                                                controller: _scrollController,
+                                                padding: const EdgeInsets.only(
+                                                  left: 12,
+                                                  right: 12,
+                                                  top: 12,
+                                                  bottom:
+                                                      100, // Extra space for navbar
                                                 ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.verified,
-                                                    color: Colors.deepPurple,
-                                                  ),
-                                                  title: const Text(
-                                                    'Validate all classifications',
-                                                  ),
-                                                  subtitle: const Text(
-                                                    'Re-check all tagged photos with CLIP',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    _validateAllClassifications();
-                                                  },
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.delete_forever,
-                                                  ),
-                                                  title: const Text(
-                                                    'Remove all persisted tags',
-                                                  ),
-                                                  subtitle: const Text(
-                                                    'Clears saved scan results for all photos',
-                                                  ),
-                                                  onTap: () async {
-                                                    Navigator.pop(ctx);
-                                                    final confirm = await showDialog<bool>(
-                                                      context: context,
-                                                      builder: (dctx) => AlertDialog(
-                                                        title: const Text(
-                                                          'Confirm',
-                                                        ),
-                                                        content: const Text(
-                                                          'Are you sure you want to remove all persisted tags? '
-                                                          'This cannot be undone.',
-                                                        ),
-                                                        actions: [
-                                                          TextButton(
-                                                            onPressed: () =>
-                                                                Navigator.pop(
-                                                                  dctx,
-                                                                  false,
-                                                                ),
-                                                            child: const Text(
-                                                              'Cancel',
-                                                            ),
-                                                          ),
-                                                          TextButton(
-                                                            onPressed: () =>
-                                                                Navigator.pop(
-                                                                  dctx,
-                                                                  true,
-                                                                ),
-                                                            child: const Text(
-                                                              'Remove',
-                                                            ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    );
-                                                    if (confirm != true) return;
-                                                    try {
-                                                      // Block any new scans during clearing
-                                                      _clearingTags = true;
+                                                gridDelegate:
+                                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                                      crossAxisCount:
+                                                          _crossAxisCount,
+                                                      mainAxisSpacing: spacing,
+                                                      crossAxisSpacing: spacing,
+                                                      childAspectRatio: 1.0,
+                                                    ),
+                                                itemCount: filtered.length,
+                                                itemBuilder: (context, index) {
+                                                  final url = filtered[index];
+                                                  final key = p.basename(url);
+                                                  final fullTags =
+                                                      photoTags[key] ?? [];
+                                                  // Show the first tag (highest priority from server)
+                                                  final visibleTags = fullTags
+                                                      .take(1)
+                                                      .toList();
 
-                                                      // Clear server tags first
-                                                      // IMMEDIATELY stop any ongoing scanning/validation and ALL timers
-                                                      _scanning = false;
-                                                      _validating = false;
-                                                      _validationCancelled =
-                                                          true;
-                                                      _progressRefreshTimer
-                                                          ?.cancel();
-                                                      _smoothProgressTimer
-                                                          ?.cancel();
-                                                      _dotAnimationTimer
-                                                          ?.cancel();
-                                                      _autoScanRetryTimer
-                                                          ?.cancel();
-                                                      _autoScanRetryTimer =
-                                                          null;
-                                                      developer.log(
-                                                        '🛑 Stopped scanning/validation and all timers for tag clear',
+                                                  final isSelected =
+                                                      _selectedKeys.contains(
+                                                        key,
                                                       );
-
-                                                      try {
-                                                        await http
-                                                            .delete(
-                                                              Uri.parse(
-                                                                '${ApiService.baseUrl}/tags-db/',
-                                                              ),
-                                                              headers: {
-                                                                'Content-Type':
-                                                                    'application/json',
-                                                              },
-                                                            )
-                                                            .timeout(
-                                                              const Duration(
-                                                                seconds: 10,
-                                                              ),
+                                                  // Key based on photo+tags for proper rebuild
+                                                  return GestureDetector(
+                                                    key: ValueKey(
+                                                      '$key-${fullTags.join(",")}',
+                                                    ),
+                                                    onTap: () async {
+                                                      if (_isSelectMode) {
+                                                        setState(() {
+                                                          if (isSelected) {
+                                                            _selectedKeys
+                                                                .remove(key);
+                                                          } else {
+                                                            _selectedKeys.add(
+                                                              key,
                                                             );
-                                                        developer.log(
-                                                          '🗑️ Cleared server tags database',
-                                                        );
-                                                      } catch (e) {
-                                                        developer.log(
-                                                          '⚠️ Failed to clear server tags: $e',
-                                                        );
-                                                      }
-
-                                                      // Clear all local tags at once (much faster)
-                                                      final removed =
-                                                          await TagStore.clearAllTags();
-
-                                                      // Verify storage is actually empty
-                                                      final remainingCount =
-                                                          await TagStore.getStoredTagCount();
-                                                      if (remainingCount > 0) {
-                                                        developer.log(
-                                                          '⚠️ WARNING: $remainingCount tags still in storage after clear!',
-                                                        );
-                                                      }
-
-                                                      // Clear in-memory tags AND detections
-                                                      photoTags.clear();
-                                                      photoAllDetections
-                                                          .clear();
-
-                                                      // Invalidate cached filtered list so it rebuilds
-                                                      _lastPhotoTagsLength = -1;
-                                                      _cachedFilteredUrls
-                                                          .clear();
-
-                                                      // Reset ALL scan/validation state to allow fresh re-scan
-                                                      _validationComplete =
-                                                          false;
-                                                      _validationCancelled =
-                                                          false;
-                                                      _validating = false;
-                                                      _scanning = false;
-                                                      _hasScannedAtLeastOneBatch =
-                                                          false;
-                                                      _scanProgress = 0.0;
-                                                      _scanProcessed = 0;
-                                                      _scanTotal = 0;
-                                                      _scannedCountNotifier
-                                                              .value =
-                                                          0;
-                                                      _galleryReadyShown =
-                                                          false;
-
-                                                      // Update UI to show cleared state
-                                                      if (mounted) {
-                                                        setState(() {});
-                                                      }
-
-                                                      // Show snackbar
-                                                      if (mounted) {
-                                                        _showSnackBar(
-                                                          'Removed $removed local tags. Starting fresh scan...',
-                                                        );
-                                                      }
-
-                                                      // Wait briefly to let UI update
-                                                      developer.log(
-                                                        '🔄 Waiting 1 second before starting fresh scan...',
-                                                      );
-                                                      await Future.delayed(
-                                                        const Duration(
-                                                          seconds: 1,
-                                                        ),
-                                                      );
-
-                                                      // Verify tags are still cleared before starting scan
-                                                      if (photoTags
-                                                          .isNotEmpty) {
-                                                        developer.log(
-                                                          '⚠️ Tags not empty after clear (${photoTags.length}). Aborting rescan.',
-                                                        );
-                                                        _clearingTags = false;
+                                                          }
+                                                        });
+                                                        _updateSelectionCount();
                                                         return;
                                                       }
 
-                                                      // NOTE: Keep _clearingTags = true until _manualScan completes
-                                                      // This prevents the retry timer from triggering validation
-                                                      // during the gap between now and when _manualScan sets _scanning = true
+                                                      // Build list of all photos for swipe navigation (instant, no file loading)
+                                                      final allPhotos =
+                                                          _buildPhotoDataList(
+                                                            filtered,
+                                                          );
 
-                                                      if (mounted) {
-                                                        developer.log(
-                                                          '🔄 Starting fresh scan of ALL photos after tag clear',
-                                                        );
-                                                        // Use force scan to bypass TagStore checks
-                                                        // TagStore was just cleared so checks would be stale
-                                                        await _manualScan(
-                                                          force: true,
-                                                        );
-                                                      }
-
-                                                      // Now that scan has started (or completed), allow other operations
-                                                      _clearingTags = false;
-
-                                                      // Force validation state to false to prevent immediate validation
-                                                      _validating = false;
-                                                      _validationComplete =
-                                                          false;
-
-                                                      // Restart the retry timer in case scan failed or to continue retrying
-                                                      _startAutoScanRetryTimer();
-                                                    } catch (e) {
-                                                      _clearingTags =
-                                                          false; // Reset flag on error
-                                                      developer.log(
-                                                        'Failed to remove tags: $e',
-                                                      );
-                                                      if (mounted) {
-                                                        _showSnackBar(
-                                                          'Failed to remove tags',
-                                                        );
-                                                      }
-                                                    }
-                                                  },
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.refresh,
-                                                  ),
-                                                  title: const Text(
-                                                    'Force rescan all device images',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    _manualScan(force: true);
-                                                  },
-                                                ),
-                                                const Divider(),
-                                                const Padding(
-                                                  padding: EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 8,
-                                                  ),
-                                                  child: Text(
-                                                    'Developer Testing',
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.grey,
-                                                    ),
-                                                  ),
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.auto_awesome,
-                                                    color: Colors.amber,
-                                                  ),
-                                                  title: const Text(
-                                                    'Test sparkles effect',
-                                                  ),
-                                                  subtitle: const Text(
-                                                    'Simulate "Final touches" animation',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    // Trigger final touches animation by simulating 100%
-                                                    setState(() {
-                                                      _scanning = true;
-                                                      // Ensure we have a valid photo count for the test
-                                                      if (_cachedLocalPhotoCount ==
-                                                          0) {
-                                                        _cachedLocalPhotoCount =
-                                                            100; // Set a dummy count
-                                                      }
-                                                      _scannedCountNotifier
-                                                              .value =
-                                                          _cachedLocalPhotoCount;
-                                                      // Set to 5 seconds ago to immediately trigger the effect
-                                                      _reached100At =
-                                                          DateTime.now()
-                                                              .subtract(
-                                                                const Duration(
-                                                                  seconds: 5,
+                                                      // Navigate to photo viewer with swipe support
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (_) => PhotoViewer(
+                                                            heroTag: key,
+                                                            allPhotos:
+                                                                allPhotos,
+                                                            initialIndex: index,
+                                                            onDelete: (photoUrl) =>
+                                                                _deletePhotoFromViewer(
+                                                                  photoUrl,
                                                                 ),
-                                                              );
-                                                    });
-
-                                                    // Auto-dismiss after 10 seconds
-                                                    Future.delayed(
-                                                      const Duration(
-                                                        seconds: 10,
-                                                      ),
-                                                      () {
-                                                        if (mounted) {
-                                                          setState(() {
-                                                            _scanning = false;
-                                                            _reached100At =
-                                                                null;
-                                                          });
-                                                        }
-                                                      },
-                                                    );
-                                                  },
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.play_circle,
-                                                    color: Colors.blue,
-                                                  ),
-                                                  title: const Text(
-                                                    'Show intro video',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    Navigator.push(
-                                                      context,
-                                                      MaterialPageRoute(
-                                                        builder: (context) =>
-                                                            IntroVideoScreen(
-                                                              onVideoFinished:
-                                                                  () {
-                                                                    Navigator.pop(
+                                                            onShare: (photoUrl) =>
+                                                                _sharePhotoFromViewer(
+                                                                  photoUrl,
+                                                                ),
+                                                            onAddToAlbum:
+                                                                (photoUrl) =>
+                                                                    _addPhotoToAlbumFromViewer(
+                                                                      photoUrl,
+                                                                    ),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                    onLongPress: () {
+                                                      setState(() {
+                                                        _isSelectMode = true;
+                                                        _selectedKeys.add(key);
+                                                      });
+                                                      _updateSelectionCount();
+                                                    },
+                                                    child: ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            6,
+                                                          ),
+                                                      child: Stack(
+                                                        fit: StackFit.expand,
+                                                        children: [
+                                                          // Wrap the image in a Hero for smooth transition to the fullscreen viewer.
+                                                          Hero(
+                                                            tag: key,
+                                                            child:
+                                                                url.startsWith(
+                                                                  'local:',
+                                                                )
+                                                                ? FutureBuilder<
+                                                                    Uint8List?
+                                                                  >(
+                                                                    future: _getCachedThumbFuture(
+                                                                      url.substring(
+                                                                        6,
+                                                                      ),
+                                                                    ),
+                                                                    builder:
+                                                                        (
+                                                                          context,
+                                                                          snap,
+                                                                        ) {
+                                                                          if (snap.hasData &&
+                                                                              snap.data !=
+                                                                                  null) {
+                                                                            return Image.memory(
+                                                                              snap.data!,
+                                                                              fit: BoxFit.cover,
+                                                                            );
+                                                                          }
+                                                                          if (snap.connectionState ==
+                                                                              ConnectionState.waiting) {
+                                                                            return Container(
+                                                                              color: Colors.black26,
+                                                                            );
+                                                                          }
+                                                                          return Container(
+                                                                            color:
+                                                                                Colors.black26,
+                                                                            child: const Icon(
+                                                                              Icons.broken_image,
+                                                                              color: Colors.white54,
+                                                                            ),
+                                                                          );
+                                                                        },
+                                                                  )
+                                                                : (url.startsWith(
+                                                                        'file:',
+                                                                      )
+                                                                      ? (() {
+                                                                          final path = url.substring(
+                                                                            'file:'.length,
+                                                                          );
+                                                                          return ClipRRect(
+                                                                            borderRadius: BorderRadius.circular(
+                                                                              6,
+                                                                            ),
+                                                                            child: Image.file(
+                                                                              File(
+                                                                                path,
+                                                                              ),
+                                                                              fit: BoxFit.cover,
+                                                                            ),
+                                                                          );
+                                                                        })()
+                                                                      : Image.network(
+                                                                          ApiService.resolveImageUrl(
+                                                                            url,
+                                                                          ),
+                                                                          fit: BoxFit
+                                                                              .cover,
+                                                                          // Show a neutral placeholder instead of the
+                                                                          // engine's red X when the server returns 404
+                                                                          // or other network errors.
+                                                                          errorBuilder:
+                                                                              (
+                                                                                context,
+                                                                                error,
+                                                                                stackTrace,
+                                                                              ) {
+                                                                                return Container(
+                                                                                  color: Colors.black26,
+                                                                                  child: const Center(
+                                                                                    child: Icon(
+                                                                                      Icons.broken_image,
+                                                                                      color: Colors.white54,
+                                                                                      size: 36,
+                                                                                    ),
+                                                                                  ),
+                                                                                );
+                                                                              },
+                                                                        )),
+                                                          ),
+                                                          if (_isSelectMode)
+                                                            Positioned(
+                                                              top: 8,
+                                                              left: 8,
+                                                              child: Container(
+                                                                decoration: BoxDecoration(
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                  color:
+                                                                      isSelected
+                                                                      ? Colors
+                                                                            .blueAccent
+                                                                      : Colors
+                                                                            .black54,
+                                                                ),
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      6,
+                                                                    ),
+                                                                child: Icon(
+                                                                  isSelected
+                                                                      ? Icons
+                                                                            .check_box
+                                                                      : Icons
+                                                                            .crop_square,
+                                                                  color: Colors
+                                                                      .white,
+                                                                  size: 18,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          if (_showTags)
+                                                            Positioned(
+                                                              left: 8,
+                                                              right: 8,
+                                                              bottom: 8,
+                                                              child: LayoutBuilder(
+                                                                builder:
+                                                                    (
                                                                       context,
-                                                                    );
-                                                                  },
-                                                            ),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.info,
-                                                    color: Colors.green,
-                                                  ),
-                                                  title: const Text(
-                                                    'Show onboarding',
-                                                  ),
-                                                  onTap: () {
-                                                    Navigator.pop(ctx);
-                                                    Navigator.push(
-                                                      context,
-                                                      MaterialPageRoute(
-                                                        builder: (context) =>
-                                                            OnboardingScreen(
-                                                              onGetStarted: () {
-                                                                Navigator.pop(
-                                                                  context,
-                                                                );
-                                                              },
-                                                            ),
-                                                      ),
-                                                    );
-                                                  },
-                                                ),
-                                                ListTile(
-                                                  leading: const Icon(
-                                                    Icons.cancel,
-                                                  ),
-                                                  title: const Text('Cancel'),
-                                                  onTap: () =>
-                                                      Navigator.pop(ctx),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                                                                      constraints,
+                                                                    ) {
+                                                                      final chips = _buildTagChipsForWidth(
+                                                                        visibleTags,
+                                                                        fullTags,
+                                                                        constraints
+                                                                            .maxWidth,
+                                                                      );
 
-                        // Scroll to top button
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 105,
-                          child: Center(
-                            child: ValueListenableBuilder<bool>(
-                              valueListenable: _showScrollToTop,
-                              builder: (context, show, child) {
-                                return AnimatedScale(
-                                  scale: show ? 1.0 : 0.0,
-                                  duration: const Duration(milliseconds: 200),
-                                  curve: Curves.easeOutCubic,
-                                  child: AnimatedOpacity(
-                                    opacity: show ? 1.0 : 0.0,
-                                    duration: const Duration(milliseconds: 200),
-                                    curve: Curves.easeInOut,
-                                    child: IgnorePointer(
-                                      ignoring: !show,
-                                      child: Material(
-                                        color: Colors.transparent,
-                                        child: InkWell(
-                                          onTap: _scrollToTop,
-                                          borderRadius: BorderRadius.circular(
-                                            28,
-                                          ),
-                                          child: Container(
-                                            width: 56,
-                                            height: 56,
-                                            decoration: BoxDecoration(
-                                              color: Colors.lightBlue.shade300,
-                                              shape: BoxShape.circle,
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: Colors.black
-                                                      .withValues(alpha: 0.2),
-                                                  blurRadius: 8,
-                                                  offset: const Offset(0, 4),
-                                                ),
-                                              ],
-                                            ),
-                                            child: Icon(
-                                              Icons.arrow_upward,
-                                              color: Colors.white,
-                                              size: 28,
-                                            ),
-                                          ),
-                                        ),
+                                                                      // Check if this photo was recently validated (within last 10 seconds)
+                                                                      final photoID =
+                                                                          PhotoId.canonicalId(
+                                                                            url,
+                                                                          );
+                                                                      final recentlyValidated =
+                                                                          _recentlyValidated.containsKey(
+                                                                            photoID,
+                                                                          ) &&
+                                                                          DateTime.now()
+                                                                                  .difference(
+                                                                                    _recentlyValidated[photoID]!,
+                                                                                  )
+                                                                                  .inSeconds <
+                                                                              10;
+
+                                                                      return Row(
+                                                                        mainAxisSize:
+                                                                            MainAxisSize.min,
+                                                                        children: [
+                                                                          Expanded(
+                                                                            child: AnimatedOpacity(
+                                                                              opacity: 1.0,
+                                                                              duration: const Duration(
+                                                                                milliseconds: 300,
+                                                                              ),
+                                                                              child: Wrap(
+                                                                                spacing: 4,
+                                                                                children: chips,
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                          if (recentlyValidated)
+                                                                            Padding(
+                                                                              padding: const EdgeInsets.only(
+                                                                                left: 4,
+                                                                              ),
+                                                                              child: Container(
+                                                                                padding: const EdgeInsets.all(
+                                                                                  4,
+                                                                                ),
+                                                                                decoration: BoxDecoration(
+                                                                                  color: Colors.green.withValues(
+                                                                                    alpha: 0.9,
+                                                                                  ),
+                                                                                  shape: BoxShape.circle,
+                                                                                  boxShadow: [
+                                                                                    BoxShadow(
+                                                                                      color: Colors.black.withValues(
+                                                                                        alpha: 0.3,
+                                                                                      ),
+                                                                                      offset: const Offset(
+                                                                                        0,
+                                                                                        0.5,
+                                                                                      ),
+                                                                                      blurRadius: 2,
+                                                                                    ),
+                                                                                  ],
+                                                                                ),
+                                                                                child: const Icon(
+                                                                                  Icons.auto_awesome,
+                                                                                  size: 14,
+                                                                                  color: Colors.white,
+                                                                                ),
+                                                                              ),
+                                                                            ),
+                                                                        ],
+                                                                      );
+                                                                    },
+                                                              ),
+                                                            ),
+                                                          // When tags are hidden, show scan status indicator
+                                                          if (!_showTags)
+                                                            Positioned(
+                                                              right: 6,
+                                                              bottom: 6,
+                                                              child:
+                                                                  fullTags
+                                                                      .isNotEmpty
+                                                                  // Green sparkles = scanned
+                                                                  ? Container(
+                                                                      padding:
+                                                                          const EdgeInsets.all(
+                                                                            4,
+                                                                          ),
+                                                                      decoration: BoxDecoration(
+                                                                        color: Colors
+                                                                            .green
+                                                                            .withValues(
+                                                                              alpha: 0.9,
+                                                                            ),
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                        boxShadow: [
+                                                                          BoxShadow(
+                                                                            color: Colors.black.withValues(
+                                                                              alpha: 0.3,
+                                                                            ),
+                                                                            blurRadius:
+                                                                                2,
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                      child: const Icon(
+                                                                        Icons
+                                                                            .auto_awesome,
+                                                                        size:
+                                                                            12,
+                                                                        color: Colors
+                                                                            .white,
+                                                                      ),
+                                                                    )
+                                                                  // Grey circle outline = not scanned
+                                                                  : Container(
+                                                                      width: 20,
+                                                                      height:
+                                                                          20,
+                                                                      decoration: BoxDecoration(
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                        border: Border.all(
+                                                                          color: Colors
+                                                                              .grey
+                                                                              .shade400,
+                                                                          width:
+                                                                              2,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                              // Fast Scroller overlay
+                                              _buildFastScroller(
+                                                filtered,
+                                                gridHeight,
+                                              ),
+                                            ],
+                                          );
+                                        },
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 );
                               },
                             ),
                           ),
-                        ),
 
-                        // Performance Monitor Overlay
-                        if (_scanning && _showPerformanceMonitor)
+                          // Floating controls overlay - bottom right (menu buttons)
                           Positioned(
-                            left: 16,
-                            top: 80,
+                            top: 56,
+                            right: 8,
                             child: Container(
-                              width: 200,
-                              padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.85),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.lightBlue.shade300,
-                                  width: 2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.lightBlue.shade300.withValues(
-                                      alpha: 0.3,
-                                    ),
-                                    blurRadius: 15,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
+                                color: Colors.black.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Column(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.speed,
-                                        color: Colors.lightBlue.shade300,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      const Expanded(
-                                        child: Text(
-                                          'Performance',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      InkWell(
-                                        onTap: () => setState(
-                                          () => _showPerformanceMonitor = false,
-                                        ),
-                                        child: Container(
-                                          padding: const EdgeInsets.all(2),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white24,
-                                            borderRadius: BorderRadius.circular(
-                                              4,
+                                  IconButton(
+                                    icon: Icon(
+                                      showDebug
+                                          ? Icons.bug_report_sharp
+                                          : Icons.bug_report,
+                                      color: Colors.white,
+                                    ),
+                                    onPressed: () =>
+                                        setState(() => showDebug = !showDebug),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.camera_alt,
+                                      color: Colors.white,
+                                    ),
+                                    tooltip: 'Scan now',
+                                    onPressed: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        builder: (ctx) {
+                                          return SafeArea(
+                                            child: SingleChildScrollView(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.photo_library,
+                                                    ),
+                                                    title: const Text(
+                                                      'Scan missing images',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      _manualScan(force: false);
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.verified,
+                                                      color: Colors.deepPurple,
+                                                    ),
+                                                    title: const Text(
+                                                      'Validate all classifications',
+                                                    ),
+                                                    subtitle: const Text(
+                                                      'Re-check all tagged photos with CLIP',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      _validateAllClassifications();
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.delete_forever,
+                                                    ),
+                                                    title: const Text(
+                                                      'Remove all persisted tags',
+                                                    ),
+                                                    subtitle: const Text(
+                                                      'Clears saved scan results for all photos',
+                                                    ),
+                                                    onTap: () async {
+                                                      Navigator.pop(ctx);
+                                                      final confirm = await showDialog<bool>(
+                                                        context: context,
+                                                        builder: (dctx) => AlertDialog(
+                                                          title: const Text(
+                                                            'Confirm',
+                                                          ),
+                                                          content: const Text(
+                                                            'Are you sure you want to remove all persisted tags? '
+                                                            'This cannot be undone.',
+                                                          ),
+                                                          actions: [
+                                                            TextButton(
+                                                              onPressed: () =>
+                                                                  Navigator.pop(
+                                                                    dctx,
+                                                                    false,
+                                                                  ),
+                                                              child: const Text(
+                                                                'Cancel',
+                                                              ),
+                                                            ),
+                                                            TextButton(
+                                                              onPressed: () =>
+                                                                  Navigator.pop(
+                                                                    dctx,
+                                                                    true,
+                                                                  ),
+                                                              child: const Text(
+                                                                'Remove',
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                      if (confirm != true)
+                                                        return;
+                                                      try {
+                                                        // Block any new scans during clearing
+                                                        _clearingTags = true;
+
+                                                        // Clear server tags first
+                                                        // IMMEDIATELY stop any ongoing scanning/validation and ALL timers
+                                                        _scanning = false;
+                                                        _validating = false;
+                                                        _validationCancelled =
+                                                            true;
+                                                        _progressRefreshTimer
+                                                            ?.cancel();
+                                                        _smoothProgressTimer
+                                                            ?.cancel();
+                                                        _dotAnimationTimer
+                                                            ?.cancel();
+                                                        _autoScanRetryTimer
+                                                            ?.cancel();
+                                                        _autoScanRetryTimer =
+                                                            null;
+                                                        developer.log(
+                                                          '🛑 Stopped scanning/validation and all timers for tag clear',
+                                                        );
+
+                                                        try {
+                                                          await http
+                                                              .delete(
+                                                                Uri.parse(
+                                                                  '${ApiService.baseUrl}/tags-db/',
+                                                                ),
+                                                                headers: {
+                                                                  'Content-Type':
+                                                                      'application/json',
+                                                                },
+                                                              )
+                                                              .timeout(
+                                                                const Duration(
+                                                                  seconds: 10,
+                                                                ),
+                                                              );
+                                                          developer.log(
+                                                            '🗑️ Cleared server tags database',
+                                                          );
+                                                        } catch (e) {
+                                                          developer.log(
+                                                            '⚠️ Failed to clear server tags: $e',
+                                                          );
+                                                        }
+
+                                                        // Clear all local tags at once (much faster)
+                                                        final removed =
+                                                            await TagStore.clearAllTags();
+
+                                                        // Verify storage is actually empty
+                                                        final remainingCount =
+                                                            await TagStore.getStoredTagCount();
+                                                        if (remainingCount >
+                                                            0) {
+                                                          developer.log(
+                                                            '⚠️ WARNING: $remainingCount tags still in storage after clear!',
+                                                          );
+                                                        }
+
+                                                        // Clear in-memory tags AND detections
+                                                        photoTags.clear();
+                                                        photoAllDetections
+                                                            .clear();
+
+                                                        // Invalidate cached filtered list so it rebuilds
+                                                        _lastPhotoTagsLength =
+                                                            -1;
+                                                        _cachedFilteredUrls
+                                                            .clear();
+
+                                                        // Reset ALL scan/validation state to allow fresh re-scan
+                                                        _validationComplete =
+                                                            false;
+                                                        _validationCancelled =
+                                                            false;
+                                                        _validating = false;
+                                                        _scanning = false;
+                                                        _hasScannedAtLeastOneBatch =
+                                                            false;
+                                                        _scanProgress = 0.0;
+                                                        _scanProcessed = 0;
+                                                        _scanTotal = 0;
+                                                        _scannedCountNotifier
+                                                                .value =
+                                                            0;
+                                                        _galleryReadyShown =
+                                                            false;
+
+                                                        // Update UI to show cleared state
+                                                        if (mounted) {
+                                                          setState(() {});
+                                                        }
+
+                                                        // Show snackbar
+                                                        if (mounted) {
+                                                          _showSnackBar(
+                                                            'Removed $removed local tags. Starting fresh scan...',
+                                                          );
+                                                        }
+
+                                                        // Wait briefly to let UI update
+                                                        developer.log(
+                                                          '🔄 Waiting 1 second before starting fresh scan...',
+                                                        );
+                                                        await Future.delayed(
+                                                          const Duration(
+                                                            seconds: 1,
+                                                          ),
+                                                        );
+
+                                                        // Verify tags are still cleared before starting scan
+                                                        if (photoTags
+                                                            .isNotEmpty) {
+                                                          developer.log(
+                                                            '⚠️ Tags not empty after clear (${photoTags.length}). Aborting rescan.',
+                                                          );
+                                                          _clearingTags = false;
+                                                          return;
+                                                        }
+
+                                                        // NOTE: Keep _clearingTags = true until _manualScan completes
+                                                        // This prevents the retry timer from triggering validation
+                                                        // during the gap between now and when _manualScan sets _scanning = true
+
+                                                        if (mounted) {
+                                                          developer.log(
+                                                            '🔄 Starting fresh scan of ALL photos after tag clear',
+                                                          );
+                                                          // Use force scan to bypass TagStore checks
+                                                          // TagStore was just cleared so checks would be stale
+                                                          await _manualScan(
+                                                            force: true,
+                                                          );
+                                                        }
+
+                                                        // Now that scan has started (or completed), allow other operations
+                                                        _clearingTags = false;
+
+                                                        // Force validation state to false to prevent immediate validation
+                                                        _validating = false;
+                                                        _validationComplete =
+                                                            false;
+
+                                                        // Restart the retry timer in case scan failed or to continue retrying
+                                                        _startAutoScanRetryTimer();
+                                                      } catch (e) {
+                                                        _clearingTags =
+                                                            false; // Reset flag on error
+                                                        developer.log(
+                                                          'Failed to remove tags: $e',
+                                                        );
+                                                        if (mounted) {
+                                                          _showSnackBar(
+                                                            'Failed to remove tags',
+                                                          );
+                                                        }
+                                                      }
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.refresh,
+                                                    ),
+                                                    title: const Text(
+                                                      'Force rescan all device images',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      _manualScan(force: true);
+                                                    },
+                                                  ),
+                                                  const Divider(),
+                                                  const Padding(
+                                                    padding:
+                                                        EdgeInsets.symmetric(
+                                                          horizontal: 16,
+                                                          vertical: 8,
+                                                        ),
+                                                    child: Text(
+                                                      'Developer Testing',
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        color: Colors.grey,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.auto_awesome,
+                                                      color: Colors.amber,
+                                                    ),
+                                                    title: const Text(
+                                                      'Test sparkles effect',
+                                                    ),
+                                                    subtitle: const Text(
+                                                      'Simulate "Final touches" animation',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      // Trigger final touches animation by simulating 100%
+                                                      setState(() {
+                                                        _scanning = true;
+                                                        // Ensure we have a valid photo count for the test
+                                                        if (_cachedLocalPhotoCount ==
+                                                            0) {
+                                                          _cachedLocalPhotoCount =
+                                                              100; // Set a dummy count
+                                                        }
+                                                        _scannedCountNotifier
+                                                                .value =
+                                                            _cachedLocalPhotoCount;
+                                                        // Set to 5 seconds ago to immediately trigger the effect
+                                                        _reached100At =
+                                                            DateTime.now()
+                                                                .subtract(
+                                                                  const Duration(
+                                                                    seconds: 5,
+                                                                  ),
+                                                                );
+                                                      });
+
+                                                      // Auto-dismiss after 10 seconds
+                                                      Future.delayed(
+                                                        const Duration(
+                                                          seconds: 10,
+                                                        ),
+                                                        () {
+                                                          if (mounted) {
+                                                            setState(() {
+                                                              _scanning = false;
+                                                              _reached100At =
+                                                                  null;
+                                                            });
+                                                          }
+                                                        },
+                                                      );
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.play_circle,
+                                                      color: Colors.blue,
+                                                    ),
+                                                    title: const Text(
+                                                      'Show intro video',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) =>
+                                                              IntroVideoScreen(
+                                                                onVideoFinished:
+                                                                    () {
+                                                                      Navigator.pop(
+                                                                        context,
+                                                                      );
+                                                                    },
+                                                              ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.info,
+                                                      color: Colors.green,
+                                                    ),
+                                                    title: const Text(
+                                                      'Show onboarding',
+                                                    ),
+                                                    onTap: () {
+                                                      Navigator.pop(ctx);
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) =>
+                                                              OnboardingScreen(
+                                                                onGetStarted: () {
+                                                                  Navigator.pop(
+                                                                    context,
+                                                                  );
+                                                                },
+                                                              ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                  ListTile(
+                                                    leading: const Icon(
+                                                      Icons.cancel,
+                                                    ),
+                                                    title: const Text('Cancel'),
+                                                    onTap: () =>
+                                                        Navigator.pop(ctx),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.close,
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const Divider(
-                                    color: Colors.white24,
-                                    height: 16,
-                                  ),
-                                  _buildPerfStat(
-                                    'RAM Usage',
-                                    '${_currentRamUsageMB.toStringAsFixed(1)} MB',
-                                    Icons.memory,
-                                  ),
-                                  _buildPerfStat(
-                                    'Peak RAM',
-                                    '${_peakRamUsageMB.toStringAsFixed(1)} MB',
-                                    Icons.trending_up,
-                                  ),
-                                  _buildPerfStat(
-                                    'Batch Size',
-                                    '$_currentBatchSize photos',
-                                    Icons.burst_mode,
-                                  ),
-                                  _buildPerfStat(
-                                    'Batch Time',
-                                    '${(_avgBatchTimeMs / 1000).toStringAsFixed(1)}s',
-                                    Icons.timer,
-                                  ),
-                                  _buildPerfStat(
-                                    'Speed',
-                                    '${_imagesPerSecond.toStringAsFixed(1)} img/s',
-                                    Icons.flash_on,
+                                          );
+                                        },
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-      ),
-      // Pricing moved to Settings screen; FAB removed.
-      bottomSheet: showDebug
-          ? Container(
-              color: Colors.black87,
-              height: 240,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Server: ${ApiService.baseUrl}',
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh, color: Colors.white),
-                          onPressed: _loadAllImages,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white),
-                          onPressed: () => setState(() => showDebug = false),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: photoTags.entries
-                              .map(
-                                (e) => Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 2,
-                                  ),
-                                  child: Text(
-                                    '${e.key}: ${e.value.isNotEmpty ? e.value.join(', ') : '(none)'}',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
+
+                          // Scroll to top button
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 105,
+                            child: Center(
+                              child: ValueListenableBuilder<bool>(
+                                valueListenable: _showScrollToTop,
+                                builder: (context, show, child) {
+                                  return AnimatedScale(
+                                    scale: show ? 1.0 : 0.0,
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: show ? 1.0 : 0.0,
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      curve: Curves.easeInOut,
+                                      child: IgnorePointer(
+                                        ignoring: !show,
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: _scrollToTop,
+                                            borderRadius: BorderRadius.circular(
+                                              28,
+                                            ),
+                                            child: Container(
+                                              width: 56,
+                                              height: 56,
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    Colors.lightBlue.shade300,
+                                                shape: BoxShape.circle,
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.2),
+                                                    blurRadius: 8,
+                                                    offset: const Offset(0, 4),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Icon(
+                                                Icons.arrow_upward,
+                                                color: Colors.white,
+                                                size: 28,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+
+                          // Performance Monitor Overlay
+                          if (_scanning && _showPerformanceMonitor)
+                            Positioned(
+                              left: 16,
+                              top: 80,
+                              child: Container(
+                                width: 200,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.lightBlue.shade300,
+                                    width: 2,
                                   ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.lightBlue.shade300
+                                          .withValues(alpha: 0.3),
+                                      blurRadius: 15,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
                                 ),
-                              )
-                              .toList(),
-                        ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.speed,
+                                          color: Colors.lightBlue.shade300,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        const Expanded(
+                                          child: Text(
+                                            'Performance',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () => setState(
+                                            () =>
+                                                _showPerformanceMonitor = false,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.all(2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white24,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                            ),
+                                            child: const Icon(
+                                              Icons.close,
+                                              color: Colors.white,
+                                              size: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const Divider(
+                                      color: Colors.white24,
+                                      height: 16,
+                                    ),
+                                    _buildPerfStat(
+                                      'RAM Usage',
+                                      '${_currentRamUsageMB.toStringAsFixed(1)} MB',
+                                      Icons.memory,
+                                    ),
+                                    _buildPerfStat(
+                                      'Peak RAM',
+                                      '${_peakRamUsageMB.toStringAsFixed(1)} MB',
+                                      Icons.trending_up,
+                                    ),
+                                    _buildPerfStat(
+                                      'Batch Size',
+                                      '$_currentBatchSize photos',
+                                      Icons.burst_mode,
+                                    ),
+                                    _buildPerfStat(
+                                      'Batch Time',
+                                      '${(_avgBatchTimeMs / 1000).toStringAsFixed(1)}s',
+                                      Icons.timer,
+                                    ),
+                                    _buildPerfStat(
+                                      'Speed',
+                                      '${_imagesPerSecond.toStringAsFixed(1)} img/s',
+                                      Icons.flash_on,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            )
-          : null,
+        ),
+        // Pricing moved to Settings screen; FAB removed.
+        bottomSheet: showDebug
+            ? Container(
+                color: Colors.black87,
+                height: 240,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Server: ${ApiService.baseUrl}',
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.refresh,
+                              color: Colors.white,
+                            ),
+                            onPressed: _loadAllImages,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () => setState(() => showDebug = false),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: photoTags.entries
+                                .map(
+                                  (e) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    child: Text(
+                                      '${e.key}: ${e.value.isNotEmpty ? e.value.join(', ') : '(none)'}',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
