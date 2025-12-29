@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/snackbar_helper.dart';
 
@@ -121,6 +122,7 @@ class _PricingScreenState extends State<PricingScreen> {
     required List<String> bullets,
     required Color color,
     required VoidCallback onTap,
+    bool enabled = true,
   }) {
     return Card(
       elevation: 6,
@@ -173,9 +175,9 @@ class _PricingScreenState extends State<PricingScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: onTap,
+                onPressed: enabled ? onTap : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: color,
+                  backgroundColor: enabled ? color : Colors.grey.shade400,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -196,10 +198,11 @@ class _PricingScreenState extends State<PricingScreen> {
     BuildContext context,
     String label,
     String price,
-    VoidCallback onTap,
-  ) {
+    VoidCallback onTap, [
+    bool enabled = true,
+  ]) {
     return ElevatedButton(
-      onPressed: onTap,
+      onPressed: enabled ? onTap : null,
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.white,
         elevation: 2,
@@ -226,6 +229,8 @@ class _PricingScreenState extends State<PricingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool canPurchase =
+        !kReleaseMode; // Disable purchases in release builds until Billing is integrated
     return Scaffold(
       appBar: AppBar(
         title: const Text('Plans & Credits'),
@@ -253,6 +258,20 @@ class _PricingScreenState extends State<PricingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Compliance note: purchases are simulated. Implement Google Play Billing before enabling.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blueGrey.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'Note: Purchase flows are simulated for development. Real purchases of digital goods must use Google Play Billing before release.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
               const Text(
                 'Simple Pricing',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -336,6 +355,7 @@ class _PricingScreenState extends State<PricingScreen> {
                 onTap: () => ScaffoldMessenger.of(
                   context,
                 ).showSnackBar(createStyledSnackBar('You are on Free plan')),
+                enabled: true,
               ),
               const SizedBox(height: 12),
 
@@ -353,6 +373,7 @@ class _PricingScreenState extends State<PricingScreen> {
                 onTap: () => ScaffoldMessenger.of(
                   context,
                 ).showSnackBar(createStyledSnackBar('Pro unlock simulated')),
+                enabled: canPurchase,
               ),
               const SizedBox(height: 12),
 
@@ -371,6 +392,7 @@ class _PricingScreenState extends State<PricingScreen> {
                 onTap: () => ScaffoldMessenger.of(context).showSnackBar(
                   createStyledSnackBar('Subscription flow simulated'),
                 ),
+                enabled: canPurchase,
               ),
 
               const SizedBox(height: 18),
@@ -411,7 +433,7 @@ class _PricingScreenState extends State<PricingScreen> {
                 scaffoldMessenger.showSnackBar(
                   createStyledSnackBar('Bought 10 credits (simulated)'),
                 );
-              }),
+              }, canPurchase),
               const SizedBox(height: 8),
               _buildCreditsRow(
                 context,
@@ -426,6 +448,7 @@ class _PricingScreenState extends State<PricingScreen> {
                     createStyledSnackBar('Bought 50 credits (simulated)'),
                   );
                 },
+                canPurchase,
               ),
               const SizedBox(height: 8),
               _buildCreditsRow(
@@ -441,6 +464,7 @@ class _PricingScreenState extends State<PricingScreen> {
                     createStyledSnackBar('Bought 200 credits (simulated)'),
                   );
                 },
+                canPurchase,
               ),
 
               const SizedBox(height: 20),

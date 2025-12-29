@@ -3,6 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'pricing_screen.dart';
 import 'trash_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../config/app_links.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -24,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   late bool _scanOnWifi;
   late bool _autoscanAutoStart;
+  bool _uploadConsent = false;
   bool _serverOnline = false;
   bool _checkingServer = false;
   String _serverUrl = '';
@@ -41,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _scanOnWifi = prefs.getBool('scan_on_wifi_only') ?? true;
       _autoscanAutoStart = prefs.getBool('autoscan_auto_start') ?? false;
+      _uploadConsent = prefs.getBool('server_upload_consent') ?? false;
     });
   }
 
@@ -52,6 +57,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveAutoscanAutoStart(bool val) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('autoscan_auto_start', val);
+  }
+
+  Future<void> _saveUploadConsent(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('server_upload_consent', val);
   }
 
   Future<void> _checkServerStatus() async {
@@ -193,6 +203,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          if (_serverUrl.startsWith('http://') &&
+              !(_serverUrl.contains('localhost') ||
+                  _serverUrl.contains('127.0.0.1') ||
+                  _serverUrl.contains('10.0.2.2') ||
+                  _serverUrl.contains('192.168.')))
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                border: Border.all(color: Colors.orange),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Warning: Using an HTTP server on the public internet. For Play Store compliance and security, prefer HTTPS for remote servers.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
           SwitchListTile(
             title: const Text('Scan photos only on Wi‑Fi'),
             subtitle: const Text(
@@ -216,6 +244,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _saveAutoscanAutoStart(v);
             },
             secondary: const Icon(Icons.playlist_play),
+          ),
+          SwitchListTile(
+            title: const Text('Allow server uploads'),
+            subtitle: const Text(
+              'Upload selected photos to your configured server for enhanced AI tags',
+            ),
+            value: _uploadConsent,
+            onChanged: (v) async {
+              setState(() => _uploadConsent = v);
+              await _saveUploadConsent(v);
+            },
+            secondary: const Icon(Icons.cloud_upload_outlined),
           ),
           const Divider(),
           const Padding(
@@ -247,6 +287,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: Colors.grey,
               ),
             ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: const Text('Privacy Policy'),
+            subtitle: const Text('Learn how your data is handled'),
+            onTap: () {
+              final url = AppLinks.kPrivacyPolicyUrl.trim();
+              if (url.isNotEmpty) {
+                final uri = Uri.parse(url);
+                launchUrl(uri, mode: LaunchMode.externalApplication)
+                    .then((ok) {
+                      if (!ok) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PrivacyPolicyScreen(),
+                          ),
+                        );
+                      }
+                    })
+                    .catchError((_) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const PrivacyPolicyScreen(),
+                        ),
+                      );
+                    });
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacyPolicyScreen(),
+                  ),
+                );
+              }
+            },
           ),
           const Divider(),
           ListTile(

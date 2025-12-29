@@ -58682,5 +58682,115 @@
     "all_detections": [
       "document"
     ]
+  },
+  "1000078492": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-29T16:31:03.581366Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078487": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-29T16:31:03.645241Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078485": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-29T16:31:03.708419Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
+  },
+  "1000078479": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-29T16:31:03.786270Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078475": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-29T16:31:03.843148Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078473": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-29T16:31:03.900819Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078471": {
+    "tags": [
+      "other"
+    ],
+    "last_updated": "2025-12-29T16:31:03.953782Z",
+    "source": "classifier",
+    "all_detections": [
+      "other"
+    ]
+  },
+  "1000078456": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-29T16:31:04.002840Z",
+    "source": "classifier",
+    "all_detections": [
+      "dining table"
+    ]
+  },
+  "1000078455": {
+    "tags": [
+      "food"
+    ],
+    "last_updated": "2025-12-29T16:31:04.053771Z",
+    "source": "classifier",
+    "all_detections": [
+      "oven"
+    ]
+  },
+  "1000078438": {
+    "tags": [
+      "document"
+    ],
+    "last_updated": "2025-12-29T16:31:04.100134Z",
+    "source": "classifier",
+    "all_detections": [
+      "document"
+    ]
+  },
+  "1000078497": {
+    "tags": [
+      "animals"
+    ],
+    "last_updated": "2025-12-29T16:33:43.659142Z",
+    "source": "classifier",
+    "all_detections": [
+      "person"
+    ]
   }
 }

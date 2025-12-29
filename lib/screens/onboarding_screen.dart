@@ -125,6 +125,16 @@ class OnboardingScreen extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 32),
+                // AI limitation note for safety
+                Text(
+                  'Note: AI tagging may be inaccurate. Please review results.',
+                  style: GoogleFonts.roboto(
+                    fontSize: 12,
+                    color: Colors.white.withValues(alpha: 0.9),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
               ],
             ),
           ),

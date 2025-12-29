@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:vector_math/vector_math_64.dart' as vm;
 import '../services/api_service.dart';
 
 /// Data class for a photo in the gallery viewer
@@ -462,9 +463,9 @@ class _PhotoViewerState extends State<PhotoViewer>
         // Not zoomed - animate to 2x at center
         final center = MediaQuery.of(context).size.center(Offset.zero);
         targetMatrix = Matrix4.identity()
-          ..translate(center.dx, center.dy)
-          ..scale(2.0)
-          ..translate(-center.dx, -center.dy);
+          ..translateByVector3(vm.Vector3(center.dx, center.dy, 0))
+          ..scaleByVector3(vm.Vector3(2.0, 2.0, 2.0))
+          ..translateByVector3(vm.Vector3(-center.dx, -center.dy, 0));
         willBeZoomed = true;
       }
 

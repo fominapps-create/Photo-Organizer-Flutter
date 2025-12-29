@@ -6,17 +6,15 @@ import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'dart:convert';
 import 'dart:developer' as developer;
-import 'dart:ui';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/photo_id.dart';
 import '../services/tag_store.dart';
 import '../services/trash_store.dart';
 import '../services/api_service.dart';
+import '../services/tagging_service_factory.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:path/path.dart' as p;
-import 'album_screen.dart';
 import 'photo_viewer.dart';
 import 'intro_video_screen.dart';
 import 'onboarding_screen.dart';
@@ -46,7 +44,10 @@ class GalleryScreen extends StatefulWidget {
 }
 
 class GalleryScreenState extends State<GalleryScreen>
-    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+    with
+        SingleTickerProviderStateMixin,
+        AutomaticKeepAliveClientMixin,
+        WidgetsBindingObserver {
   @override
   bool get wantKeepAlive => true;
   List<String> imageUrls = [];
@@ -136,6 +137,9 @@ class GalleryScreenState extends State<GalleryScreen>
   String _currentScrollYear = '';
   final bool _scanPaused = false;
   Set<String> _trashedIds = {};
+
+  /// Queue of photo IDs waiting to be scanned (added while scan was in progress)
+  final List<String> _pendingScanQueue = [];
 
   /// Refresh the trashed IDs cache - call this after restoring photos from trash
   Future<void> refreshTrashedIds() async {
@@ -858,16 +862,67 @@ class GalleryScreenState extends State<GalleryScreen>
     _loadAllImages();
     _loadAlbums();
 
-    // Listen to native photo changes instead of polling
+    // Use PhotoManager's built-in change notification (more reliable than custom ContentObserver)
+    PhotoManager.addChangeCallback(_onPhotoLibraryChanged);
+    PhotoManager.startChangeNotify();
+    developer.log('📸 PhotoManager change notify started');
+
+    // Also keep native listener as backup
     _photoChangesSubscription = _photoChangesChannel
         .receiveBroadcastStream()
-        .listen((event) async {
-          developer.log('📸 Photo library changed (native event)');
-          // Only check if not actively scanning to avoid conflicts
-          if (!_scanning && !_validating) {
+        .listen(
+          (event) async {
+            developer.log('📸 Photo library changed (native event): $event');
+
+            // Debounce: wait a moment for multiple rapid changes to settle
+            await Future.delayed(const Duration(milliseconds: 500));
+
+            // Always check for new photos, even during scanning
+            // New photos will be added to queue and scanned after current batch
             await _checkForGalleryChanges();
-          }
-        });
+          },
+          onError: (error) {
+            developer.log('❌ Photo changes channel error: $error');
+            // Start fallback polling if native listener fails
+            _startFallbackPolling();
+          },
+          onDone: () {
+            developer.log('📸 Photo changes channel closed');
+          },
+        );
+    developer.log('📸 Photo changes listener registered');
+
+    // Register lifecycle observer to detect when app returns from background
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Callback for PhotoManager change notifications
+  DateTime? _lastPhotoChangeTime;
+
+  void _onPhotoLibraryChanged(MethodCall call) {
+    developer.log('📸 PhotoManager change callback: ${call.method}');
+
+    // Debounce rapid changes
+    final now = DateTime.now();
+    if (_lastPhotoChangeTime != null &&
+        now.difference(_lastPhotoChangeTime!).inMilliseconds < 500) {
+      developer.log('📸 Debouncing rapid photo change');
+      return;
+    }
+    _lastPhotoChangeTime = now;
+
+    // Check for new photos
+    _checkForGalleryChanges();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      developer.log('📸 App resumed - checking for new photos');
+      // Check for new photos when app comes back from background
+      _checkForGalleryChanges();
+    }
   }
 
   @override
@@ -958,7 +1013,7 @@ class GalleryScreenState extends State<GalleryScreen>
     // Don't sync during tag clearing - the server DB was just wiped
     if (_clearingTags) return;
 
-    ApiService.pingServer(timeout: const Duration(seconds: 2)).then((online) {
+    ApiService.pingServer(timeout: const Duration(seconds: 1)).then((online) {
       if (online && mounted && !_clearingTags) {
         _syncTagsFromServer().then((_) {
           if (mounted) setState(() {});
@@ -1461,6 +1516,92 @@ class GalleryScreenState extends State<GalleryScreen>
     return allTags;
   }
 
+  /// Quick scan for just-added photos (skip tag store checks, minimal delay)
+  Future<void> _scanNewPhotosOnly(List<String> newAssetIds) async {
+    if (newAssetIds.isEmpty) {
+      developer.log('⚡ _scanNewPhotosOnly called with empty list, returning');
+      return;
+    }
+
+    developer.log(
+      '⚡ _scanNewPhotosOnly called with ${newAssetIds.length} photos',
+    );
+    developer.log('   _scanning=$_scanning, _clearingTags=$_clearingTags');
+
+    // If scan is in progress, queue these photos for later
+    if (_scanning || _clearingTags) {
+      developer.log(
+        '⏳ Scan in progress, queuing ${newAssetIds.length} photos for later',
+      );
+      _pendingScanQueue.addAll(newAssetIds);
+      developer.log('   Queue now has ${_pendingScanQueue.length} photos');
+      return;
+    }
+
+    developer.log(
+      '⚡ Starting quick scan for ${newAssetIds.length} new photos (no queue)',
+    );
+
+    final toScan = newAssetIds.map((id) => 'local:$id').toList();
+
+    // Reset validation since we're adding new photos
+    _validationComplete = false;
+    _hasScannedAtLeastOneBatch = false;
+
+    setState(() {
+      _scanning = true;
+      _scanTotal = toScan.length;
+      _scanProcessed = 0;
+      _scanProgress = 0.0;
+      _displayProgress = 0.0;
+      _targetProgress = 0.0;
+    });
+
+    _scannedCountNotifier.value = photoTags.length;
+
+    await _scanImages(toScan);
+
+    developer.log('⚡ Quick scan completed, setting _scanning=false');
+
+    setState(() {
+      _scanning = false;
+      _scanProgress = 0.0;
+      _scanTotal = 0;
+    });
+
+    developer.log(
+      '⚡ Post-scan: _hasScannedAtLeastOneBatch=$_hasScannedAtLeastOneBatch, _validationComplete=$_validationComplete',
+    );
+
+    // Check if there are queued photos that arrived during scan
+    if (_pendingScanQueue.isNotEmpty) {
+      developer.log('📋 Processing ${_pendingScanQueue.length} queued photos');
+      final queued = List<String>.from(_pendingScanQueue);
+      _pendingScanQueue.clear();
+      // Schedule scan for queued photos (don't await to avoid blocking)
+      Future.microtask(() => _scanNewPhotosOnly(queued));
+      return; // Don't show "ready" yet, more scanning to do
+    }
+
+    // Mark validation complete for local ML Kit mode (no server validation needed)
+    if (!_validationComplete && _hasScannedAtLeastOneBatch) {
+      developer.log(
+        '✅ Quick scan complete, marking validation complete for local mode',
+      );
+      setState(() {
+        _validationComplete = true;
+      });
+    }
+
+    if (!_validating) {
+      _dotAnimationTimer?.cancel();
+      _dotAnimationTimer = null;
+      if (_validationComplete && _hasScannedAtLeastOneBatch) {
+        _showGalleryReadyMessage();
+      }
+    }
+  }
+
   Future<void> _startAutoScanIfNeeded() async {
     developer.log('🎯 _startAutoScanIfNeeded() ENTRY');
     // Only scan if there are local images and we aren't already scanning
@@ -1486,17 +1627,16 @@ class GalleryScreenState extends State<GalleryScreen>
       '🔌 Checking server connectivity at ${ApiService.baseUrl}...',
     );
     final serverAvailable = await ApiService.pingServer(
-      timeout: const Duration(seconds: 3),
-      retries: 1,
+      timeout: const Duration(seconds: 1),
+      retries: 0,
     );
     if (!serverAvailable) {
       developer.log(
-        '⚠️ Server not available at ${ApiService.baseUrl}, skipping auto-scan (will retry automatically)',
+        '📱 Server not available - will use LOCAL ML Kit for scanning',
       );
-      // Silent - auto-retry timer will check again in 30 seconds
-      return;
+    } else {
+      developer.log('✅ Server available - will use cloud processing');
     }
-    developer.log('✅ Server available!');
 
     // Only consider images that have no persisted scan entry OR have empty tags.
     // Check using canonical photoID keys from TagStore (bulk check for speed)
@@ -1552,6 +1692,25 @@ class GalleryScreenState extends State<GalleryScreen>
           '🚀 All scanned but not validated. Checking for YOLO-classified photos...',
         );
 
+        // Check if server is available for CLIP validation
+        final serverAvailable = await ApiService.pingServer(
+          timeout: const Duration(seconds: 1),
+          retries: 0,
+        );
+
+        if (!serverAvailable) {
+          // Server offline - CLIP validation not possible, mark as complete
+          developer.log(
+            '📱 Server offline - CLIP validation not possible, marking complete',
+          );
+          setState(() {
+            _validationComplete = true;
+          });
+          _dotAnimationTimer?.cancel();
+          _dotAnimationTimer = null;
+          return;
+        }
+
         // Quick check: do we have any YOLO-classified images?
         bool hasYoloImages = false;
         const yoloCategories = {'people', 'animals', 'food'};
@@ -1578,17 +1737,18 @@ class GalleryScreenState extends State<GalleryScreen>
             '📸 Found YOLO-classified photos. Starting validation...',
           );
           _validateAllClassifications();
-        } else if (_hasScannedAtLeastOneBatch) {
+        } else {
+          // No YOLO images = local ML Kit mode or all non-YOLO tags
+          // Mark validation complete since there's nothing to validate
           developer.log(
             '✅ No YOLO-classified photos found. Marking validation as complete.',
           );
           setState(() {
             _validationComplete = true;
           });
-        } else {
-          developer.log(
-            '⚠️ No YOLO photos but also no batches scanned - NOT marking complete',
-          );
+          // Cancel dot animation
+          _dotAnimationTimer?.cancel();
+          _dotAnimationTimer = null;
         }
       } else {
         developer.log(
@@ -1641,6 +1801,17 @@ class GalleryScreenState extends State<GalleryScreen>
       _scanTotal = 0;
     });
 
+    // Check if there are queued photos that arrived during scan
+    if (_pendingScanQueue.isNotEmpty) {
+      developer.log(
+        '📋 Processing ${_pendingScanQueue.length} queued photos after auto-scan',
+      );
+      final queued = List<String>.from(_pendingScanQueue);
+      _pendingScanQueue.clear();
+      Future.microtask(() => _scanNewPhotosOnly(queued));
+      return; // Don't show "ready" yet, more scanning to do
+    }
+
     // Cancel dot animation if validation is also complete
     if (!_validating) {
       _dotAnimationTimer?.cancel();
@@ -1672,13 +1843,13 @@ class GalleryScreenState extends State<GalleryScreen>
 
     // Check server connectivity first
     final serverAvailable = await ApiService.pingServer(
-      timeout: const Duration(seconds: 3),
-      retries: 1,
+      timeout: const Duration(seconds: 1),
+      retries: 0,
     );
     if (!serverAvailable) {
-      developer.log('⚠️ Server offline, manual scan aborted (silent)');
-      // Silent - auto-retry timer will check again
-      return;
+      developer.log('📱 Server offline, will use LOCAL ML Kit for scanning');
+    } else {
+      developer.log('✅ Server available, will use cloud processing');
     }
 
     final localUrls = imageUrls
@@ -1756,6 +1927,17 @@ class GalleryScreenState extends State<GalleryScreen>
       _scanProcessed = 0;
     });
 
+    // Check if there are queued photos that arrived during scan
+    if (_pendingScanQueue.isNotEmpty) {
+      developer.log(
+        '📋 Processing ${_pendingScanQueue.length} queued photos after manual scan',
+      );
+      final queued = List<String>.from(_pendingScanQueue);
+      _pendingScanQueue.clear();
+      Future.microtask(() => _scanNewPhotosOnly(queued));
+      return; // Don't show "ready" yet, more scanning to do
+    }
+
     // After scan completes, mark as validation complete (YOLO-only scan doesn't need CLIP validation)
     // BUT only if we actually scanned photos - don't complete if scan failed/aborted
     if (mounted && !_validationComplete && _hasScannedAtLeastOneBatch) {
@@ -1823,14 +2005,24 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log('📡 Checking server connectivity...');
     // Check server connectivity first
     final serverAvailable = await ApiService.pingServer(
-      timeout: const Duration(seconds: 3),
-      retries: 1,
+      timeout: const Duration(seconds: 1),
+      retries: 0,
     );
     if (!serverAvailable) {
-      if (!mounted) return;
-      // Silent - settings indicator shows server status
-      developer.log('⚠️ Server offline, rescan aborted silently');
+      developer.log(
+        '📱 Server offline - CLIP validation requires server, skipping validation',
+      );
+      // CLIP validation requires server - mark as complete when offline
+      setState(() {
+        _validating = false;
+        _validationComplete = true;
+      });
+      // Cancel dot animation
+      _dotAnimationTimer?.cancel();
+      _dotAnimationTimer = null;
       return;
+    } else {
+      developer.log('✅ Server available, will use cloud processing');
     }
 
     final localUrls = imageUrls
@@ -2053,6 +2245,15 @@ class GalleryScreenState extends State<GalleryScreen>
       _runBackgroundValidation(yoloClassifiedImages);
     } else if (_validating) {
       developer.log('✅ Validation already running in parallel - continuing...');
+    } else if (yoloClassifiedImages.isEmpty && mounted) {
+      // LOCAL ML KIT MODE: No YOLO images = no validation needed
+      // Mark validation as complete immediately
+      developer.log(
+        '✅ Local ML Kit mode - no validation needed, marking complete',
+      );
+      setState(() {
+        _validationComplete = true;
+      });
     }
   }
 
@@ -2095,29 +2296,19 @@ class GalleryScreenState extends State<GalleryScreen>
     try {
       final assetLoadStartTime = DateTime.now();
       // Load files in parallel for maximum speed
-      // Use thumbnails (1024px) for large images, original for small ones
+      // Use small thumbnails for ML Kit (512px is plenty - it uses 224x224 internally)
       final fileLoadFutures = batch.map((u) async {
         Uint8List? imageBytes;
         if (u.startsWith('local:')) {
           final id = u.substring('local:'.length);
           final asset = _localAssets[id];
           if (asset != null) {
-            // Check if image is already small - if so, use original to preserve quality
-            final width = asset.width;
-            final height = asset.height;
-            final maxDimension = width > height ? width : height;
-
-            if (maxDimension <= 1024) {
-              // Small image - use original bytes to preserve quality
-              imageBytes = await asset.originBytes;
-            } else {
-              // Large image - use 1024px thumbnail for speed
-              // CLIP uses 224x224 internally, so 1024px is plenty
-              imageBytes = await asset.thumbnailDataWithSize(
-                const ThumbnailSize(1024, 1024),
-                quality: 85,
-              );
-            }
+            // Always use 512px thumbnail for scanning - much faster than full image
+            // ML Kit image labeling only needs enough detail to recognize objects
+            imageBytes = await asset.thumbnailDataWithSize(
+              const ThumbnailSize(512, 512),
+              quality: 75,
+            );
           }
         } else if (u.startsWith('file:')) {
           final path = u.substring('file:'.length);
@@ -2174,122 +2365,226 @@ class GalleryScreenState extends State<GalleryScreen>
         '📦 TOTAL file prep: ${prepDuration}ms for ${batchItems.length} files',
       );
 
-      // Upload batch
+      // Process batch - use local ML Kit or cloud API depending on availability
       final uploadStartTime = DateTime.now();
-      developer.log(
-        '📤 BATCH $batchNumber: Starting upload/server processing...',
-      );
 
-      final res = await ApiService.uploadImagesBatch(batchItems);
+      // Check if server is available
+      final serverAvailable = await TaggingServiceFactory.isServerAvailable();
 
-      final uploadEndTime = DateTime.now();
-      final uploadDuration = uploadEndTime
-          .difference(uploadStartTime)
-          .inMilliseconds;
-      developer.log(
-        '📤 BATCH $batchNumber: Upload + server processing took ${uploadDuration}ms',
-      );
-
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        try {
-          final parseStartTime = DateTime.now();
-          final body = json.decode(res.body);
-          final parseEndTime = DateTime.now();
-          developer.log(
-            '🔍 JSON parse took ${parseEndTime.difference(parseStartTime).inMilliseconds}ms',
+      if (serverAvailable) {
+        developer.log(
+          '📤 BATCH $batchNumber: Server available, using cloud processing...',
+        );
+        // One-time consent gate for server uploads
+        final prefs = await SharedPreferences.getInstance();
+        final consent = prefs.getBool('server_upload_consent') ?? false;
+        if (!consent) {
+          final allow = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Enable Server Uploads?'),
+              content: const Text(
+                'Allow sending selected photos to your server for AI tags. You can change this anytime in Settings.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('No'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Yes'),
+                ),
+              ],
+            ),
           );
+          if (allow != true) {
+            developer.log('Upload cancelled — consent not granted');
+            setState(() {
+              _scanning = false;
+            });
+            return;
+          }
+          await prefs.setBool('server_upload_consent', true);
+        }
 
-          // Response format: {"results": [{"photoID": "...", "tags": [...]}, ...]}
-          if (body is Map && body['results'] is List) {
-            final results = body['results'] as List;
-            final batchTagsToSave = <String, List<String>>{};
-            final batchDetectionsToSave = <String, List<String>>{};
+        final res = await ApiService.uploadImagesBatch(batchItems);
 
-            // Check for pause before processing results
-            while (_scanPaused && _scanning) {
-              developer.log('⏸️  Batch paused before processing results...');
-              await Future.delayed(const Duration(milliseconds: 200));
-              if (!mounted || !_scanning) return;
-            }
+        final uploadEndTime = DateTime.now();
+        final uploadDuration = uploadEndTime
+            .difference(uploadStartTime)
+            .inMilliseconds;
+        developer.log(
+          '📤 BATCH $batchNumber: Upload + server processing took ${uploadDuration}ms',
+        );
 
-            final processingStartTime = DateTime.now();
-            for (var i = 0; i < results.length && i < batchUrls.length; i++) {
-              final result = results[i];
-              final url = batchUrls[i];
-              final basename = p.basename(url);
-              final photoID = PhotoId.canonicalId(url);
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try {
+            final parseStartTime = DateTime.now();
+            final body = json.decode(res.body);
+            final parseEndTime = DateTime.now();
+            developer.log(
+              '🔍 JSON parse took ${parseEndTime.difference(parseStartTime).inMilliseconds}ms',
+            );
 
-              List<String> tags = [];
-              List<String> allDetections = [];
-              if (result is Map && result['tags'] is List) {
-                tags = (result['tags'] as List).cast<String>();
+            // Response format: {"results": [{"photoID": "...", "tags": [...]}, ...]}
+            if (body is Map && body['results'] is List) {
+              final results = body['results'] as List;
+              final batchTagsToSave = <String, List<String>>{};
+              final batchDetectionsToSave = <String, List<String>>{};
+
+              // Check for pause before processing results
+              while (_scanPaused && _scanning) {
+                developer.log('⏸️  Batch paused before processing results...');
+                await Future.delayed(const Duration(milliseconds: 200));
+                if (!mounted || !_scanning) return;
               }
-              // Store all detections if available (includes small objects)
-              if (result is Map && result['all_detections'] is List) {
-                allDetections = (result['all_detections'] as List)
-                    .cast<String>();
-              } else {
-                // Fallback: if no separate all_detections, use tags
-                allDetections = List.from(tags);
-              }
 
-              // Update in-memory tags and detections
-              photoTags[basename] = tags;
-              photoAllDetections[basename] = allDetections;
-              batchTagsToSave[photoID] = tags;
-              batchDetectionsToSave[photoID] = allDetections;
-              // Update scanned count notifier for live UI updates
-              _scannedCountNotifier.value = photoTags.length;
-              developer.log(
-                '📊 Updated _scannedCountNotifier to ${photoTags.length}',
-              );
+              final processingStartTime = DateTime.now();
+              for (var i = 0; i < results.length && i < batchUrls.length; i++) {
+                final result = results[i];
+                final url = batchUrls[i];
+                final basename = p.basename(url);
+                final photoID = PhotoId.canonicalId(url);
 
-              if (tags.isNotEmpty) {
-                developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
+                List<String> tags = [];
+                List<String> allDetections = [];
+                if (result is Map && result['tags'] is List) {
+                  tags = (result['tags'] as List).cast<String>();
+                }
+                // Store all detections if available (includes small objects)
+                if (result is Map && result['all_detections'] is List) {
+                  allDetections = (result['all_detections'] as List)
+                      .cast<String>();
+                } else {
+                  // Fallback: if no separate all_detections, use tags
+                  allDetections = List.from(tags);
+                }
 
-                // Track for background validation (only non-empty tags)
-                if (i < batchItems.length) {
-                  yoloClassifiedImages.add({
-                    'file': batchItems[i]['file'],
-                    'url': url,
-                    'tags': tags,
-                    'photoID': photoID,
-                  });
+                // Update in-memory tags and detections
+                photoTags[basename] = tags;
+                photoAllDetections[basename] = allDetections;
+                batchTagsToSave[photoID] = tags;
+                batchDetectionsToSave[photoID] = allDetections;
+                // Update scanned count notifier for live UI updates
+                _scannedCountNotifier.value = photoTags.length;
+                developer.log(
+                  '📊 Updated _scannedCountNotifier to ${photoTags.length}',
+                );
+
+                if (tags.isNotEmpty) {
+                  developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
+
+                  // Track for background validation (only non-empty tags)
+                  if (i < batchItems.length) {
+                    yoloClassifiedImages.add({
+                      'file': batchItems[i]['file'],
+                      'url': url,
+                      'tags': tags,
+                      'photoID': photoID,
+                    });
+                  }
                 }
               }
+              final processingEndTime = DateTime.now();
+              developer.log(
+                '🔄 Tag processing took ${processingEndTime.difference(processingStartTime).inMilliseconds}ms',
+              );
+
+              // Save all tags in one batch operation (much faster)
+              final saveStartTime = DateTime.now();
+              await TagStore.saveLocalTagsBatch(batchTagsToSave);
+              await TagStore.saveLocalDetectionsBatch(batchDetectionsToSave);
+              final saveEndTime = DateTime.now();
+              developer.log(
+                '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
+              );
+
+              // Mark that at least one batch was scanned (enables validation)
+              _hasScannedAtLeastOneBatch = true;
+
+              // Trigger UI refresh to show new tags on photos
+              if (mounted) {
+                developer.log('🔄 Triggering setState after batch save');
+                // Also invalidate filter cache so tags appear on grid
+                _lastPhotoTagsLength = -1;
+                setState(() {});
+              }
             }
-            final processingEndTime = DateTime.now();
-            developer.log(
-              '🔄 Tag processing took ${processingEndTime.difference(processingStartTime).inMilliseconds}ms',
-            );
-
-            // Save all tags in one batch operation (much faster)
-            final saveStartTime = DateTime.now();
-            await TagStore.saveLocalTagsBatch(batchTagsToSave);
-            await TagStore.saveLocalDetectionsBatch(batchDetectionsToSave);
-            final saveEndTime = DateTime.now();
-            developer.log(
-              '💾 Tag save took ${saveEndTime.difference(saveStartTime).inMilliseconds}ms for ${batchTagsToSave.length} photos',
-            );
-
-            // Mark that at least one batch was scanned (enables validation)
-            _hasScannedAtLeastOneBatch = true;
-
-            // Trigger UI refresh to show new tags on photos
-            if (mounted) {
-              developer.log('🔄 Triggering setState after batch save');
-              // Also invalidate filter cache so tags appear on grid
-              _lastPhotoTagsLength = -1;
-              setState(() {});
-            }
+          } catch (e) {
+            developer.log('Failed parsing batch response: $e');
+            // Don't save empty tags on failure - leave photos unscanned for retry
           }
-        } catch (e) {
-          developer.log('Failed parsing batch response: $e');
+        } else {
+          developer.log('Batch scan failed: status=${res.statusCode}');
           // Don't save empty tags on failure - leave photos unscanned for retry
         }
       } else {
-        developer.log('Batch scan failed: status=${res.statusCode}');
-        // Don't save empty tags on failure - leave photos unscanned for retry
+        // LOCAL PROCESSING: No server available, use on-device ML Kit
+        developer.log(
+          '📱 BATCH $batchNumber: No server, using LOCAL ML Kit processing...',
+        );
+
+        // Prepare inputs for local tagging
+        final taggingInputs = <TaggingInput>[];
+        for (var i = 0; i < batchItems.length; i++) {
+          taggingInputs.add(
+            TaggingInput(
+              photoID: batchItems[i]['photoID'] as String,
+              bytes: batchItems[i]['file'] as Uint8List?,
+            ),
+          );
+        }
+
+        // Process with local ML Kit
+        final localResults = await TaggingServiceFactory.tagImageBatch(
+          items: taggingInputs,
+          preferLocal: true,
+        );
+
+        final uploadEndTime = DateTime.now();
+        final uploadDuration = uploadEndTime
+            .difference(uploadStartTime)
+            .inMilliseconds;
+        developer.log(
+          '📱 BATCH $batchNumber: Local ML Kit processing took ${uploadDuration}ms',
+        );
+
+        // Process results same as cloud
+        final batchTagsToSave = <String, List<String>>{};
+        final batchDetectionsToSave = <String, List<String>>{};
+
+        for (var i = 0; i < batchUrls.length; i++) {
+          final url = batchUrls[i];
+          final basename = p.basename(url);
+          final photoID = PhotoId.canonicalId(url);
+
+          final result = localResults[photoID];
+          final tags = result?.tags ?? ['other'];
+          final allDetections = result?.allDetections ?? tags;
+
+          photoTags[basename] = tags;
+          photoAllDetections[basename] = allDetections;
+          batchTagsToSave[photoID] = tags;
+          batchDetectionsToSave[photoID] = allDetections;
+          _scannedCountNotifier.value = photoTags.length;
+
+          if (tags.isNotEmpty && tags.first != 'other') {
+            developer.log(
+              '✅ [LOCAL] Tagged $basename with: ${tags.join(", ")}',
+            );
+          }
+        }
+
+        // Save tags
+        await TagStore.saveLocalTagsBatch(batchTagsToSave);
+        await TagStore.saveLocalDetectionsBatch(batchDetectionsToSave);
+        _hasScannedAtLeastOneBatch = true;
+
+        if (mounted) {
+          _lastPhotoTagsLength = -1;
+          setState(() {});
+        }
       }
     } catch (e) {
       developer.log('Batch scan error: $e');
@@ -3222,35 +3517,133 @@ class GalleryScreenState extends State<GalleryScreen>
     }
   }
 
+  /// Fallback polling for photo changes when native listener fails
+  Timer? _fallbackPollingTimer;
+
+  void _startFallbackPolling() {
+    // Cancel any existing timer
+    _fallbackPollingTimer?.cancel();
+
+    developer.log('📸 Starting fallback polling for photo changes (every 10s)');
+
+    // Poll every 10 seconds as a fallback
+    _fallbackPollingTimer = Timer.periodic(const Duration(seconds: 10), (
+      _,
+    ) async {
+      if (mounted) {
+        await _checkForGalleryChanges();
+      }
+    });
+  }
+
   /// Check for new or deleted photos and update incrementally (no full reload)
   Future<void> _checkForGalleryChanges() async {
     try {
+      developer.log('📸 Checking for gallery changes...');
+
       // Get current device photos without clearing existing data
       final perm = await PhotoManager.requestPermissionExtend();
       if (!perm.isAuth && perm != PermissionState.limited) {
+        developer.log('📸 No permission to check gallery');
         return; // No permission, skip check
       }
 
+      // Get fresh album list (this fetches fresh data from system)
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.image,
         hasAll: true,
-        onlyAll: false,
+        onlyAll: true,
       );
 
-      if (albums.isEmpty) return;
+      if (albums.isEmpty) {
+        developer.log('📸 No albums found');
+        return;
+      }
 
-      // Collect all current device photos
+      // Only check the main "All" album (fastest)
+      // Use fetchPathProperties to get FRESH data (bypasses cache)
+      final allAlbum = albums.first;
+      final refreshedAlbum = await allAlbum.fetchPathProperties(
+        filterOptionGroup: FilterOptionGroup(
+          imageOption: FilterOption(
+            sizeConstraint: SizeConstraint(ignoreSize: true),
+          ),
+        ),
+      );
+
+      if (refreshedAlbum == null) {
+        developer.log('📸 Failed to refresh album properties');
+        return;
+      }
+
+      final count = await refreshedAlbum.assetCountAsync;
+      developer.log('📸 Fresh album count: $count');
+
+      // Quick check: if count is same, likely no changes
+      final oldCount = imageUrls.where((u) => u.startsWith('local:')).length;
+      developer.log('📸 Old count: $oldCount, New count: $count');
+
+      if (count == oldCount) {
+        developer.log('📸 No change in count, skipping');
+        return; // No change in count, skip full check
+      }
+
+      // OPTIMIZATION: Only fetch new photos if count increased
+      // Fetch just the difference from the start (newest photos)
+      if (count > oldCount) {
+        final newCount = count - oldCount;
+        developer.log(
+          '📸 Detected $newCount new photos, fetching incrementally...',
+        );
+
+        // Get only the newest photos (they're at the start of the list)
+        final newAssets = await refreshedAlbum.getAssetListRange(
+          start: 0,
+          end: newCount + 10,
+        );
+
+        final newIds = <String>[];
+        for (final asset in newAssets) {
+          if (!_localAssets.containsKey(asset.id)) {
+            _localAssets[asset.id] = asset;
+            imageUrls.insert(
+              0,
+              'local:${asset.id}',
+            ); // Add at start (newest first)
+            newIds.add(asset.id);
+          }
+        }
+
+        if (newIds.isNotEmpty) {
+          developer.log('📸 Added ${newIds.length} new photos incrementally');
+          _updateCachedLocalPhotoCount();
+          _lastImageUrlsLength = -1;
+
+          if (mounted) {
+            setState(() {});
+            // Immediately trigger scan for new photos only (skip full check)
+            developer.log(
+              '🚀 Auto-triggering quick scan for ${newIds.length} new photos',
+            );
+            // Use unawaited to not block UI
+            _scanNewPhotosOnly(newIds);
+          }
+        }
+        return;
+      }
+
+      // Full check needed (photos deleted or complex change)
       final currentDeviceIds = <String>{};
-      for (final album in albums) {
-        final count = await album.assetCountAsync;
-        if (count > 0) {
-          final assets = await album.getAssetListRange(start: 0, end: count);
-          for (final asset in assets) {
-            currentDeviceIds.add(asset.id);
-            // Update _localAssets with any new photos
-            if (!_localAssets.containsKey(asset.id)) {
-              _localAssets[asset.id] = asset;
-            }
+      if (count > 0) {
+        final assets = await refreshedAlbum.getAssetListRange(
+          start: 0,
+          end: count,
+        );
+        for (final asset in assets) {
+          currentDeviceIds.add(asset.id);
+          // Update _localAssets with any new photos
+          if (!_localAssets.containsKey(asset.id)) {
+            _localAssets[asset.id] = asset;
           }
         }
       }
@@ -3516,6 +3909,111 @@ class GalleryScreenState extends State<GalleryScreen>
     return _thumbFutureCache.putIfAbsent(id, () => _getThumbForAsset(id));
   }
 
+  /// Search synonyms for better tag matching
+  /// Maps common search terms to related ML Kit labels
+  static const Map<String, List<String>> _searchSynonyms = {
+    // Electronics/Screens
+    'tv': ['television', 'monitor', 'screen', 'display'],
+    'television': ['tv', 'monitor', 'screen', 'display'],
+    'monitor': ['tv', 'television', 'screen', 'display', 'computer'],
+    'screen': ['tv', 'television', 'monitor', 'display', 'laptop'],
+    'display': ['tv', 'television', 'monitor', 'screen'],
+    'computer': ['laptop', 'monitor', 'keyboard', 'screen', 'pc'],
+    'laptop': ['computer', 'notebook', 'screen', 'keyboard'],
+    'phone': ['mobile', 'smartphone', 'cellphone', 'iphone', 'android'],
+    'mobile': ['phone', 'smartphone', 'cellphone'],
+
+    // Animals
+    'dog': ['puppy', 'canine', 'pet', 'hound'],
+    'puppy': ['dog', 'canine', 'pet'],
+    'cat': ['kitten', 'feline', 'pet'],
+    'kitten': ['cat', 'feline', 'pet'],
+    'bird': ['parrot', 'sparrow', 'pigeon', 'crow'],
+
+    // Food
+    'food': [
+      'meal',
+      'dish',
+      'cuisine',
+      'snack',
+      'breakfast',
+      'lunch',
+      'dinner',
+    ],
+    'meal': ['food', 'dish', 'cuisine'],
+    'drink': ['beverage', 'coffee', 'tea', 'juice', 'water'],
+    'coffee': ['drink', 'beverage', 'cafe', 'espresso'],
+
+    // People
+    'person': ['people', 'human', 'man', 'woman', 'face'],
+    'people': ['person', 'human', 'crowd', 'group'],
+    'face': ['person', 'people', 'portrait', 'selfie'],
+    'selfie': ['face', 'portrait', 'person'],
+
+    // Places/Scenes
+    'beach': ['ocean', 'sea', 'coast', 'sand', 'shore'],
+    'ocean': ['sea', 'beach', 'water', 'coast'],
+    'mountain': ['hill', 'peak', 'landscape', 'nature'],
+    'forest': ['woods', 'trees', 'nature', 'jungle'],
+    'city': ['urban', 'building', 'downtown', 'street'],
+    'building': ['architecture', 'house', 'structure', 'city'],
+
+    // Vehicles
+    'car': ['automobile', 'vehicle', 'auto', 'sedan'],
+    'automobile': ['car', 'vehicle', 'auto'],
+    'bike': ['bicycle', 'cycle', 'motorcycle'],
+    'bicycle': ['bike', 'cycle'],
+  };
+
+  /// Get synonyms for a search term
+  List<String> _getSearchSynonyms(String term) {
+    return _searchSynonyms[term.toLowerCase()] ?? [];
+  }
+
+  /// Get all unique tags/detections from gallery sorted by popularity
+  List<MapEntry<String, int>> _getTagsSortedByPopularity() {
+    final tagCounts = <String, int>{};
+
+    for (final entry in photoAllDetections.entries) {
+      for (final detection in entry.value) {
+        final tag = detection.toLowerCase();
+        tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+      }
+    }
+
+    // Also count main category tags
+    for (final entry in photoTags.entries) {
+      for (final tag in entry.value) {
+        final tagLower = tag.toLowerCase();
+        tagCounts[tagLower] = (tagCounts[tagLower] ?? 0) + 1;
+      }
+    }
+
+    // Sort by count descending
+    final sorted = tagCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return sorted;
+  }
+
+  /// Get search suggestions based on existing tags, sorted by popularity
+  List<String> getSearchSuggestions({String? prefix, int limit = 20}) {
+    final sorted = _getTagsSortedByPopularity();
+
+    if (prefix == null || prefix.isEmpty) {
+      return sorted.take(limit).map((e) => e.key).toList();
+    }
+
+    final prefixLower = prefix.toLowerCase();
+    return sorted
+        .where(
+          (e) => e.key.startsWith(prefixLower) || e.key.contains(prefixLower),
+        )
+        .take(limit)
+        .map((e) => e.key)
+        .toList();
+  }
+
   /// Update cached filtered list when inputs change
   void _updateCachedFilteredList() {
     // Check if we need to recompute
@@ -3547,7 +4045,14 @@ class GalleryScreenState extends State<GalleryScreen>
           .map((term) => term.toLowerCase())
           .toList();
 
-      return searchTerms.any(
+      // Expand search terms with synonyms
+      final expandedTerms = <String>{};
+      for (final term in searchTerms) {
+        expandedTerms.add(term);
+        expandedTerms.addAll(_getSearchSynonyms(term));
+      }
+
+      return expandedTerms.any(
         (searchTerm) =>
             tags.any((t) => t.toLowerCase().contains(searchTerm)) ||
             allDetections.any((d) => d.toLowerCase().contains(searchTerm)),
@@ -3983,9 +4488,16 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   void _showAddFilterMenu() {
-    final allTags = getAllCurrentTags().toList()..sort();
-    final current = searchQuery.split(' ').where((t) => t.isNotEmpty).toSet();
-    final available = allTags.where((t) => !current.contains(t)).toList();
+    // Get tags sorted by popularity (most common first)
+    final sortedTags = _getTagsSortedByPopularity();
+    final current = searchQuery
+        .split(' ')
+        .where((t) => t.isNotEmpty)
+        .map((t) => t.toLowerCase())
+        .toSet();
+    final available = sortedTags
+        .where((e) => !current.contains(e.key))
+        .toList();
 
     if (available.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3996,32 +4508,77 @@ class GalleryScreenState extends State<GalleryScreen>
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (ctx) {
-        return SafeArea(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: available.length,
-            itemBuilder: (context, index) {
-              final tag = available[index];
-              return ListTile(
-                leading: const Icon(Icons.add_circle_outline),
-                title: Text(tag),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  setState(() {
-                    final tags = searchQuery
-                        .split(' ')
-                        .where((t) => t.isNotEmpty)
-                        .toList();
-                    tags.add(tag);
-                    searchQuery = tags.join(' ');
-                    _searchController.text = searchQuery;
-                  });
-                  widget.onSearchChanged?.call();
-                },
-              );
-            },
-          ),
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.3,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return SafeArea(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      'Add Filter (by popularity)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      itemCount: available.length,
+                      itemBuilder: (context, index) {
+                        final entry = available[index];
+                        final tag = entry.key;
+                        final count = entry.value;
+                        return ListTile(
+                          leading: const Icon(Icons.add_circle_outline),
+                          title: Text(tag),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              '$count',
+                              style: TextStyle(
+                                color: Colors.grey.shade700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            setState(() {
+                              final tags = searchQuery
+                                  .split(' ')
+                                  .where((t) => t.isNotEmpty)
+                                  .toList();
+                              tags.add(tag);
+                              searchQuery = tags.join(' ');
+                              _searchController.text = searchQuery;
+                            });
+                            widget.onSearchChanged?.call();
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -4174,7 +4731,13 @@ class GalleryScreenState extends State<GalleryScreen>
 
   @override
   void dispose() {
+    // Stop PhotoManager change notifications
+    PhotoManager.stopChangeNotify();
+    PhotoManager.removeChangeCallback(_onPhotoLibraryChanged);
+
+    WidgetsBinding.instance.removeObserver(this);
     _photoChangesSubscription?.cancel();
+    _fallbackPollingTimer?.cancel();
     _dotAnimationTimer?.cancel();
     _autoScanRetryTimer?.cancel();
     _progressRefreshTimer?.cancel();
@@ -4767,37 +5330,50 @@ class GalleryScreenState extends State<GalleryScreen>
                                         .split(' ')
                                         .where((tag) => tag.isNotEmpty)
                                         .map((tag) {
-                                          // Count photos matching this specific tag
+                                          // Count photos matching this specific tag (including synonyms)
                                           final tagLower = tag.toLowerCase();
                                           final int count;
 
                                           // Special handling for "none" filter
                                           if (tagLower == 'none') {
                                             count = imageUrls.where((u) {
-                                              if (_trashedIds.contains(u))
+                                              if (_trashedIds.contains(u)) {
                                                 return false;
+                                              }
                                               final key = p.basename(u);
                                               final tags = photoTags[key] ?? [];
                                               return tags.isEmpty;
                                             }).length;
                                           } else {
+                                            // Include synonyms in count
+                                            final searchTerms = <String>{
+                                              tagLower,
+                                            };
+                                            searchTerms.addAll(
+                                              _getSearchSynonyms(tagLower),
+                                            );
+
                                             count = imageUrls.where((u) {
-                                              if (_trashedIds.contains(u))
+                                              if (_trashedIds.contains(u)) {
                                                 return false;
+                                              }
                                               final key = p.basename(u);
                                               final tags = photoTags[key] ?? [];
                                               final allDetections =
                                                   photoAllDetections[key] ?? [];
-                                              return tags.any(
-                                                    (t) => t
-                                                        .toLowerCase()
-                                                        .contains(tagLower),
-                                                  ) ||
-                                                  allDetections.any(
-                                                    (d) => d
-                                                        .toLowerCase()
-                                                        .contains(tagLower),
-                                                  );
+                                              return searchTerms.any(
+                                                (term) =>
+                                                    tags.any(
+                                                      (t) => t
+                                                          .toLowerCase()
+                                                          .contains(term),
+                                                    ) ||
+                                                    allDetections.any(
+                                                      (d) => d
+                                                          .toLowerCase()
+                                                          .contains(term),
+                                                    ),
+                                              );
                                             }).length;
                                           }
 
@@ -5689,8 +6265,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                           ],
                                                         ),
                                                       );
-                                                      if (confirm != true)
+                                                      if (confirm != true) {
                                                         return;
+                                                      }
                                                       try {
                                                         // Block any new scans during clearing
                                                         _clearingTags = true;

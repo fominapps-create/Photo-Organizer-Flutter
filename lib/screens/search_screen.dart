@@ -30,12 +30,18 @@ class _SearchScreenState extends State<SearchScreen> {
     super.initState();
     _searchFocus.requestFocus();
     _searchController.addListener(_onSearchChanged);
+    // Show suggestions when focus changes
+    _searchFocus.addListener(() {
+      if (_searchFocus.hasFocus && _searchController.text.isEmpty) {
+        _onSearchChanged(); // Trigger to show top suggestions
+      }
+    });
     _fetchAvailableTags();
   }
 
   Future<void> _fetchAvailableTags() async {
     setState(() {
-      // Use the actual current tags passed from gallery instead of server
+      // Use the actual current tags passed from gallery (sorted by popularity)
       _allAvailableTags = List.from(widget.recommendedTags);
       // Add "None" for searching untagged photos if not already present
       if (!_allAvailableTags.contains('None')) {
@@ -49,13 +55,27 @@ class _SearchScreenState extends State<SearchScreen> {
       }
       _loadingTags = false;
     });
+    // Show initial suggestions after tags are loaded
+    _onSearchChanged();
   }
 
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase();
     if (query.isEmpty) {
       setState(() {
-        _filteredSuggestions = [];
+        // Show top 8 popular suggestions when field is empty but focused
+        _filteredSuggestions = _allAvailableTags
+            .where((tag) {
+              // Filter out already selected tags
+              if (_selectedTags.contains(tag)) return false;
+              if (widget.excludeTags != null &&
+                  widget.excludeTags!.contains(tag)) {
+                return false;
+              }
+              return true;
+            })
+            .take(8)
+            .toList();
       });
       return;
     }
@@ -65,6 +85,7 @@ class _SearchScreenState extends State<SearchScreen> {
         // Filter by search query
         if (!tag.toLowerCase().contains(query)) return false;
         // Filter out already selected tags
+        if (_selectedTags.contains(tag)) return false;
         if (widget.excludeTags != null && widget.excludeTags!.contains(tag)) {
           return false;
         }
@@ -236,7 +257,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   ],
                 ),
               ),
-              // Dropdown suggestions
+              // Dropdown suggestions (shows popular when empty, filtered when typing)
               if (_filteredSuggestions.isNotEmpty)
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -250,52 +271,75 @@ class _SearchScreenState extends State<SearchScreen> {
                       width: 1,
                     ),
                   ),
-                  constraints: const BoxConstraints(maxHeight: 200),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    itemCount: _filteredSuggestions.length,
-                    itemBuilder: (context, index) {
-                      final tag = _filteredSuggestions[index];
-                      return InkWell(
-                        onTap: () {
-                          setState(() {
-                            _selectedTags.add(tag);
-                            _searchController.clear();
-                            _filteredSuggestions = [];
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            border: index < _filteredSuggestions.length - 1
-                                ? Border(
-                                    bottom: BorderSide(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      width: 1,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          child: Text(
-                            tag,
-                            style: TextStyle(
-                              color:
-                                  Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? Colors.white
-                                  : Colors.black87,
-                              fontSize: 16,
-                            ),
+                  constraints: const BoxConstraints(maxHeight: 280),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header showing context
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Text(
+                          _searchController.text.isEmpty
+                              ? 'Popular tags'
+                              : 'Suggestions',
+                          style: TextStyle(
+                            color: Colors.lightBlue.shade300,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                      );
-                    },
+                      ),
+                      Flexible(
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.zero,
+                          itemCount: _filteredSuggestions.length,
+                          itemBuilder: (context, index) {
+                            final tag = _filteredSuggestions[index];
+                            return InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _selectedTags.add(tag);
+                                  _searchController.clear();
+                                  _filteredSuggestions = [];
+                                });
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  border:
+                                      index < _filteredSuggestions.length - 1
+                                      ? Border(
+                                          bottom: BorderSide(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.1,
+                                            ),
+                                            width: 1,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                                child: Text(
+                                  tag,
+                                  style: TextStyle(
+                                    color:
+                                        Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               if (_filteredSuggestions.isNotEmpty) const SizedBox(height: 16),

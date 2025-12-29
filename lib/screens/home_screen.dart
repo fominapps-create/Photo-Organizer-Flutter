@@ -409,17 +409,19 @@ class _HomeScreenState extends State<HomeScreen> {
             bottom: 135,
             child: GestureDetector(
               onTap: () {
-                // Get actual tags from photos
-                final currentTags =
-                    _galleryKey.currentState?.getAllCurrentTags() ?? <String>{};
-                final availableTags = currentTags.toList()..sort();
+                // Get tags sorted by popularity (most common first)
+                final suggestionsByPopularity =
+                    _galleryKey.currentState?.getSearchSuggestions(
+                      limit: 100,
+                    ) ??
+                    <String>[];
 
-                // Open search screen with actual photo tags
+                // Open search screen with tags sorted by popularity
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => SearchScreen(
-                      recommendedTags: availableTags,
+                      recommendedTags: suggestionsByPopularity,
                       onTagSelected: (tag) {
                         // Apply search filter in gallery
                         if (_selectedIndex == 0) {
@@ -474,7 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      'Ask Filto',
+                      'Filto',
                       style: TextStyle(
                         color: Colors.orange.shade700,
                         fontSize: 12,

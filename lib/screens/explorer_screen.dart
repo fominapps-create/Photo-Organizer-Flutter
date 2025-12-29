@@ -929,6 +929,43 @@ class ExplorerScreenState extends State<ExplorerScreen>
             final fileObj = batchFile as Map;
             final batchFileRef = fileObj['file'];
             final batchPhotoID = fileObj['photoID'];
+            // One-time consent gate for server uploads
+            final prefs = await SharedPreferences.getInstance();
+            final consent = prefs.getBool('server_upload_consent') ?? false;
+            if (!consent) {
+              final allow = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Enable Server Uploads?'),
+                  content: const Text(
+                    'Allow sending selected photos to your server for AI tags. You can change this anytime in Settings.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('No'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Yes'),
+                    ),
+                  ],
+                ),
+              );
+              if (allow != true) {
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Upload cancelled — consent not granted'),
+                  ),
+                );
+                setState(() {
+                  uploading = false;
+                  uploadProgress = 0.0;
+                });
+                return;
+              }
+              await prefs.setBool('server_upload_consent', true);
+            }
             final res = await ApiService.uploadImage(
               batchFileRef,
               photoID: batchPhotoID,
