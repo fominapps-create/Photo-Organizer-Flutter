@@ -577,27 +577,29 @@ class _PhotoViewerState extends State<PhotoViewer>
       right: 0,
       // Position right above the action buttons
       bottom: bottomPadding + 80,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              bgColor,
-              bgColor.withValues(alpha: bgColor.a * 0.8),
-              Colors.transparent,
-            ],
-            stops: const [0.0, 0.7, 1.0],
+      // IgnorePointer prevents this overlay from blocking horizontal swipe gestures
+      child: IgnorePointer(
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                bgColor,
+                bgColor.withValues(alpha: bgColor.a * 0.8),
+                Colors.transparent,
+              ],
+              stops: const [0.0, 0.7, 1.0],
+            ),
           ),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Category tags
-            if (photo.tags.isNotEmpty) ...[
-              const Text(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Category tags
+              if (photo.tags.isNotEmpty) ...[
+                const Text(
                 'Category',
                 style: TextStyle(
                   color: Colors.white70,
@@ -686,6 +688,7 @@ class _PhotoViewerState extends State<PhotoViewer>
             ],
           ],
         ),
+      ),
       ),
     );
   }

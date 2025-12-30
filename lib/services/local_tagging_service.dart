@@ -141,8 +141,14 @@ class LocalTaggingService {
     // Track confidence scores for conflict resolution
     double bestPeopleConfidence = 0.0;
     double bestAnimalConfidence = 0.0;
+    double bestFoodConfidence = 0.0;
+    double bestDocumentConfidence = 0.0;
     String? bestPeopleLabel;
     String? bestAnimalLabel;
+    String? bestFoodLabel;
+    
+    // Track weak scenery labels (indoor/product labels that shouldn't trigger scenery)
+    bool hasOnlyWeakScenery = true;
 
     // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
@@ -167,13 +173,44 @@ class LocalTaggingService {
           bestAnimalLabel = text;
         }
       }
+      // Food detection with confidence tracking
       if (_isFoodLabel(text)) {
-        categories.add('food');
+        // Flower requires high confidence (0.75+) to avoid food misclassification
+        if (text.contains('flower')) {
+          if (confidence >= 0.75) {
+            // Don't add food category for high-confidence flowers
+            developer.log('🌸 High-confidence flower ($confidence) - not food');
+          } else {
+            // Low confidence flower might actually be food
+            categories.add('food');
+            if (confidence > bestFoodConfidence) {
+              bestFoodConfidence = confidence;
+              bestFoodLabel = text;
+            }
+          }
+        } else {
+          categories.add('food');
+          if (confidence > bestFoodConfidence) {
+            bestFoodConfidence = confidence;
+            bestFoodLabel = text;
+          }
+        }
       }
+      // Document detection with stricter requirements
       if (_isDocumentLabel(text)) {
-        categories.add('document');
+        // Only count as document if confidence is high enough
+        if (confidence >= 0.65) {
+          categories.add('document');
+          if (confidence > bestDocumentConfidence) {
+            bestDocumentConfidence = confidence;
+          }
+        }
       }
+      // Scenery detection - track if we have strong vs weak labels
       if (_isSceneryLabel(text)) {
+        if (!_isWeakSceneryLabel(text)) {
+          hasOnlyWeakScenery = false;
+        }
         categories.add('scenery');
       }
       // Track screenshot detection for subtag
@@ -242,6 +279,38 @@ class LocalTaggingService {
       developer.log(
         '🔄 Low confidence: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) - too uncertain',
       );
+    }
+
+    // SCENERY FILTER: Remove scenery if only indoor/product labels were matched
+    // This prevents "shelf, room, building, products" from being tagged as scenery
+    if (categories.contains('scenery') && hasOnlyWeakScenery) {
+      // If we have other categories, remove scenery
+      if (categories.length > 1) {
+        categories.remove('scenery');
+        developer.log(
+          '🔄 Removed weak scenery (indoor/product labels only)',
+        );
+      } else {
+        // If scenery is the only category and it's weak, return 'other'
+        categories.remove('scenery');
+        developer.log(
+          '🔄 Removed scenery - only weak indoor labels (building/shelf/room/products)',
+        );
+      }
+    }
+
+    // DOCUMENT FILTER: Require strong document indicators
+    // Just "text" or "writing" with a colorful/complex background is not a document
+    if (categories.contains('document') && categories.length > 1) {
+      // If we also detected people/animals/food, it's probably not a document
+      if (categories.contains('people') || 
+          categories.contains('animals') || 
+          categories.contains('food')) {
+        categories.remove('document');
+        developer.log(
+          '🔄 Removed document - other primary content detected',
+        );
+      }
     }
 
     // Priority order: people > animals > food > document > scenery
@@ -600,6 +669,7 @@ class LocalTaggingService {
 
   static bool _isSceneryLabel(String label) {
     const sceneryKeywords = [
+      // Strong outdoor/nature scenery
       'landscape',
       'scenery',
       'nature',
@@ -611,8 +681,6 @@ class LocalTaggingService {
       'valley',
       'forest',
       'tree',
-      'flower',
-      'plant',
       'garden',
       'park',
       'beach',
@@ -628,8 +696,7 @@ class LocalTaggingService {
       'night',
       'star',
       'moon',
-      'building',
-      'architecture',
+      // Urban outdoor scenery
       'city',
       'street',
       'road',
@@ -640,6 +707,7 @@ class LocalTaggingService {
       'temple',
       'monument',
       'statue',
+      // Natural landscapes
       'field',
       'meadow',
       'desert',
@@ -651,7 +719,36 @@ class LocalTaggingService {
       'view',
       'panorama',
       'aerial',
+      // Note: 'building', 'architecture', 'flower', 'plant' removed
+      // - building/architecture are too generic (appear in any photo with structures)
+      // - flower/plant overlap with food and can misclassify
     ];
     return sceneryKeywords.any((k) => label.contains(k));
+  }
+
+  /// Weak scenery labels - indoor/product labels that shouldn't trigger scenery category
+  /// These are often detected in shopping/indoor photos and don't represent actual scenery
+  static bool _isWeakSceneryLabel(String label) {
+    const weakLabels = [
+      'building',
+      'architecture',
+      'room',
+      'interior',
+      'shelf',
+      'shelving',
+      'product',
+      'products',
+      'display',
+      'store',
+      'shop',
+      'retail',
+      'furniture',
+      'wall',
+      'floor',
+      'ceiling',
+      'window',
+      'door',
+    ];
+    return weakLabels.any((k) => label.contains(k));
   }
 }

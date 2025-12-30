@@ -16,6 +16,7 @@ import '../services/trash_store.dart';
 import '../services/api_service.dart';
 import '../services/tagging_service_factory.dart';
 import '../services/scan_foreground_service.dart';
+import '../services/local_tagging_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'photo_viewer.dart';
@@ -74,6 +75,7 @@ class GalleryScreenState extends State<GalleryScreen>
   final Set<String> _selectedKeys = {};
   final Map<String, double> _textWidthCache = {};
   bool _scanning = false;
+  bool _scanPreparing = false; // True during initial ML Kit warmup before % starts
   bool _clearingTags = false;
   bool _hasScannedAtLeastOneBatch = false;
   bool _validating = false;
@@ -1428,7 +1430,17 @@ class GalleryScreenState extends State<GalleryScreen>
                     String liveMessage;
                     Widget? icon;
 
-                    if (_scanning && stuckAt100) {
+                    if (_scanPreparing) {
+                      liveMessage = 'Preparing AI model...';
+                      icon = const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      );
+                    } else if (_scanning && stuckAt100) {
                       liveMessage =
                           '100% - $scannedCount/$_cachedLocalPhotoCount photos scanned';
                       icon = AnimatedBuilder(
@@ -2425,6 +2437,29 @@ class GalleryScreenState extends State<GalleryScreen>
 
   Future<void> _scanImages(List<String> urls) async {
     developer.log('📸 _scanImages called with ${urls.length} photos');
+
+    // Show "Preparing..." state before scanning starts
+    if (mounted) {
+      setState(() => _scanPreparing = true);
+    }
+
+    // Pre-warm ML Kit labeler (this is often the source of 30-50s delay on first run)
+    developer.log('🔥 Pre-warming ML Kit labeler...');
+    final warmupStart = DateTime.now();
+    try {
+      // Access the labeler singleton to trigger model loading
+      final _ = LocalTaggingService.labeler;
+      developer.log(
+        '✅ ML Kit labeler ready in ${DateTime.now().difference(warmupStart).inMilliseconds}ms',
+      );
+    } catch (e) {
+      developer.log('⚠️ ML Kit warmup error: $e');
+    }
+
+    // End preparing state
+    if (mounted) {
+      setState(() => _scanPreparing = false);
+    }
 
     // Start memory monitoring for adaptive throttling
     _startMemoryMonitor();
