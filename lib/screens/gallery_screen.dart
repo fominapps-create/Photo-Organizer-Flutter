@@ -3773,13 +3773,25 @@ class GalleryScreenState extends State<GalleryScreen>
         return;
       }
 
-      // Get ALL albums (Camera, Screenshots, Downloads, DCIM, etc.)
-      developer.log('🔍 Getting asset path list...');
-      final albums = await PhotoManager.getAssetPathList(
+      // OPTIMIZATION: Use onlyAll: true to get the single "Recent/All" album
+      // This is MUCH faster than iterating through individual albums
+      developer.log('🔍 Getting asset path list (onlyAll: true for speed)...');
+      var albums = await PhotoManager.getAssetPathList(
         type: RequestType.image,
         hasAll: true,
-        onlyAll: false, // Get all individual albums, not just "Recent"
+        onlyAll: true, // Use the aggregated "Recent/All" album for fast loading
       );
+
+      // Fallback: if onlyAll returns empty, try getting individual albums
+      if (albums.isEmpty) {
+        developer.log('⚠️ onlyAll returned empty, trying individual albums...');
+        albums = await PhotoManager.getAssetPathList(
+          type: RequestType.image,
+          hasAll: true,
+          onlyAll: false,
+        );
+      }
+
       developer.log(
         '📁 Found ${albums.length} albums: ${albums.map((a) => a.name).join(", ")}',
       );
@@ -3803,25 +3815,21 @@ class GalleryScreenState extends State<GalleryScreen>
         return;
       }
 
-      // Combine photos from ALL albums
-      developer.log('🔄 Processing albums...');
-      final allAssets = <AssetEntity>[];
-      for (final album in albums) {
-        final count = await album.assetCountAsync;
-        developer.log('📸 Album "${album.name}": $count photos');
-        if (count > 0) {
-          final assets = await album.getAssetListRange(start: 0, end: count);
-          allAssets.addAll(assets);
-        }
-      }
+      // Get photos from the first (main) album - typically "Recent" or "All"
+      // This avoids the slow iteration through all albums
+      developer.log('🔄 Loading photos from main album...');
+      final mainAlbum = albums.first;
+      final totalCount = await mainAlbum.assetCountAsync;
+      developer.log('📸 Main album "${mainAlbum.name}": $totalCount photos');
 
-      // Remove duplicates (same photo might be in multiple albums)
-      final seenIds = <String>{};
       final uniqueAssets = <AssetEntity>[];
-      for (final asset in allAssets) {
-        if (seenIds.add(asset.id)) {
-          uniqueAssets.add(asset);
-        }
+      if (totalCount > 0) {
+        // Load all assets from the main album
+        final assets = await mainAlbum.getAssetListRange(
+          start: 0,
+          end: totalCount,
+        );
+        uniqueAssets.addAll(assets);
       }
 
       developer.log('🎯 Total unique photos: ${uniqueAssets.length}');
@@ -4888,10 +4896,58 @@ class GalleryScreenState extends State<GalleryScreen>
                   ),
                 )
               : imageUrls.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No photos found in gallery.',
-                    style: TextStyle(color: Colors.white, fontSize: 18),
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.photo_library_outlined,
+                          size: 64,
+                          color: Colors.white.withValues(alpha: 0.7),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No photos found in gallery.',
+                          style: TextStyle(color: Colors.white, fontSize: 18),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Please ensure photo permissions are granted.\nTap the button below to open Settings.',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.7),
+                            fontSize: 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            await PhotoManager.openSetting();
+                          },
+                          icon: const Icon(Icons.settings),
+                          label: const Text('Open Settings'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() => loading = true);
+                            _loadAllImages();
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : Column(
