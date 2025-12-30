@@ -26,6 +26,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   late bool _scanOnWifi;
   late bool _autoscanAutoStart;
+  late bool _backgroundScanEnabled;
   // Note: Server-related fields commented out for free tier
   // bool _uploadConsent = false;
   // bool _serverOnline = false;
@@ -48,6 +49,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _autoscanAutoStart =
           prefs.getBool('autoscan_auto_start') ??
           true; // Default ON for free tier
+      _backgroundScanEnabled =
+          prefs.getBool('background_scan_enabled') ?? false;
       _showDevButtons = prefs.getBool('show_dev_buttons') ?? false;
     });
   }
@@ -60,6 +63,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveAutoscanAutoStart(bool val) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('autoscan_auto_start', val);
+  }
+
+  Future<void> _saveBackgroundScan(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('background_scan_enabled', val);
   }
 
   // Note: Commented out for free tier - no server uploads
@@ -237,6 +245,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _saveAutoscanAutoStart(v);
             },
             secondary: const Icon(Icons.playlist_play),
+          ),
+          SwitchListTile(
+            title: const Text('Background scanning'),
+            subtitle: const Text('Continue scanning when app is minimized'),
+            value: _backgroundScanEnabled,
+            onChanged: (v) async {
+              setState(() => _backgroundScanEnabled = v);
+              await _saveBackgroundScan(v);
+            },
+            secondary: const Icon(Icons.sync),
           ),
           // Server upload toggle hidden for free tier (no server-based features)
           // SwitchListTile(

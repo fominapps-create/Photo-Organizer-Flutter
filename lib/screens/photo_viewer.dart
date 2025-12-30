@@ -14,6 +14,9 @@ class PhotoData {
   final List<String> tags;
   final List<String> allDetections;
 
+  /// Photo creation date (from EXIF or file metadata)
+  final DateTime? dateTime;
+
   /// For local assets, store the asset reference for lazy file loading
   final AssetEntity? asset;
 
@@ -22,6 +25,7 @@ class PhotoData {
     required this.heroTag,
     this.tags = const [],
     this.allDetections = const [],
+    this.dateTime,
     this.asset,
   });
 }
@@ -282,6 +286,10 @@ class _PhotoViewerState extends State<PhotoViewer>
           else
             _buildZoomablePhoto(_currentPhoto, 0, true),
 
+          // Date overlay at top (below app bar)
+          if (_showControls && _currentPhoto.dateTime != null)
+            _buildDateOverlay(_currentPhoto.dateTime!),
+
           // Tags overlay at bottom
           if (_showInfo && _showControls) _buildTagsOverlay(_currentPhoto),
 
@@ -378,6 +386,62 @@ class _PhotoViewerState extends State<PhotoViewer>
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Format date like "Jan 15, 2024 • 3:45 PM"
+  String _formatDateTime(DateTime dt) {
+    final months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final month = months[dt.month - 1];
+    final day = dt.day;
+    final year = dt.year;
+
+    // Format time as 12-hour with AM/PM
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+
+    return '$month $day, $year • $hour:$minute $ampm';
+  }
+
+  Widget _buildDateOverlay(DateTime dateTime) {
+    // Position below the app bar
+    final topPadding = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: topPadding + 56 + 8, // Below app bar (56) + small gap
+      left: 16,
+      right: 16,
+      child: IgnorePointer(
+        child: Text(
+          _formatDateTime(dateTime),
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.9),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            shadows: [
+              Shadow(
+                offset: const Offset(0, 1),
+                blurRadius: 4,
+                color: Colors.black.withValues(alpha: 0.7),
+              ),
+            ],
+          ),
         ),
       ),
     );

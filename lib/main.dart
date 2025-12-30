@@ -69,10 +69,10 @@ void _preWarmMLKit() {
     try {
       final startTime = DateTime.now();
       developer.log('🔥 Pre-warming ML Kit labeler...');
-      
+
       // Access the labeler singleton - this triggers model loading
       final _ = LocalTaggingService.labeler;
-      
+
       final elapsed = DateTime.now().difference(startTime).inMilliseconds;
       developer.log('✅ ML Kit labeler pre-warmed in ${elapsed}ms');
     } catch (e) {

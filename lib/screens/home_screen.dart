@@ -4,6 +4,8 @@
 // ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'dart:ui';
 import 'gallery_screen.dart';
 import 'settings_screen.dart';
@@ -70,6 +72,65 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       AlbumScreen(key: _albumKey),
     ];
+
+    // Request notification permission after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestNotificationPermission();
+    });
+  }
+
+  /// Request permission for background scanning
+  Future<void> _requestNotificationPermission() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasAsked = prefs.getBool('hasAskedBackgroundScan') ?? false;
+    final backgroundScanEnabled =
+        prefs.getBool('background_scan_enabled') ?? false;
+
+    // Check current permission status
+    final permission =
+        await FlutterForegroundTask.checkNotificationPermission();
+
+    // If already granted and enabled, or we've asked before, skip
+    if ((permission == NotificationPermission.granted &&
+            backgroundScanEnabled) ||
+        hasAsked) {
+      return;
+    }
+
+    // Mark that we've asked
+    await prefs.setBool('hasAskedBackgroundScan', true);
+
+    if (!mounted) return;
+
+    // Simple question about background scanning
+    final wantsBackground = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Background Scanning'),
+        content: const Text(
+          'Continue scanning photos when the app is minimized?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Yes'),
+          ),
+        ],
+      ),
+    );
+
+    if (wantsBackground == true) {
+      // Save preference then request system permission
+      await prefs.setBool('background_scan_enabled', true);
+      await FlutterForegroundTask.requestNotificationPermission();
+    } else {
+      await prefs.setBool('background_scan_enabled', false);
+    }
   }
 
   @override
@@ -411,7 +472,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 right: 16,
                 bottom: 135,
                 child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
+                  duration: const Duration(milliseconds: 100),
                   opacity: showNavBar ? 1.0 : 0.0,
                   child: IgnorePointer(
                     ignoring: !showNavBar,
@@ -457,7 +518,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       : Colors.white,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.3),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.3,
+                                      ),
                                       blurRadius: 12,
                                       offset: const Offset(0, 4),
                                     ),

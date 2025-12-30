@@ -937,11 +937,11 @@ class GalleryScreenState extends State<GalleryScreen>
       }
     }
 
-    // If there are no chips (none fit or no short tags), show a 'None' chip
+    // If there are no chips (none fit or no short tags), show an 'Unscanned' chip
     if (chips.isEmpty && hiddenCount == 0) {
       chips.add(
         GestureDetector(
-          onTap: () => searchByTag('None'),
+          onTap: () => searchByTag('Unscanned'),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
@@ -958,7 +958,7 @@ class GalleryScreenState extends State<GalleryScreen>
               ],
             ),
             child: Text(
-              'None',
+              'Unscanned',
               style: baseStyle.copyWith(fontSize: defaultFontSize),
             ),
           ),
@@ -1136,9 +1136,11 @@ class GalleryScreenState extends State<GalleryScreen>
       final detections = photoAllDetections[key] ?? [];
 
       AssetEntity? asset;
+      DateTime? dateTime;
       if (url.startsWith('local:')) {
         final id = url.substring('local:'.length);
         asset = _localAssets[id];
+        dateTime = asset?.createDateTime;
       }
 
       photos.add(
@@ -1147,6 +1149,7 @@ class GalleryScreenState extends State<GalleryScreen>
           heroTag: key,
           tags: tags,
           allDetections: detections,
+          dateTime: dateTime,
           asset: asset,
         ),
       );
@@ -1159,44 +1162,60 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log('🚀 START: _loadAllImages called');
     setState(() => loading = true);
 
-    // Load developer buttons setting
-    final prefs = await SharedPreferences.getInstance();
-    _showDevButtons = prefs.getBool('show_dev_buttons') ?? false;
+    try {
+      // Load developer buttons setting (fast - just reading a bool)
+      final prefs = await SharedPreferences.getInstance();
+      _showDevButtons = prefs.getBool('show_dev_buttons') ?? false;
 
-    // Load trashed photo IDs for filtering
-    _trashedIds = await TrashStore.getTrashedIds();
-    developer.log('🗑️ Loaded ${_trashedIds.length} trashed photo IDs');
+      // Load trashed photo IDs for filtering (fast - small list)
+      _trashedIds = await TrashStore.getTrashedIds();
+      developer.log('🗑️ Loaded ${_trashedIds.length} trashed photo IDs');
 
-    // Clean up any empty tag entries from failed scans
-    final cleanedCount = await TagStore.cleanEmptyTags();
-    if (cleanedCount > 0) {
-      developer.log('🧹 Cleaned up $cleanedCount empty tag entries');
-    }
+      // Clean up empty tag entries in BACKGROUND (don't block gallery load)
+      TagStore.cleanEmptyTags().then((cleanedCount) {
+        if (cleanedCount > 0) {
+          developer.log('🧹 Cleaned up $cleanedCount empty tag entries');
+        }
+      });
 
-    developer.log('🔄 Calling _loadOrganizedImages...');
-    await _loadOrganizedImages();
-    developer.log(
-      '✅ _loadOrganizedImages completed. Found ${imageUrls.length} photos',
-    );
-
-    // Show gallery immediately - load tags in background
-    setState(() => loading = false);
-    developer.log('Total photos in gallery: ${imageUrls.length}');
-
-    // Load tags in background (non-blocking) and refresh UI when done
-    _loadTags().then((_) {
-      if (mounted) {
-        setState(() {}); // Refresh to show loaded tags
-        developer.log('📂 Tags loaded in background, UI refreshed');
+      developer.log('🔄 Calling _loadOrganizedImages...');
+      try {
+        await _loadOrganizedImages();
+        developer.log(
+          '✅ _loadOrganizedImages completed. Found ${imageUrls.length} photos',
+        );
+      } catch (e, stack) {
+        developer.log('❌ Error in _loadOrganizedImages: $e');
+        developer.log('Stack: $stack');
       }
-    });
 
-    // Sync tags from server in background (non-blocking) if available
-    _syncTagsFromServerInBackground();
+      // Show gallery immediately - load tags in background
+      setState(() => loading = false);
+      developer.log('Total photos in gallery: ${imageUrls.length}');
 
-    _startAutoScanIfNeeded();
-    _startAutoScanRetryTimer();
-    _startStuckPhotosRecheckTimer(); // Periodic re-check for unscanned photos
+      // Load tags in background (non-blocking) and refresh UI when done
+      _loadTags().then((_) {
+        if (mounted) {
+          setState(() {}); // Refresh to show loaded tags
+          developer.log('📂 Tags loaded in background, UI refreshed');
+        }
+      });
+
+      // Sync tags from server in background (non-blocking) if available
+      _syncTagsFromServerInBackground();
+
+      // Start auto scan in background (don't block)
+      Future.microtask(() => _startAutoScanIfNeeded());
+      _startAutoScanRetryTimer();
+      _startStuckPhotosRecheckTimer(); // Periodic re-check for unscanned photos
+    } catch (e, stack) {
+      developer.log('❌ Fatal error in _loadAllImages: $e');
+      developer.log('Stack: $stack');
+      // Ensure loading is set to false even on error
+      if (mounted) {
+        setState(() => loading = false);
+      }
+    }
   }
 
   /// Sync tags from server in background without blocking UI
@@ -3133,8 +3152,8 @@ class GalleryScreenState extends State<GalleryScreen>
       // Batch size for streaming validation (matches regular validation)
       const validationBatchSize = 10;
 
-      // Short delay between batches to avoid overwhelming phone during concurrent scan
-      const delayBetweenBatches = Duration(milliseconds: 200);
+      // No delay between batches - process as fast as possible
+      const delayBetweenBatches = Duration.zero;
 
       for (
         var batchStart = 0;
@@ -3378,8 +3397,7 @@ class GalleryScreenState extends State<GalleryScreen>
         // Use shared batch processing method
         await _processValidationBatch(batch);
 
-        // Small delay between validation batches
-        await Future.delayed(const Duration(milliseconds: 500));
+        // No delay - process as fast as possible
       }
 
       // Validation complete
@@ -4625,7 +4643,7 @@ class GalleryScreenState extends State<GalleryScreen>
       final allDetections = photoAllDetections[key] ?? [];
       if (searchQuery.isEmpty) return true;
 
-      if (searchQuery.trim().toLowerCase() == 'none') {
+      if (searchQuery.trim().toLowerCase() == 'unscanned') {
         // Show photos with no tags OR those marked as unreadable
         return tags.isEmpty || (tags.length == 1 && tags.first == 'unreadable');
       }
@@ -5668,58 +5686,97 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ? 'Validating...'
                                               : photoTags.isNotEmpty
                                               ? '${photoTags.length} photos scanned ($pct%)'
-                                              : 'No photos scanned yet';
+                                              : 'Preparing for scan';
+                                          // Green only when ALL photos scanned, orange for partial progress
+                                          final allScanned =
+                                              _cachedLocalPhotoCount > 0 &&
+                                              photoTags.length >=
+                                                  _cachedLocalPhotoCount;
                                           _showBadgeTooltip(
                                             context,
                                             status,
                                             (_scanning || _validating)
                                                 ? Colors.orange.shade700
-                                                : photoTags.isNotEmpty
+                                                : allScanned
                                                 ? Colors.green.shade700
+                                                : photoTags.isNotEmpty
+                                                ? Colors
+                                                      .orange
+                                                      .shade700 // Partial progress = orange
                                                 : Colors.grey.shade700,
                                           );
                                         },
-                                        child: Container(
-                                          padding: const EdgeInsets.all(
-                                            4,
-                                          ), // 4px rule - smaller
-                                          decoration: BoxDecoration(
-                                            color: (_scanning || _validating)
-                                                ? Colors.orange.shade100
-                                                      .withValues(alpha: 0.3)
-                                                : photoTags.isNotEmpty
-                                                ? Colors.green.shade100
-                                                      .withValues(alpha: 0.3)
-                                                : Colors.grey.shade400
-                                                      .withValues(alpha: 0.3),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                              color: (_scanning || _validating)
-                                                  ? Colors.orange.shade600
-                                                  : photoTags.isNotEmpty
-                                                  ? Colors.green.shade600
-                                                  : Colors.grey.shade600,
-                                              width: 2,
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withValues(
-                                                  alpha: 0.1,
+                                        child: Builder(
+                                          builder: (context) {
+                                            // Green only when ALL photos scanned
+                                            final allScanned =
+                                                _cachedLocalPhotoCount > 0 &&
+                                                photoTags.length >=
+                                                    _cachedLocalPhotoCount;
+                                            return Container(
+                                              padding: const EdgeInsets.all(
+                                                4,
+                                              ), // 4px rule - smaller
+                                              decoration: BoxDecoration(
+                                                color:
+                                                    (_scanning || _validating)
+                                                    ? Colors.orange.shade100
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          )
+                                                    : allScanned
+                                                    ? Colors.green.shade100
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          )
+                                                    : photoTags.isNotEmpty
+                                                    ? Colors.orange.shade100
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          ) // Partial = orange
+                                                    : Colors.grey.shade400
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          ),
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color:
+                                                      (_scanning || _validating)
+                                                      ? Colors.orange.shade600
+                                                      : allScanned
+                                                      ? Colors.green.shade600
+                                                      : photoTags.isNotEmpty
+                                                      ? Colors
+                                                            .orange
+                                                            .shade600 // Partial = orange
+                                                      : Colors.grey.shade600,
+                                                  width: 2,
                                                 ),
-                                                blurRadius: 4,
-                                                offset: const Offset(0, 2),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.1),
+                                                    blurRadius: 4,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
                                               ),
-                                            ],
-                                          ),
-                                          child: Icon(
-                                            Icons.verified_outlined,
-                                            color: (_scanning || _validating)
-                                                ? Colors.orange.shade600
-                                                : photoTags.isNotEmpty
-                                                ? Colors.green.shade600
-                                                : Colors.grey.shade600,
-                                            size: 16, // 4px rule - smaller
-                                          ),
+                                              child: Icon(
+                                                Icons.verified_outlined,
+                                                color:
+                                                    (_scanning || _validating)
+                                                    ? Colors.orange.shade600
+                                                    : allScanned
+                                                    ? Colors.green.shade600
+                                                    : photoTags.isNotEmpty
+                                                    ? Colors
+                                                          .orange
+                                                          .shade600 // Partial = orange
+                                                    : Colors.grey.shade600,
+                                                size: 16, // 4px rule - smaller
+                                              ),
+                                            );
+                                          },
                                         ),
                                       ),
                                       // Show loading dots during scanning/validating
@@ -6005,8 +6062,8 @@ class GalleryScreenState extends State<GalleryScreen>
                                           final tagLower = tag.toLowerCase();
                                           final int count;
 
-                                          // Special handling for "none" filter
-                                          if (tagLower == 'none') {
+                                          // Special handling for "unscanned" filter
+                                          if (tagLower == 'unscanned') {
                                             count = imageUrls.where((u) {
                                               if (_trashedIds.contains(u)) {
                                                 return false;
@@ -6358,7 +6415,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         : 'Select',
                                                     style: TextStyle(
                                                       color: _isSelectMode
-                                                          ? Colors.orange.shade700
+                                                          ? Colors
+                                                                .orange
+                                                                .shade700
                                                           : Colors
                                                                 .grey
                                                                 .shade800,
@@ -6422,8 +6481,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   children: [
                                                     Icon(
                                                       Icons.select_all,
-                                                      color:
-                                                          Colors.orange.shade700,
+                                                      color: Colors
+                                                          .orange
+                                                          .shade700,
                                                       size: 20,
                                                     ),
                                                     const SizedBox(width: 8),

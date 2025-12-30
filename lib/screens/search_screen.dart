@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class SearchScreen extends StatefulWidget {
   final List<String>
@@ -43,9 +44,9 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       // Use the actual current tags passed from gallery (sorted by popularity)
       _allAvailableTags = List.from(widget.recommendedTags);
-      // Add "None" for searching untagged photos if not already present
-      if (!_allAvailableTags.contains('None')) {
-        _allAvailableTags.insert(0, 'None');
+      // Add "Unscanned" for searching untagged photos if not already present
+      if (!_allAvailableTags.contains('Unscanned')) {
+        _allAvailableTags.insert(0, 'Unscanned');
       }
       // Filter out already selected tags
       if (widget.excludeTags != null) {
@@ -64,9 +65,12 @@ class _SearchScreenState extends State<SearchScreen> {
     if (query.isEmpty) {
       setState(() {
         // Show top 8 popular suggestions when field is empty but focused
-        _filteredSuggestions = _allAvailableTags
+        // Include selected tags at the top, then unselected ones
+        final selectedInList = _allAvailableTags
+            .where((tag) => _selectedTags.contains(tag))
+            .toList();
+        final unselectedInList = _allAvailableTags
             .where((tag) {
-              // Filter out already selected tags
               if (_selectedTags.contains(tag)) return false;
               if (widget.excludeTags != null &&
                   widget.excludeTags!.contains(tag)) {
@@ -74,8 +78,9 @@ class _SearchScreenState extends State<SearchScreen> {
               }
               return true;
             })
-            .take(8)
+            .take(8 - selectedInList.length)
             .toList();
+        _filteredSuggestions = [...selectedInList, ...unselectedInList];
       });
       return;
     }
@@ -84,8 +89,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _filteredSuggestions = _allAvailableTags.where((tag) {
         // Filter by search query
         if (!tag.toLowerCase().contains(query)) return false;
-        // Filter out already selected tags
-        if (_selectedTags.contains(tag)) return false;
+        // Don't filter out selected tags - show them with checkmark
         if (widget.excludeTags != null && widget.excludeTags!.contains(tag)) {
           return false;
         }
@@ -220,28 +224,47 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: TextField(
                           controller: _searchController,
                           focusNode: _searchFocus,
-                          style: TextStyle(
+                          style: GoogleFonts.poppins(
                             color:
                                 Theme.of(context).brightness == Brightness.dark
                                 ? Colors.white
                                 : Colors.black87,
-                            fontSize: 16,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
                           ),
                           decoration: InputDecoration(
                             hintText: 'Search photos by tag...',
-                            hintStyle: TextStyle(
+                            hintStyle: GoogleFonts.poppins(
                               color:
                                   (Theme.of(context).brightness ==
                                               Brightness.dark
                                           ? Colors.white
                                           : Colors.black54)
                                       .withValues(alpha: 0.5),
-                              fontSize: 16,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w400,
                             ),
                             prefixIcon: Icon(
                               Icons.search,
                               color: Colors.lightBlue.shade300,
                             ),
+                            suffixIcon:
+                                (_searchController.text.isNotEmpty ||
+                                    _selectedTags.isNotEmpty)
+                                ? IconButton(
+                                    icon: Icon(
+                                      Icons.close,
+                                      color: Colors.lightBlue.shade300,
+                                    ),
+                                    onPressed: () {
+                                      setState(() {
+                                        _searchController.clear();
+                                        _selectedTags.clear();
+                                        _onSearchChanged();
+                                      });
+                                    },
+                                  )
+                                : null,
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
@@ -281,7 +304,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                         child: Text(
                           _searchController.text.isEmpty
-                              ? 'Popular tags'
+                              ? 'Common Words'
                               : 'Suggestions',
                           style: TextStyle(
                             color: Colors.lightBlue.shade300,
@@ -297,12 +320,20 @@ class _SearchScreenState extends State<SearchScreen> {
                           itemCount: _filteredSuggestions.length,
                           itemBuilder: (context, index) {
                             final tag = _filteredSuggestions[index];
+                            final isAlreadySelected = _selectedTags.contains(
+                              tag,
+                            );
                             return InkWell(
                               onTap: () {
                                 setState(() {
-                                  _selectedTags.add(tag);
+                                  if (isAlreadySelected) {
+                                    _selectedTags.remove(tag);
+                                  } else {
+                                    _selectedTags.add(tag);
+                                  }
                                   _searchController.clear();
-                                  _filteredSuggestions = [];
+                                  // Keep dropdown open - just refresh suggestions
+                                  _onSearchChanged();
                                 });
                               },
                               child: Container(
@@ -311,6 +342,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                   vertical: 12,
                                 ),
                                 decoration: BoxDecoration(
+                                  color: isAlreadySelected
+                                      ? Colors.lightBlue.shade100.withValues(
+                                          alpha: 0.3,
+                                        )
+                                      : null,
                                   border:
                                       index < _filteredSuggestions.length - 1
                                       ? Border(
@@ -323,16 +359,31 @@ class _SearchScreenState extends State<SearchScreen> {
                                         )
                                       : null,
                                 ),
-                                child: Text(
-                                  tag,
-                                  style: TextStyle(
-                                    color:
-                                        Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    fontSize: 16,
-                                  ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        tag,
+                                        style: GoogleFonts.poppins(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                          fontSize: 16,
+                                          fontWeight: isAlreadySelected
+                                              ? FontWeight.w600
+                                              : FontWeight.w400,
+                                        ),
+                                      ),
+                                    ),
+                                    if (isAlreadySelected)
+                                      Icon(
+                                        Icons.check,
+                                        color: Colors.lightBlue.shade400,
+                                        size: 20,
+                                      ),
+                                  ],
                                 ),
                               ),
                             );
@@ -350,20 +401,24 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: _selectedTags.map((tag) => Chip(
-                      label: Text(tag),
-                      deleteIcon: const Icon(Icons.close, size: 18),
-                      onDeleted: () {
-                        setState(() {
-                          _selectedTags.remove(tag);
-                        });
-                      },
-                      backgroundColor: Colors.lightBlue.shade100,
-                      labelStyle: TextStyle(
-                        color: Colors.lightBlue.shade700,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    )).toList(),
+                    children: _selectedTags
+                        .map(
+                          (tag) => Chip(
+                            label: Text(tag),
+                            deleteIcon: const Icon(Icons.close, size: 18),
+                            onDeleted: () {
+                              setState(() {
+                                _selectedTags.remove(tag);
+                              });
+                            },
+                            backgroundColor: Colors.lightBlue.shade100,
+                            labelStyle: TextStyle(
+                              color: Colors.lightBlue.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        )
+                        .toList(),
                   ),
                 ),
               // Spacer to push content up

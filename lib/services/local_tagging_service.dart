@@ -153,6 +153,9 @@ class LocalTaggingService {
     // Track if we have STRONG person indicators (face, person, human - not just clothing)
     bool hasStrongPersonLabel = false;
 
+    // Track if we have STRONG food indicators (actual food items, not just context)
+    bool hasStrongFoodLabel = false;
+
     // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
       final text = label.label.toLowerCase();
@@ -201,6 +204,10 @@ class LocalTaggingService {
             bestFoodConfidence = confidence;
             bestFoodLabel = text;
           }
+          // Check if this is a STRONG food label (actual food item, not just context)
+          if (_isStrongFoodLabel(text)) {
+            hasStrongFoodLabel = true;
+          }
         }
       }
       // Document detection with stricter requirements
@@ -234,17 +241,13 @@ class LocalTaggingService {
     for (final label in labels) {
       final text = label.label.toLowerCase();
       if (text.contains('beard') ||
-          text.contains('fun') ||
+          text.contains('fun ') || // 'fun' with space to avoid 'function'
           text.contains('event') ||
           text.contains('party') ||
           text.contains('gathering') ||
-          text.contains('tableware') ||
-          text.contains('alcohol') ||
-          text.contains('drinking') ||
           text.contains('celebration') ||
           text.contains('crew') ||
-          text.contains('team') ||
-          text.contains('sitting')) {
+          text.contains('team')) {
         hasStrongPeopleContext = true;
       }
       // Check for body parts (could be human or animal)
@@ -257,7 +260,8 @@ class LocalTaggingService {
           text.contains('shoulder') ||
           text.contains('torso') ||
           text.contains('body') ||
-          text.contains('skin')) {
+          text.contains('skin') ||
+          text.contains('muscle')) {
         hasBodyParts = true;
       }
       // Check for fur/animal indicators
@@ -274,18 +278,29 @@ class LocalTaggingService {
         hasFurOrAnimalIndicator = true;
       }
     }
-    if (hasStrongPeopleContext && !categories.contains('people')) {
+    // FOOD PRIORITY FIX: Don't add people from weak context (celebration/party) when strong food detected
+    // This prevents cake photos being tagged as "people" just because of "celebration" label
+    if (hasStrongPeopleContext &&
+        !categories.contains('people') &&
+        !hasStrongFoodLabel) {
       categories.add('people');
       developer.log(
         '👤 Added people category from context (beard/fun/event/crew/team/etc)',
       );
+    } else if (hasStrongPeopleContext && hasStrongFoodLabel) {
+      developer.log(
+        '🍰 Skipped people from context - strong food label detected (${bestFoodLabel ?? "food"})',
+      );
     }
-    
+
     // BODY PARTS WITHOUT FUR = PEOPLE (Issue #2)
     // If we detect body parts but no fur/animal indicators, it's likely human
-    if (hasBodyParts && !hasFurOrAnimalIndicator && !categories.contains('people')) {
+    if (hasBodyParts &&
+        !hasFurOrAnimalIndicator &&
+        !categories.contains('people')) {
       categories.add('people');
-      hasStrongPersonLabel = true; // Treat as strong since body parts without fur = human
+      hasStrongPersonLabel =
+          true; // Treat as strong since body parts without fur = human
       developer.log(
         '👤 Added people category - body parts detected without fur/animal indicators',
       );
@@ -342,6 +357,19 @@ class LocalTaggingService {
       );
     }
 
+    // FOOD vs PEOPLE CONFLICT: If strong food detected without strong people, food wins
+    // This prevents kitchens/tables with food from being tagged as people
+    if (categories.contains('people') &&
+        categories.contains('food') &&
+        hasStrongFoodLabel &&
+        !hasStrongPersonLabel &&
+        !hasStrongPeopleContext) {
+      categories.remove('people');
+      developer.log(
+        '🔄 Removed people - strong food label detected without strong person indicator',
+      );
+    }
+
     // SCENERY FILTER: Remove scenery if only indoor/product labels were matched
     // This prevents "shelf, room, building, products" from being tagged as scenery
     if (categories.contains('scenery') && hasOnlyWeakScenery) {
@@ -356,6 +384,33 @@ class LocalTaggingService {
           '🔄 Removed scenery - only weak indoor labels (building/shelf/room/products)',
         );
       }
+    }
+
+    // SCENERY vs PEOPLE CONFLICT: Body parts detected means people, not scenery
+    // This prevents outdoor photos with visible body parts from being tagged as scenery
+    if (categories.contains('scenery') &&
+        categories.contains('people') &&
+        hasBodyParts) {
+      categories.remove('scenery');
+      developer.log(
+        '🔄 Removed scenery - body parts detected, keeping people category',
+      );
+    }
+
+    // SCENERY ONLY WITH BODY PARTS: Even if no other category, body parts = people
+    if (categories.contains('scenery') &&
+        hasBodyParts &&
+        !hasFurOrAnimalIndicator) {
+      // Body parts without people category means the weak filter removed it - add it back
+      if (!categories.contains('people')) {
+        categories.add('people');
+        hasStrongPersonLabel = true;
+        developer.log(
+          '👤 Re-added people category - body parts found with scenery',
+        );
+      }
+      categories.remove('scenery');
+      developer.log('🔄 Removed scenery - body parts take priority');
     }
 
     // DOCUMENT FILTER: Require strong document indicators
@@ -469,8 +524,31 @@ class LocalTaggingService {
       'ballet',
       'dance',
       'dancer',
-      // NOTE: Clothing moved to weak labels - requires strong person context
-      // Just seeing clothes/accessories without face/person is not enough
+      // Clothing worn by people (CRITICAL for people detection)
+      'dress',
+      'jacket',
+      'coat',
+      'sweater',
+      'shirt',
+      'blouse',
+      'suit',
+      'tuxedo',
+      'gown',
+      'outwear',
+      'outerwear',
+      'hoodie',
+      'cardigan',
+      'vest',
+      'uniform',
+      'costume',
+      'attire',
+      'apparel',
+      'jeans',
+      'pants',
+      'trousers',
+      'shorts',
+      'skirt',
+      'legging',
       // Body features unique to humans
       'beard',
       'mustache',
@@ -478,22 +556,24 @@ class LocalTaggingService {
       'makeup',
       'hairstyle',
       // Drinking/eating contexts with people
-      'drinking',
       'cheers',
       'toast',
       // Actions/poses/emotions specific to humans
-      'smiling',
+      'smile',
+      'smil', // covers smiling, smiled
+      'grin',
+      'frown',
+      'expression',
       'laughing',
       'posing',
       'dancing',
       'singing',
       'clapping',
       'waving',
-      'fun', // typically implies human activity
-      'cool', // often describes person/style
       'happy',
       'joy',
-      'playing',
+      // Note: removed 'fun', 'cool', 'show', 'play', 'standing', 'sitting', 'drinking'
+      // - these cause false positives (display, showcase, playful, function, cooling)
       'leisure', // leisure activities involve people
       'walking', // person walking
       'jogging',
@@ -555,8 +635,42 @@ class LocalTaggingService {
       // Group/team context (CRITICAL for family photos)
       'crew',
       'team',
-      'sitting',
       'audience',
+      // Poses/actions that indicate humans (CRITICAL - prevent Other categorization)
+      // Note: removed 'sitting', 'standing' - too generic, can apply to objects/furniture
+      'pose',
+      'posing',
+      // Facial expressions (CRITICAL - smile = person)
+      'smile',
+      'smil', // covers smiling, smiled, smile
+      'grin',
+      'frown',
+      'expression',
+      // Clothing worn by people (CRITICAL - clothes on body = people)
+      'dress',
+      'jacket',
+      'coat',
+      'sweater',
+      'shirt',
+      'blouse',
+      'suit',
+      'tuxedo',
+      'gown',
+      'outwear',
+      'outerwear',
+      'hoodie',
+      'cardigan',
+      'vest',
+      'uniform',
+      'costume',
+      'attire',
+      'apparel',
+      'jeans',
+      'pants',
+      'trousers',
+      'shorts',
+      'skirt',
+      'legging',
     ];
     return strongLabels.any((k) => label.contains(k));
   }
@@ -591,17 +705,7 @@ class LocalTaggingService {
       'bag',
       'handbag',
       'backpack',
-      // Clothing/fashion - can appear on mannequins, in stores, or as objects
-      'fashion',
-      'dress',
-      'clothing',
-      'shirt',
-      'pants',
-      'jeans',
-      'jacket',
-      'coat',
-      'sweater',
-      'skirt',
+      // Accessories only (not main clothing - those are now strong)
       'shoe',
       'sneaker',
       'boot',
@@ -615,7 +719,6 @@ class LocalTaggingService {
       'jewelry',
       'necklace',
       'bracelet',
-      'suit',
       'tie',
       'scarf',
       'glove',
@@ -626,7 +729,6 @@ class LocalTaggingService {
       'chair',
       'table',
       'furniture',
-      'room',
       'office',
       'monitor',
       'computer',
@@ -634,7 +736,6 @@ class LocalTaggingService {
       // Generic objects
       'toy',
       'vehicle',
-      'pattern',
       'musical instrument',
     ];
     return weakLabels.any((k) => label.contains(k));
@@ -761,6 +862,64 @@ class LocalTaggingService {
     return foodKeywords.any((k) => label.contains(k));
   }
 
+  /// STRONG food labels - actual food items (not context like restaurant/cooking)
+  /// Used to prevent weak people context (celebration/party) from overriding food
+  static bool _isStrongFoodLabel(String label) {
+    // Actual food items that definitely indicate food is the subject
+    const strongFoodKeywords = [
+      // Baked goods / desserts
+      'cake',
+      'cookie',
+      'ice cream',
+      'chocolate',
+      'candy',
+      'donut',
+      'doughnut',
+      'croissant',
+      'muffin',
+      'pancake',
+      'waffle',
+      'pie',
+      'pastry',
+      'bread',
+      // Main dishes
+      'pizza',
+      'burger',
+      'sandwich',
+      'pasta',
+      'rice',
+      'sushi',
+      'taco',
+      'burrito',
+      'hotdog',
+      'hot dog',
+      'steak',
+      'chicken',
+      'drumstick',
+      'noodle',
+      'fries',
+      'soup',
+      'salad',
+      // Fruits & vegetables
+      'fruit',
+      'vegetable',
+      'apple',
+      'banana',
+      'orange',
+      'grape',
+      'strawberry',
+      'watermelon',
+      'tomato',
+      'potato',
+      'carrot',
+      'broccoli',
+      // Dairy & protein
+      'egg',
+      'cheese',
+    ];
+    return strongFoodKeywords.any((k) => label.contains(k));
+  }
+
   static bool _isDocumentLabel(String label) {
     // Only match actual documents with text/writing - IDs, papers, receipts, etc.
     const docKeywords = [
@@ -811,7 +970,9 @@ class LocalTaggingService {
       'scenery',
       'nature',
       'outdoor',
-      // Note: 'sky', 'cloud' removed - often falsely detected on grey/blue backgrounds
+      // Sky/cloud - strong outdoor indicators (restored)
+      'sky',
+      'cloud',
       'mountain',
       'hill',
       'valley',
@@ -842,7 +1003,7 @@ class LocalTaggingService {
       'church',
       'temple',
       'monument',
-      'statue',
+      // Note: 'statue' removed - often inside museums/buildings, not outdoor scenery
       // Natural landscapes
       'field',
       'meadow',
@@ -884,9 +1045,19 @@ class LocalTaggingService {
       'ceiling',
       'window',
       'door',
-      // Sky/cloud often falsely detected on grey/blue solid backgrounds
-      'sky',
-      'cloud',
+      // Indoor furniture that doesn't indicate outdoor scenery
+      'couch',
+      'sofa',
+      'chair',
+      'table',
+      'desk',
+      'bed',
+      // Art/sculptures are typically indoors in museums
+      'statue',
+      'sculpture',
+      'art',
+      'museum',
+      'gallery',
       // Skyscraper often falsely detected on electronic boards/screens
       'skyscraper',
       'tower',
