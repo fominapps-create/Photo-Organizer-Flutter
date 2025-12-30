@@ -229,6 +229,8 @@ class LocalTaggingService {
     // SECOND PASS: Check for strong people indicators that may have been missed
     // If we have beard, fun, event, party etc. without explicit 'person', add people
     bool hasStrongPeopleContext = false;
+    bool hasBodyParts = false;
+    bool hasFurOrAnimalIndicator = false;
     for (final label in labels) {
       final text = label.label.toLowerCase();
       if (text.contains('beard') ||
@@ -239,15 +241,53 @@ class LocalTaggingService {
           text.contains('tableware') ||
           text.contains('alcohol') ||
           text.contains('drinking') ||
-          text.contains('celebration')) {
+          text.contains('celebration') ||
+          text.contains('crew') ||
+          text.contains('team') ||
+          text.contains('sitting')) {
         hasStrongPeopleContext = true;
-        break;
+      }
+      // Check for body parts (could be human or animal)
+      if (text.contains('hand') ||
+          text.contains('finger') ||
+          text.contains('arm') ||
+          text.contains('leg') ||
+          text.contains('foot') ||
+          text.contains('back') ||
+          text.contains('shoulder') ||
+          text.contains('torso') ||
+          text.contains('body') ||
+          text.contains('skin')) {
+        hasBodyParts = true;
+      }
+      // Check for fur/animal indicators
+      if (text.contains('fur') ||
+          text.contains('paw') ||
+          text.contains('snout') ||
+          text.contains('tail') ||
+          text.contains('whisker') ||
+          text.contains('feather') ||
+          text.contains('beak') ||
+          text.contains('wing') ||
+          text.contains('hoof') ||
+          text.contains('claw')) {
+        hasFurOrAnimalIndicator = true;
       }
     }
     if (hasStrongPeopleContext && !categories.contains('people')) {
       categories.add('people');
       developer.log(
-        '👤 Added people category from context (beard/fun/event/etc)',
+        '👤 Added people category from context (beard/fun/event/crew/team/etc)',
+      );
+    }
+    
+    // BODY PARTS WITHOUT FUR = PEOPLE (Issue #2)
+    // If we detect body parts but no fur/animal indicators, it's likely human
+    if (hasBodyParts && !hasFurOrAnimalIndicator && !categories.contains('people')) {
+      categories.add('people');
+      hasStrongPersonLabel = true; // Treat as strong since body parts without fur = human
+      developer.log(
+        '👤 Added people category - body parts detected without fur/animal indicators',
       );
     }
 
@@ -506,6 +546,17 @@ class LocalTaggingService {
       'forehead',
       'chin',
       'cheek',
+      // Back-facing people (CRITICAL - don't delete photos of people from behind)
+      'back',
+      'shoulder',
+      'torso',
+      'silhouette',
+      'posture',
+      // Group/team context (CRITICAL for family photos)
+      'crew',
+      'team',
+      'sitting',
+      'audience',
     ];
     return strongLabels.any((k) => label.contains(k));
   }
@@ -533,7 +584,6 @@ class LocalTaggingService {
       'feet',
       'toe',
       // Generic actions animals can do too
-      'sitting',
       'standing',
       'walking',
       'running',
@@ -689,9 +739,24 @@ class LocalTaggingService {
       'restaurant',
       'cooking',
       'baking',
-      'kitchen',
-      'plate',
-      'bowl',
+      // Note: kitchen, plate, bowl, sink removed - don't indicate actual food present
+      // Only tag as food if actual food items are detected
+      'hotdog',
+      'hot dog',
+      'drumstick',
+      'chicken',
+      'steak',
+      'sushi',
+      'noodle',
+      'taco',
+      'burrito',
+      'fries',
+      'donut',
+      'doughnut',
+      'croissant',
+      'muffin',
+      'pancake',
+      'waffle',
     ];
     return foodKeywords.any((k) => label.contains(k));
   }

@@ -304,23 +304,44 @@ class _PhotoViewerState extends State<PhotoViewer>
     return Positioned(
       left: 0,
       right: 0,
-      bottom: bottomPadding + 16,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          if (widget.onAddToAlbum != null)
-            _buildActionButton(Icons.folder, 'Album', Colors.orange, () {
-              widget.onAddToAlbum?.call(_currentPhoto.url);
-            }),
-          if (widget.onShare != null)
-            _buildActionButton(Icons.share, 'Share', Colors.orange, () {
-              widget.onShare?.call(_currentPhoto.url);
-            }),
-          if (widget.onDelete != null)
-            _buildActionButton(Icons.delete, 'Delete', Colors.orange, () {
-              widget.onDelete?.call(_currentPhoto.url);
-            }),
-        ],
+      bottom: 0,
+      child: Container(
+        // Navbar background that extends to safe area
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.85),
+              Colors.black.withValues(alpha: 0.7),
+              Colors.transparent,
+            ],
+            stops: const [0.0, 0.6, 1.0],
+          ),
+        ),
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: bottomPadding + 16,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            if (widget.onAddToAlbum != null)
+              _buildActionButton(Icons.folder, 'Album', Colors.orange, () {
+                widget.onAddToAlbum?.call(_currentPhoto.url);
+              }),
+            if (widget.onShare != null)
+              _buildActionButton(Icons.share, 'Share', Colors.orange, () {
+                widget.onShare?.call(_currentPhoto.url);
+              }),
+            if (widget.onDelete != null)
+              _buildActionButton(Icons.delete, 'Delete', Colors.orange, () {
+                widget.onDelete?.call(_currentPhoto.url);
+              }),
+          ],
+        ),
       ),
     );
   }
@@ -575,8 +596,8 @@ class _PhotoViewerState extends State<PhotoViewer>
     return Positioned(
       left: 0,
       right: 0,
-      // Position right above the action buttons
-      bottom: bottomPadding + 80,
+      // Position right above the action buttons navbar (navbar is ~60px + safe area)
+      bottom: bottomPadding + 60,
       // IgnorePointer prevents this overlay from blocking horizontal swipe gestures
       child: IgnorePointer(
         child: Container(

@@ -343,72 +343,31 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 ),
               if (_filteredSuggestions.isNotEmpty) const SizedBox(height: 16),
-              // Recommended tags section
-              Expanded(
-                child: _loadingTags
-                    ? const Center(child: CircularProgressIndicator())
-                    : _allAvailableTags.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No tags available yet.\nUpload and scan some photos!',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color:
-                                Theme.of(context).brightness == Brightness.dark
-                                ? Colors.white54
-                                : Colors.black54,
-                            fontSize: 16,
-                          ),
-                        ),
-                      )
-                    : SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Available Tags',
-                              style: TextStyle(
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.white
-                                    : Colors.black87,
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _selectedTags.isEmpty
-                                  ? 'Tap tags to select (${_allAvailableTags.length} available)'
-                                  : '${_selectedTags.length} tag${_selectedTags.length == 1 ? '' : 's'} selected',
-                              style: TextStyle(
-                                color: _selectedTags.isEmpty
-                                    ? (Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? Colors.white
-                                              : Colors.black54)
-                                          .withValues(alpha: 0.6)
-                                    : Colors.lightBlue.shade300,
-                                fontSize: 14,
-                                fontWeight: _selectedTags.isEmpty
-                                    ? FontWeight.normal
-                                    : FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              children: _allAvailableTags
-                                  .map((tag) => _buildTagChip(tag))
-                                  .toList(),
-                            ),
-                          ],
-                        ),
+              // Selected tags display (if any)
+              if (_selectedTags.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _selectedTags.map((tag) => Chip(
+                      label: Text(tag),
+                      deleteIcon: const Icon(Icons.close, size: 18),
+                      onDeleted: () {
+                        setState(() {
+                          _selectedTags.remove(tag);
+                        });
+                      },
+                      backgroundColor: Colors.lightBlue.shade100,
+                      labelStyle: TextStyle(
+                        color: Colors.lightBlue.shade700,
+                        fontWeight: FontWeight.w600,
                       ),
-              ),
+                    )).toList(),
+                  ),
+                ),
+              // Spacer to push content up
+              const Expanded(child: SizedBox()),
               // Search button
               if (_selectedTags.isNotEmpty)
                 Padding(
