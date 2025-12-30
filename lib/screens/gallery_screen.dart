@@ -19,6 +19,7 @@ import '../services/scan_foreground_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'photo_viewer.dart';
+import 'trash_screen.dart';
 import 'intro_video_screen.dart';
 import 'onboarding_screen.dart';
 
@@ -249,9 +250,6 @@ class GalleryScreenState extends State<GalleryScreen>
     if (photoUrls.isEmpty) return;
 
     try {
-      _showSnackBar(
-        'Preparing ${photoUrls.length == 1 ? 'photo' : '${photoUrls.length} photos'}...',
-      );
 
       final xFiles = <XFile>[];
 
@@ -335,7 +333,18 @@ class GalleryScreenState extends State<GalleryScreen>
 
       if (mounted) {
         Navigator.pop(context); // Close viewer
-        _showSnackBar('Photo moved to trash');
+        _showSnackBar(
+          'Photo moved to trash',
+          actionLabel: 'View Trash',
+          onAction: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TrashScreen(onRestored: _loadAllImages),
+              ),
+            );
+          },
+        );
       }
     } catch (e) {
       _showSnackBar('Failed to delete: $e');
@@ -701,7 +710,12 @@ class GalleryScreenState extends State<GalleryScreen>
     widget.onAlbumCreated?.call();
   }
 
-  void _showSnackBar(String message, {Duration? duration}) {
+  void _showSnackBar(
+    String message, {
+    Duration? duration,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -709,6 +723,12 @@ class GalleryScreenState extends State<GalleryScreen>
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.only(bottom: 48, left: 16, right: 16),
         duration: duration ?? const Duration(seconds: 4),
+        action: actionLabel != null && onAction != null
+            ? SnackBarAction(
+                label: actionLabel,
+                onPressed: onAction,
+              )
+            : null,
       ),
     );
   }
@@ -1037,8 +1057,25 @@ class GalleryScreenState extends State<GalleryScreen>
 
     if (state == AppLifecycleState.resumed) {
       developer.log('📸 App resumed');
+      // App is now in foreground - stop foreground notification if scanning
+      ScanForegroundService.setAppInForeground(true);
+      if (ScanForegroundService.isRunning) {
+        // Stop the notification when user comes back to app
+        ScanForegroundService.stopService();
+      }
       // Check for new photos when app comes back
       _checkForGalleryChanges();
+    } else if (state == AppLifecycleState.paused) {
+      // App going to background - start foreground service if scanning
+      developer.log('📸 App paused - going to background');
+      ScanForegroundService.setAppInForeground(false);
+      if (_scanning && !ScanForegroundService.isRunning) {
+        // Start foreground service to keep scanning alive
+        ScanForegroundService.startService(
+          total: _cachedLocalPhotoCount,
+          scanned: _scannedCountNotifier.value,
+        );
+      }
     } else if (state == AppLifecycleState.detached) {
       // App is being killed - handle graceful shutdown
       developer.log('📸 App detached - graceful shutdown');
@@ -1143,9 +1180,17 @@ class GalleryScreenState extends State<GalleryScreen>
       '✅ _loadOrganizedImages completed. Found ${imageUrls.length} photos',
     );
 
-    await _loadTags();
-    developer.log('Total photos in gallery: ${imageUrls.length}');
+    // Show gallery immediately - load tags in background
     setState(() => loading = false);
+    developer.log('Total photos in gallery: ${imageUrls.length}');
+
+    // Load tags in background (non-blocking) and refresh UI when done
+    _loadTags().then((_) {
+      if (mounted) {
+        setState(() {}); // Refresh to show loaded tags
+        developer.log('📂 Tags loaded in background, UI refreshed');
+      }
+    });
 
     // Sync tags from server in background (non-blocking) if available
     _syncTagsFromServerInBackground();
@@ -1932,6 +1977,8 @@ class GalleryScreenState extends State<GalleryScreen>
           developer.log(
             '📱 Server offline - CLIP validation not possible, marking complete',
           );
+          // Update scanned count to reflect all tagged photos
+          _scannedCountNotifier.value = photoTags.length;
           setState(() {
             _validationComplete = true;
           });
@@ -1972,6 +2019,8 @@ class GalleryScreenState extends State<GalleryScreen>
           developer.log(
             '✅ No YOLO-classified photos found. Marking validation as complete.',
           );
+          // Update scanned count to reflect all tagged photos
+          _scannedCountNotifier.value = photoTags.length;
           setState(() {
             _validationComplete = true;
           });
@@ -4890,8 +4939,19 @@ class GalleryScreenState extends State<GalleryScreen>
       });
       _updateSelectionCount();
 
-      // Show feedback
-      _showSnackBar('Moved $count photo${count > 1 ? 's' : ''} to trash');
+      // Show feedback with View Trash button
+      _showSnackBar(
+        'Moved $count photo${count > 1 ? 's' : ''} to trash',
+        actionLabel: 'View Trash',
+        onAction: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TrashScreen(onRestored: _loadAllImages),
+            ),
+          );
+        },
+      );
     } catch (e) {
       developer.log('❌ Error deleting photos: $e');
       _showSnackBar('Failed to delete: $e');

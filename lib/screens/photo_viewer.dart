@@ -575,7 +575,8 @@ class _PhotoViewerState extends State<PhotoViewer>
     return Positioned(
       left: 0,
       right: 0,
-      bottom: 0,
+      // Position right above the action buttons
+      bottom: bottomPadding + 80,
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -589,7 +590,7 @@ class _PhotoViewerState extends State<PhotoViewer>
             stops: const [0.0, 0.7, 1.0],
           ),
         ),
-        padding: EdgeInsets.fromLTRB(16, 48, 16, 128 + 32 + bottomPadding),
+        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,

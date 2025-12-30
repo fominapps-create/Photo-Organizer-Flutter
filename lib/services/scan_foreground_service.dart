@@ -8,6 +8,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart'
 class ScanForegroundService {
   static bool _isInitialized = false;
   static bool _isRunning = false;
+  static bool _isAppInForeground = true; // Track if app is visible
 
   // Track progress for graceful shutdown notification
   static int _lastScanned = 0;
@@ -16,6 +17,12 @@ class ScanForegroundService {
 
   // Local notifications plugin for post-shutdown messages
   static local_notif.FlutterLocalNotificationsPlugin? _localNotifications;
+
+  /// Set app foreground state (call from app lifecycle observer)
+  static void setAppInForeground(bool inForeground) {
+    _isAppInForeground = inForeground;
+    developer.log('📱 App foreground state: $inForeground');
+  }
 
   /// Initialize the foreground task system (call once at app start)
   static Future<void> init() async {
@@ -48,10 +55,21 @@ class ScanForegroundService {
   }
 
   /// Start the foreground service with initial notification
+  /// Only shows notification when app is in background
   static Future<void> startService({
     required int total,
     int scanned = 0,
   }) async {
+    // Don't start foreground service if app is in foreground
+    // We only need it to keep the process alive when in background
+    if (_isAppInForeground) {
+      // Just track progress without starting service
+      _lastScanned = scanned;
+      _lastTotal = total;
+      developer.log('📱 Skipping foreground service - app in foreground');
+      return;
+    }
+
     if (_isRunning) {
       // Already running, just update
       await updateProgress(scanned: scanned, total: total);

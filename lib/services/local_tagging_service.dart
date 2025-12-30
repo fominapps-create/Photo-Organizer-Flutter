@@ -182,24 +182,66 @@ class LocalTaggingService {
       }
     }
 
+    // SECOND PASS: Check for strong people indicators that may have been missed
+    // If we have beard, fun, event, party etc. without explicit 'person', add people
+    bool hasStrongPeopleContext = false;
+    for (final label in labels) {
+      final text = label.label.toLowerCase();
+      if (text.contains('beard') ||
+          text.contains('fun') ||
+          text.contains('event') ||
+          text.contains('party') ||
+          text.contains('gathering') ||
+          text.contains('tableware') ||
+          text.contains('alcohol') ||
+          text.contains('drinking') ||
+          text.contains('celebration')) {
+        hasStrongPeopleContext = true;
+        break;
+      }
+    }
+    if (hasStrongPeopleContext && !categories.contains('people')) {
+      categories.add('people');
+      developer.log('👤 Added people category from context (beard/fun/event/etc)');
+    }
+
     // CONFLICT RESOLUTION: When both people AND animals detected, check confidence
     // This prevents animal photos being tagged as people due to weak body-part labels
     if (categories.contains('people') && categories.contains('animals')) {
       // If animal confidence is significantly higher, remove people
       // Or if people detection is based on weak/generic labels
       if (bestAnimalConfidence > bestPeopleConfidence + 0.1) {
-        // Animal label is more confident - likely an animal photo
-        categories.remove('people');
-        developer.log(
-          '🔄 Conflict: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
-        );
-      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '')) {
+        // But if we have strong people context, keep people instead
+        if (hasStrongPeopleContext) {
+          categories.remove('animals');
+          developer.log(
+            '🔄 Conflict: Kept people (strong context) over animals',
+          );
+        } else {
+          // Animal label is more confident - likely an animal photo
+          categories.remove('people');
+          developer.log(
+            '🔄 Conflict: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
+          );
+        }
+      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '') && !hasStrongPeopleContext) {
         // People detection based on generic label that animals share
         categories.remove('people');
         developer.log(
           '🔄 Conflict: Removed weak people label "$bestPeopleLabel" - animal detected',
         );
       }
+    }
+
+    // LOW CONFIDENCE FILTER: If best people confidence is very low, use 'other'
+    // This prevents false positives like crystals being tagged as "mouth"
+    if (categories.contains('people') &&
+        bestPeopleConfidence < 0.7 &&
+        _isWeakPeopleLabel(bestPeopleLabel ?? '')) {
+      categories.remove('people');
+      developer.log(
+        '🔄 Low confidence: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) - too uncertain',
+      );
     }
 
     // Priority order: people > animals > food > document > scenery
@@ -211,19 +253,22 @@ class LocalTaggingService {
     if (categories.contains('document')) prioritized.add('document');
     if (categories.contains('scenery')) prioritized.add('scenery');
 
-    // Build final tags: main category first
+    // Build final tags: ONLY the main category (single tag for display)
+    // Screenshot goes to allDetections, not as a category
     final resultTags = <String>[];
     if (prioritized.isNotEmpty) {
       resultTags.add(prioritized.first);
-      // Add screenshot as secondary tag if detected and main category is people
-      if (hasScreenshot && prioritized.first == 'people') {
-        resultTags.add('screenshot');
-      }
+      // Screenshot is added to allDetections, not as a tag
     } else {
       // Log when no category matched - helps debug misses
       developer.log(
         '⚠️ No category matched for labels: ${allDetections.join(", ")}',
       );
+    }
+
+    // Add screenshot to allDetections if detected (so it shows as an object)
+    if (hasScreenshot && !allDetections.contains('Screenshot')) {
+      allDetections.add('Screenshot');
     }
 
     // Return result with both tags and raw detections
@@ -328,6 +373,16 @@ class LocalTaggingService {
       'glove',
       'sock',
       'belt',
+      // Body features unique to humans
+      'beard',
+      'mustache',
+      'tattoo',
+      'makeup',
+      'hairstyle',
+      // Drinking/eating contexts with people
+      'drinking',
+      'cheers',
+      'toast',
       // Actions/poses/emotions specific to humans
       'smiling',
       'laughing',
@@ -350,6 +405,11 @@ class LocalTaggingService {
       'exercising',
       'workout',
       'fitness',
+      // Headphones/earbuds (humans wear these, not animals)
+      'headphone',
+      'earphone',
+      'earbud',
+      'headset',
     ];
     return peopleKeywords.any((k) => label.contains(k));
   }
