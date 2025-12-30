@@ -149,6 +149,9 @@ class LocalTaggingService {
     
     // Track weak scenery labels (indoor/product labels that shouldn't trigger scenery)
     bool hasOnlyWeakScenery = true;
+    
+    // Track if we have STRONG person indicators (face, person, human - not just clothing)
+    bool hasStrongPersonLabel = false;
 
     // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
@@ -164,6 +167,10 @@ class LocalTaggingService {
         if (confidence > bestPeopleConfidence) {
           bestPeopleConfidence = confidence;
           bestPeopleLabel = text;
+        }
+        // Check if this is a STRONG person label (not just clothing/accessories)
+        if (_isStrongPersonLabel(text)) {
+          hasStrongPersonLabel = true;
         }
       }
       if (_isAnimalLabel(text)) {
@@ -278,6 +285,15 @@ class LocalTaggingService {
       categories.remove('people');
       developer.log(
         '🔄 Low confidence: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) - too uncertain',
+      );
+    }
+
+    // WEAK PEOPLE FILTER: Remove people if ONLY weak labels detected (clothing, furniture, etc)
+    // This prevents false positives like crates with labels, excel screenshots, cat photos
+    if (categories.contains('people') && !hasStrongPersonLabel && !hasStrongPeopleContext) {
+      categories.remove('people');
+      developer.log(
+        '🔄 Removed people - no strong person indicator found (only weak: ${bestPeopleLabel ?? "?"})',
       );
     }
 
@@ -412,36 +428,8 @@ class LocalTaggingService {
       'ballet',
       'dance',
       'dancer',
-      // Clothing/fashion (strongly indicates person - animals don't wear these)
-      'fashion',
-      'dress',
-      'clothing',
-      'shirt',
-      'pants',
-      'jeans',
-      'jacket',
-      'coat',
-      'sweater',
-      'skirt',
-      'shoe',
-      'sneaker',
-      'boot',
-      'hat',
-      'cap',
-      'glasses',
-      'sunglasses',
-      'goggle', // goggles, swimming goggles, ski goggles
-      'eyewear',
-      'watch',
-      'jewelry',
-      'necklace',
-      'bracelet',
-      'suit',
-      'tie',
-      'scarf',
-      'glove',
-      'sock',
-      'belt',
+      // NOTE: Clothing moved to weak labels - requires strong person context
+      // Just seeing clothes/accessories without face/person is not enough
       // Body features unique to humans
       'beard',
       'mustache',
@@ -483,6 +471,39 @@ class LocalTaggingService {
     return peopleKeywords.any((k) => label.contains(k));
   }
 
+  /// STRONG person labels - definitely indicate a human is present
+  /// Used to validate people category when weak labels are also detected
+  static bool _isStrongPersonLabel(String label) {
+    const strongLabels = [
+      'person',
+      'people',
+      'human',
+      'man',
+      'woman',
+      'child',
+      'kid',
+      'baby',
+      'face',
+      'selfie',
+      'portrait',
+      'crowd',
+      'group',
+      'family',
+      'couple',
+      'boy',
+      'girl',
+      'adult',
+      'teenager',
+      'elder',
+      'senior',
+      'beard',
+      'mustache',
+      'smiling',
+      'laughing',
+    ];
+    return strongLabels.any((k) => label.contains(k));
+  }
+
   /// Weak people labels - could match animals or other objects
   /// Used for conflict resolution when both people and animals detected
   static bool _isWeakPeopleLabel(String label) {
@@ -514,6 +535,51 @@ class LocalTaggingService {
       'bag',
       'handbag',
       'backpack',
+      // Clothing/fashion - can appear on mannequins, in stores, or as objects
+      'fashion',
+      'dress',
+      'clothing',
+      'shirt',
+      'pants',
+      'jeans',
+      'jacket',
+      'coat',
+      'sweater',
+      'skirt',
+      'shoe',
+      'sneaker',
+      'boot',
+      'hat',
+      'cap',
+      'glasses',
+      'sunglasses',
+      'goggle',
+      'eyewear',
+      'watch',
+      'jewelry',
+      'necklace',
+      'bracelet',
+      'suit',
+      'tie',
+      'scarf',
+      'glove',
+      'sock',
+      'belt',
+      // Furniture/indoor items that don't indicate people
+      'desk',
+      'chair',
+      'table',
+      'furniture',
+      'room',
+      'office',
+      'monitor',
+      'computer',
+      'keyboard',
+      // Generic objects
+      'toy',
+      'vehicle',
+      'pattern',
+      'musical instrument',
     ];
     return weakLabels.any((k) => label.contains(k));
   }
@@ -674,8 +740,7 @@ class LocalTaggingService {
       'scenery',
       'nature',
       'outdoor',
-      'sky',
-      'cloud',
+      // Note: 'sky', 'cloud' removed - often falsely detected on grey/blue backgrounds
       'mountain',
       'hill',
       'valley',
@@ -701,7 +766,7 @@ class LocalTaggingService {
       'street',
       'road',
       'bridge',
-      'tower',
+      // Note: 'tower', 'skyscraper' removed - often falsely detected on electronic boards
       'castle',
       'church',
       'temple',
@@ -748,6 +813,15 @@ class LocalTaggingService {
       'ceiling',
       'window',
       'door',
+      // Sky/cloud often falsely detected on grey/blue solid backgrounds
+      'sky',
+      'cloud',
+      // Skyscraper often falsely detected on electronic boards/screens
+      'skyscraper',
+      'tower',
+      // Mobile phone screenshots often have these
+      'mobile phone',
+      'phone',
     ];
     return weakLabels.any((k) => label.contains(k));
   }

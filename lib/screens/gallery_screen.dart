@@ -1431,7 +1431,7 @@ class GalleryScreenState extends State<GalleryScreen>
                     Widget? icon;
 
                     if (_scanPreparing) {
-                      liveMessage = 'Preparing AI model...';
+                      liveMessage = 'Preparing to scan...';
                       icon = const SizedBox(
                         width: 14,
                         height: 14,
