@@ -80,7 +80,7 @@ class CLIPPhotoClassifier:
             # Map category indices to clean names
             category_names = [
                 "people", "animals", "food", "scenery",
-                "document"
+                "document", "illustration"
             ]
             
             # Build all scores for dynamic threshold adjustment
@@ -138,6 +138,17 @@ class CLIPPhotoClassifier:
                     
                 if prob >= required_threshold:
                     results.append((tag_name, prob))
+            
+            # Priority logic: If people is detected, it should be the main category
+            # and suppress document classification (screenshots of people should be 'people', not 'document')
+            people_score = next((score for tag, score in results if tag == "people"), 0)
+            if people_score > 0:
+                # People detected - remove document from results if people is present
+                # The person in the photo is more important than any text visible
+                original_len = len(results)
+                results = [(tag, score) for tag, score in results if tag != "document"]
+                if len(results) < original_len:
+                    logger.info(f"Suppressing document - people detected (score={people_score:.2f})")
             
             # If no categories matched, tag as 'Other' (scanned but uncategorized)
             if not results:

@@ -77,7 +77,20 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
 
   Future<void> _checkFirstLaunch() async {
     final prefs = await SharedPreferences.getInstance();
-    final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+
+    // Use versioned key to ensure onboarding shows after major updates
+    // Increment this version when onboarding content changes significantly
+    const onboardingVersion = 2; // Bumped to force onboarding for current users
+    final hasSeenOnboarding =
+        prefs.getBool('hasSeenOnboarding_v$onboardingVersion') ?? false;
+
+    // Clean up old keys on first check
+    if (!hasSeenOnboarding) {
+      // Check if we need to show onboarding (fresh install or major update)
+      // For fresh installs, no old key exists. For updates, we've incremented version.
+      await prefs.remove('hasSeenOnboarding'); // Clean up legacy key
+    }
+
     setState(() {
       _isFirstLaunch = !hasSeenOnboarding;
       _isCheckingFirstLaunch = false;
@@ -86,7 +99,8 @@ class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
 
   Future<void> _markOnboardingComplete() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('hasSeenOnboarding', true);
+    const onboardingVersion = 2;
+    await prefs.setBool('hasSeenOnboarding_v$onboardingVersion', true);
     setState(() {
       _isFirstLaunch = false;
     });

@@ -8,11 +8,14 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/photo_id.dart';
 import '../services/tag_store.dart';
 import '../services/trash_store.dart';
 import '../services/api_service.dart';
 import '../services/tagging_service_factory.dart';
+import '../services/scan_foreground_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'photo_viewer.dart';
@@ -59,6 +62,8 @@ class GalleryScreenState extends State<GalleryScreen>
   Map<String, List<String>> albums = {};
   String searchQuery = '';
   bool showDebug = false;
+  bool _showDevButtons =
+      false; // Developer buttons (camera/bug) - toggled in settings
   bool _showSearchBar = true;
   bool _showTags = true;
   late final TextEditingController _searchController;
@@ -99,6 +104,17 @@ class GalleryScreenState extends State<GalleryScreen>
   Timer? _actionButtonsHideTimer;
   final ValueNotifier<bool> _showActionButtons = ValueNotifier<bool>(true);
   Timer? _autoScanRetryTimer;
+  Timer?
+  _stuckPhotosRecheckTimer; // Periodic re-check for photos stuck without tags
+  Timer? _memoryMonitorTimer; // Background timer for RAM/CPU monitoring
+  String _cachedMemoryPressure = 'normal'; // Cached pressure level
+  double _cachedCpuUsagePercent =
+      0.0; // Cached CPU usage (0-100, normalized by core count)
+  int _lastCpuTime = 0; // Last total CPU time (jiffies)
+  DateTime _lastCpuCheck = DateTime.now(); // When we last checked CPU
+  int _cpuCoreCount = 0; // Number of CPU cores (cached)
+  final List<double> _cpuSamples = []; // Moving average buffer (3-5 samples)
+  static const int _cpuSampleWindow = 3; // Number of samples for moving average
   bool _showPerformanceMonitor = false;
   double _currentRamUsageMB = 0.0;
   double _peakRamUsageMB = 0.0;
@@ -135,7 +151,7 @@ class GalleryScreenState extends State<GalleryScreen>
   int _validationOverrides = 0;
   final List<Map<String, dynamic>> _validationChanges = [];
   String _currentScrollYear = '';
-  final bool _scanPaused = false;
+  bool _scanPaused = false; // User paused via badge tap or notification
   Set<String> _trashedIds = {};
 
   /// Queue of photo IDs waiting to be scanned (added while scan was in progress)
@@ -147,6 +163,62 @@ class GalleryScreenState extends State<GalleryScreen>
     _cachedFilteredUrls.clear();
     _lastImageUrlsLength = -1; // Force recompute
     if (mounted) setState(() {});
+  }
+
+  /// Toggle pause/resume for scanning
+  void _toggleScanPause() {
+    if (!_scanning) return;
+    final newPaused = !_scanPaused;
+    setState(() {
+      _scanPaused = newPaused;
+    });
+    developer.log(
+      newPaused ? '⏸️ Scan paused by user' : '▶️ Scan resumed by user',
+    );
+
+    // Update notification to show paused/resumed state
+    if (newPaused) {
+      ScanForegroundService.showPaused(
+        scanned: photoTags.length,
+        total: _cachedLocalPhotoCount,
+      );
+    } else {
+      ScanForegroundService.showResumed(
+        scanned: photoTags.length,
+        total: _cachedLocalPhotoCount,
+      );
+    }
+  }
+
+  /// Listen for pause/resume button presses from the notification
+  void Function(Object)? _foregroundTaskCallback;
+
+  void _setupForegroundTaskListener() {
+    // Remove any existing callback
+    if (_foregroundTaskCallback != null) {
+      FlutterForegroundTask.removeTaskDataCallback(_foregroundTaskCallback!);
+    }
+
+    // Add callback to receive data from task handler
+    _foregroundTaskCallback = (Object data) {
+      if (data is Map && data['action'] != null) {
+        final action = data['action'] as String;
+        developer.log('📱 Received foreground task action: $action');
+        if (action == 'pause' && !_scanPaused) {
+          _toggleScanPause();
+        } else if (action == 'resume' && _scanPaused) {
+          _toggleScanPause();
+        }
+      }
+    };
+    FlutterForegroundTask.addTaskDataCallback(_foregroundTaskCallback!);
+  }
+
+  void _cleanupForegroundTaskListener() {
+    if (_foregroundTaskCallback != null) {
+      FlutterForegroundTask.removeTaskDataCallback(_foregroundTaskCallback!);
+      _foregroundTaskCallback = null;
+    }
   }
 
   /// Update the selection count notifier for HomeScreen navbar
@@ -166,9 +238,54 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Share selected photos - called from HomeScreen navbar
-  void shareSelected() {
-    if (_selectedKeys.isNotEmpty) {
-      _showSnackBar('Share ${_selectedKeys.length} photos');
+  void shareSelected() async {
+    if (_selectedKeys.isEmpty) return;
+
+    await _sharePhotos(_selectedKeys.toList());
+  }
+
+  /// Share one or more photos using the system share sheet
+  Future<void> _sharePhotos(List<String> photoUrls) async {
+    if (photoUrls.isEmpty) return;
+
+    try {
+      _showSnackBar(
+        'Preparing ${photoUrls.length == 1 ? 'photo' : '${photoUrls.length} photos'}...',
+      );
+
+      final xFiles = <XFile>[];
+
+      for (final url in photoUrls) {
+        File? file;
+
+        if (url.startsWith('local:')) {
+          final id = url.substring('local:'.length);
+          final asset = _localAssets[id];
+          if (asset != null) {
+            file = await asset.file;
+          }
+        } else if (url.startsWith('file:')) {
+          final path = url.substring('file:'.length);
+          file = File(path);
+        }
+
+        if (file != null && await file.exists()) {
+          xFiles.add(XFile(file.path));
+        }
+      }
+
+      if (xFiles.isEmpty) {
+        _showSnackBar('Could not load photos');
+        return;
+      }
+
+      await Share.shareXFiles(
+        xFiles,
+        text: xFiles.length == 1 ? null : 'Sharing ${xFiles.length} photos',
+      );
+    } catch (e) {
+      developer.log('Share error: $e');
+      _showSnackBar('Failed to share: $e');
     }
   }
 
@@ -226,9 +343,8 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Share a single photo from the viewer
-  void _sharePhotoFromViewer(String photoUrl) {
-    _showSnackBar('Share photo');
-    // TODO: Implement actual share functionality
+  void _sharePhotoFromViewer(String photoUrl) async {
+    await _sharePhotos([photoUrl]);
   }
 
   /// Add a single photo to album from the viewer
@@ -918,11 +1034,37 @@ class GalleryScreenState extends State<GalleryScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+
     if (state == AppLifecycleState.resumed) {
-      developer.log('📸 App resumed - checking for new photos');
-      // Check for new photos when app comes back from background
+      developer.log('📸 App resumed');
+      // Check for new photos when app comes back
       _checkForGalleryChanges();
+    } else if (state == AppLifecycleState.detached) {
+      // App is being killed - handle graceful shutdown
+      developer.log('📸 App detached - graceful shutdown');
+      _handleGracefulShutdown();
     }
+    // Scanning continues in background via foreground service
+    // Only stops when app is killed
+  }
+
+  /// Handle graceful shutdown when app is being killed
+  Future<void> _handleGracefulShutdown() async {
+    if (!_scanning || !ScanForegroundService.isRunning) {
+      developer.log('📸 No scan in progress, nothing to clean up');
+      return;
+    }
+
+    // Mark that we're shutting down
+    ScanForegroundService.beginGracefulShutdown();
+
+    // Show notification with current progress (this survives app death)
+    await ScanForegroundService.showInterruptedNotification();
+
+    // Stop the foreground service
+    await ScanForegroundService.stopService();
+
+    developer.log('📸 Graceful shutdown complete');
   }
 
   @override
@@ -981,6 +1123,10 @@ class GalleryScreenState extends State<GalleryScreen>
     developer.log('🚀 START: _loadAllImages called');
     setState(() => loading = true);
 
+    // Load developer buttons setting
+    final prefs = await SharedPreferences.getInstance();
+    _showDevButtons = prefs.getBool('show_dev_buttons') ?? false;
+
     // Load trashed photo IDs for filtering
     _trashedIds = await TrashStore.getTrashedIds();
     developer.log('🗑️ Loaded ${_trashedIds.length} trashed photo IDs');
@@ -1006,6 +1152,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
     _startAutoScanIfNeeded();
     _startAutoScanRetryTimer();
+    _startStuckPhotosRecheckTimer(); // Periodic re-check for unscanned photos
   }
 
   /// Sync tags from server in background without blocking UI
@@ -1047,6 +1194,85 @@ class GalleryScreenState extends State<GalleryScreen>
         );
         timer.cancel();
         _autoScanRetryTimer = null;
+      }
+    });
+  }
+
+  /// Start a periodic re-check for photos that are stuck without tags.
+  /// This runs less frequently than the retry timer and specifically looks
+  /// for photos that may have failed to scan previously.
+  void _startStuckPhotosRecheckTimer() {
+    _stuckPhotosRecheckTimer?.cancel();
+    // Re-check every 5 minutes for stuck photos
+    _stuckPhotosRecheckTimer = Timer.periodic(const Duration(minutes: 5), (
+      timer,
+    ) async {
+      if (!mounted || _scanning || _clearingTags) return;
+
+      developer.log(
+        '🔍 Periodic re-check: Looking for stuck unscanned photos...',
+      );
+
+      final localUrls = imageUrls
+          .where((u) => u.startsWith('local:') || u.startsWith('file:'))
+          .toList();
+
+      if (localUrls.isEmpty) return;
+
+      // Find photos with no tags or only 'unreadable' tag that we might want to retry
+      int stuckCount = 0;
+      final stuckPhotos = <String>[];
+
+      for (final url in localUrls) {
+        final key = p.basename(url);
+        final tags = photoTags[key] ?? [];
+
+        // Photo is "stuck" if it has no tags at all
+        if (tags.isEmpty) {
+          stuckCount++;
+          stuckPhotos.add(url);
+        }
+      }
+
+      if (stuckCount > 0) {
+        developer.log(
+          '⚠️ Found $stuckCount photos without tags - triggering rescan',
+        );
+
+        // Limit to first 50 stuck photos per re-check to avoid overwhelming the device
+        final photosToRescan = stuckPhotos.take(50).toList();
+
+        // Clear any 'unreadable' tags for these photos so they get retried
+        final prefs = await SharedPreferences.getInstance();
+        for (final url in photosToRescan) {
+          final key = p.basename(url);
+          final tags = photoTags[key] ?? [];
+          if (tags.contains('unreadable')) {
+            // Give it another chance
+            photoTags.remove(key);
+            await prefs.remove('photoTag_$key');
+            developer.log('🔄 Clearing unreadable tag for $key to retry');
+          }
+        }
+
+        // Trigger a scan for the stuck photos
+        if (!_scanning && mounted) {
+          setState(() {
+            _scanning = true;
+            _scanProgress = 0;
+            _scanTotal = photosToRescan.length;
+          });
+
+          await _scanImages(photosToRescan);
+
+          if (mounted) {
+            setState(() {
+              _scanning = false;
+            });
+          }
+        }
+      } else {
+        developer.log('✅ Periodic re-check: All photos have tags');
       }
     });
   }
@@ -1185,6 +1411,9 @@ class GalleryScreenState extends State<GalleryScreen>
                           );
                         },
                       );
+                    } else if (_scanning && _scanPaused) {
+                      liveMessage =
+                          'Paused at $scannedCount/$_cachedLocalPhotoCount ($pct%)';
                     } else if (_scanning) {
                       liveMessage =
                           'Scanning $scannedCount/$_cachedLocalPhotoCount ($pct%)';
@@ -2148,8 +2377,29 @@ class GalleryScreenState extends State<GalleryScreen>
   Future<void> _scanImages(List<String> urls) async {
     developer.log('📸 _scanImages called with ${urls.length} photos');
 
-    // Adaptive batch sizing based on device capabilities
-    int batchSize = await _determineOptimalBatchSize();
+    // Start memory monitoring for adaptive throttling
+    _startMemoryMonitor();
+
+    // Start foreground service with notification (keeps app alive in background)
+    final totalToScan =
+        urls.length + photoTags.length; // Total including already scanned
+    await ScanForegroundService.startService(
+      total: totalToScan,
+      scanned: photoTags.length,
+    );
+
+    // Listen for pause/resume from notification buttons
+    _setupForegroundTaskListener();
+
+    // Get initial config based on device capabilities (CPU cores for baseline)
+    final baseConfig = await _getBaseDeviceConfig();
+    int batchSize = baseConfig['batchSize'] as int;
+    int maxConcurrentBatches = baseConfig['maxConcurrent'] as int;
+
+    developer.log(
+      '⚙️ Base config: batchSize=$batchSize, maxConcurrent=$maxConcurrentBatches',
+    );
+
     final scanStartTime = DateTime.now();
 
     // Track YOLO-classified images for background validation
@@ -2157,10 +2407,11 @@ class GalleryScreenState extends State<GalleryScreen>
 
     // Pipeline approach: process multiple batches concurrently for better throughput
     // Use Completer to properly track batch completion
-    const int maxConcurrentBatches =
-        3; // Increased from 2 to 3 for better pipeline
     final activeBatches = <Completer<void>>[];
     int batchStart = 0;
+    int batchesProcessed = 0;
+    int currentConcurrency =
+        maxConcurrentBatches; // Will be adjusted dynamically
 
     while (batchStart < urls.length) {
       developer.log(
@@ -2172,6 +2423,8 @@ class GalleryScreenState extends State<GalleryScreen>
         developer.log(
           '⏹️ Scan stopped (scanning=$_scanning, clearingTags=$_clearingTags)',
         );
+        _stopMemoryMonitor();
+        await ScanForegroundService.stopService();
         await Future.wait(activeBatches.map((c) => c.future));
         return;
       }
@@ -2179,16 +2432,64 @@ class GalleryScreenState extends State<GalleryScreen>
       // Check for pause
       while (_scanPaused) {
         if (!mounted || !_scanning || _clearingTags) {
+          _stopMemoryMonitor();
+          await ScanForegroundService.stopService();
           await Future.wait(activeBatches.map((c) => c.future));
           return;
         }
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
+      // REAL-TIME THROTTLING: Use cached RAM and CPU values (updated by background timer)
+      // CPU % is normalized: 100% = all cores saturated, uses 3-sample moving average
+      if (batchesProcessed % 3 == 0) {
+        // Memory-based adjustment
+        var newConcurrency = _adjustConcurrencyForMemory(
+          _cachedMemoryPressure,
+          maxConcurrentBatches,
+        );
+
+        // CPU-based adjustment using normalized CPU % (100% = all cores saturated)
+        // Thresholds are conservative since this is best-effort telemetry
+        if (_cachedCpuUsagePercent > 85) {
+          // Device CPU is heavily saturated - drop to minimum
+          newConcurrency = 1;
+          developer.log(
+            '🔥 CPU at ${_cachedCpuUsagePercent.toInt()}% (normalized) - dropping to 1 concurrent',
+          );
+        } else if (_cachedCpuUsagePercent > 70) {
+          // CPU moderately loaded - reduce significantly
+          newConcurrency = (newConcurrency * 0.4).ceil().clamp(1, 2);
+          developer.log(
+            '⚠️ CPU at ${_cachedCpuUsagePercent.toInt()}% - reducing concurrency',
+          );
+        } else if (_cachedCpuUsagePercent > 55) {
+          // CPU getting warm - slight reduction
+          newConcurrency = (newConcurrency * 0.6).ceil().clamp(2, 4);
+        } else if (_cachedCpuUsagePercent < 30 &&
+            _cachedMemoryPressure == 'low') {
+          // CPU and RAM both have plenty of headroom - can boost
+          newConcurrency = (newConcurrency * 1.25).ceil().clamp(1, 10);
+        }
+
+        if (newConcurrency != currentConcurrency) {
+          developer.log(
+            '🔄 Adjusting concurrency: $currentConcurrency → $newConcurrency (RAM: ${_currentRamUsageMB.toInt()}MB, CPU: ${_cachedCpuUsagePercent.toInt()}%, cores: $_cpuCoreCount)',
+          );
+          currentConcurrency = newConcurrency;
+        }
+
+        // If memory is critically low, add a brief pause to let GC run
+        if (_cachedMemoryPressure == 'critical') {
+          developer.log('⚠️ Critical memory pressure - pausing 200ms for GC');
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
+      }
+
       // If at max capacity, wait for ANY batch to complete
-      if (activeBatches.length >= maxConcurrentBatches) {
+      if (activeBatches.length >= currentConcurrency) {
         developer.log(
-          '⏸️  DEBUG: At max capacity, waiting for ANY batch to complete...',
+          '⏸️  DEBUG: At max capacity ($currentConcurrency), waiting for ANY batch to complete...',
         );
         await Future.any(activeBatches.map((c) => c.future));
         developer.log(
@@ -2231,10 +2532,20 @@ class GalleryScreenState extends State<GalleryScreen>
           });
 
       batchStart += batchSize;
+      batchesProcessed++;
+      // Note: Throttling is now handled dynamically via RAM and CPU monitoring
+      // No fixed cooldown intervals - speed adjusts based on real-time resource usage
     }
 
     // Wait for all remaining batches to complete
     await Future.wait(activeBatches.map((c) => c.future));
+
+    // Stop memory monitoring - scanning done
+    _stopMemoryMonitor();
+
+    // Stop foreground service and show completion notification
+    _cleanupForegroundTaskListener();
+    await ScanForegroundService.showComplete(total: photoTags.length);
 
     // After all batches complete, run background validation if we have YOLO-classified images
     // Note: With streaming validation enabled, validation may already be running
@@ -2292,29 +2603,42 @@ class GalleryScreenState extends State<GalleryScreen>
     // Prepare batch of files
     final batchItems = <Map<String, dynamic>>[];
     final batchUrls = <String>[];
+    final skippedUrls = <String>[]; // Track photos that couldn't be loaded
 
     try {
       final assetLoadStartTime = DateTime.now();
       // Load files in parallel for maximum speed
-      // Use small thumbnails for ML Kit (512px is plenty - it uses 224x224 internally)
+      // Use small thumbnails for ML Kit (256px is optimal - it uses 224x224 internally)
       final fileLoadFutures = batch.map((u) async {
         Uint8List? imageBytes;
         if (u.startsWith('local:')) {
           final id = u.substring('local:'.length);
           final asset = _localAssets[id];
           if (asset != null) {
-            // Always use 512px thumbnail for scanning - much faster than full image
-            // ML Kit image labeling only needs enough detail to recognize objects
-            imageBytes = await asset.thumbnailDataWithSize(
-              const ThumbnailSize(512, 512),
-              quality: 75,
-            );
+            // Use 256px thumbnail for scanning - matches ML Kit's 224x224 input
+            // Smaller = faster loading + faster ML processing
+            try {
+              imageBytes = await asset.thumbnailDataWithSize(
+                const ThumbnailSize(256, 256),
+                quality: 70,
+              );
+            } catch (e) {
+              developer.log('⚠️ Failed to load thumbnail for $id: $e');
+            }
+          } else {
+            developer.log('⚠️ Asset not found in cache for $id');
           }
         } else if (u.startsWith('file:')) {
           final path = u.substring('file:'.length);
           final file = File(path);
           if (await file.exists()) {
-            imageBytes = await file.readAsBytes();
+            try {
+              imageBytes = await file.readAsBytes();
+            } catch (e) {
+              developer.log('⚠️ Failed to read file $path: $e');
+            }
+          } else {
+            developer.log('⚠️ File does not exist: $path');
           }
         }
 
@@ -2322,7 +2646,7 @@ class GalleryScreenState extends State<GalleryScreen>
           final photoID = PhotoId.canonicalId(u);
           return {'file': imageBytes, 'photoID': photoID, 'url': u};
         }
-        return null;
+        return {'url': u, 'failed': true}; // Track failed loads
       }).toList();
 
       // Wait for all files to load concurrently
@@ -2333,18 +2657,44 @@ class GalleryScreenState extends State<GalleryScreen>
           .inMilliseconds;
       developer.log('⏱️  Step 1: Asset loading took ${assetLoadDuration}ms');
 
-      // Filter out nulls and build batch items
+      // Filter out failed loads and build batch items
       final filterStartTime = DateTime.now();
       for (final item in loadedFiles) {
-        if (item != null) {
+        if (item['failed'] != true && item['file'] != null) {
           batchItems.add({'file': item['file'], 'photoID': item['photoID']});
           batchUrls.add(item['url'] as String);
+        } else if (item['url'] != null) {
+          skippedUrls.add(item['url'] as String);
         }
       }
       final filterEndTime = DateTime.now();
       developer.log(
         '⏱️  Step 2: Filtering/building items took ${filterEndTime.difference(filterStartTime).inMilliseconds}ms',
       );
+
+      // Log skipped photos for debugging
+      if (skippedUrls.isNotEmpty) {
+        developer.log(
+          '⚠️ SKIPPED ${skippedUrls.length} photos (could not load):',
+        );
+        for (final url in skippedUrls.take(5)) {
+          developer.log('   - $url');
+        }
+        if (skippedUrls.length > 5) {
+          developer.log('   ... and ${skippedUrls.length - 5} more');
+        }
+        // Mark skipped photos as 'unreadable' so they don't keep getting retried
+        // This prevents the same 75 photos from blocking the scan every time
+        final skippedTagsToSave = <String, List<String>>{};
+        for (final url in skippedUrls) {
+          final photoID = PhotoId.canonicalId(url);
+          skippedTagsToSave[photoID] = ['unreadable'];
+        }
+        await TagStore.saveLocalTagsBatch(skippedTagsToSave);
+        developer.log(
+          '💾 Marked ${skippedUrls.length} unreadable photos to prevent retry',
+        );
+      }
 
       if (batchItems.isEmpty) {
         return;
@@ -2379,6 +2729,7 @@ class GalleryScreenState extends State<GalleryScreen>
         final prefs = await SharedPreferences.getInstance();
         final consent = prefs.getBool('server_upload_consent') ?? false;
         if (!consent) {
+          if (!mounted) return;
           final allow = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
@@ -2468,6 +2819,15 @@ class GalleryScreenState extends State<GalleryScreen>
                 batchDetectionsToSave[photoID] = allDetections;
                 // Update scanned count notifier for live UI updates
                 _scannedCountNotifier.value = photoTags.length;
+
+                // Update notification progress (every 10 photos to reduce overhead)
+                if (photoTags.length % 10 == 0) {
+                  ScanForegroundService.updateProgress(
+                    scanned: photoTags.length,
+                    total: _cachedLocalPhotoCount,
+                  );
+                }
+
                 developer.log(
                   '📊 Updated _scannedCountNotifier to ${photoTags.length}',
                 );
@@ -2568,6 +2928,14 @@ class GalleryScreenState extends State<GalleryScreen>
           batchTagsToSave[photoID] = tags;
           batchDetectionsToSave[photoID] = allDetections;
           _scannedCountNotifier.value = photoTags.length;
+
+          // Update notification progress (every 10 photos to reduce overhead)
+          if (photoTags.length % 10 == 0) {
+            ScanForegroundService.updateProgress(
+              scanned: photoTags.length,
+              total: _cachedLocalPhotoCount,
+            );
+          }
 
           if (tags.isNotEmpty && tags.first != 'other') {
             developer.log(
@@ -3443,16 +3811,16 @@ class GalleryScreenState extends State<GalleryScreen>
     return 0;
   }
 
-  /// Determine optimal initial batch size based on device capabilities
-  Future<int> _determineOptimalBatchSize() async {
+  /// Determine optimal scan configuration based on device capabilities
+  /// Returns: {batchSize, maxConcurrent} - base config from CPU cores
+  /// RAM-based throttling is done in real-time during scanning
+  Future<Map<String, int>> _getBaseDeviceConfig() async {
     try {
-      // Try to get device info
       int cpuCores = 4; // Default assumption
-      int ramGB = 4; // Default assumption
 
       // Attempt to read /proc/cpuinfo for CPU cores (Android/Linux)
       try {
-        if (!kIsWeb && Platform.isAndroid || Platform.isLinux) {
+        if (!kIsWeb && (Platform.isAndroid || Platform.isLinux)) {
           final cpuInfo = await File('/proc/cpuinfo').readAsString();
           final processors = cpuInfo
               .split('\n')
@@ -3464,56 +3832,189 @@ class GalleryScreenState extends State<GalleryScreen>
         // Fallback to default
       }
 
-      // Attempt to read /proc/meminfo for RAM (Android/Linux)
-      try {
-        if (!kIsWeb && Platform.isAndroid || Platform.isLinux) {
-          final memInfo = await File('/proc/meminfo').readAsString();
-          final memTotalLine = memInfo
-              .split('\n')
-              .firstWhere(
-                (line) => line.startsWith('MemTotal:'),
-                orElse: () => '',
-              );
-          if (memTotalLine.isNotEmpty) {
-            final memKB = int.tryParse(
-              memTotalLine.replaceAll(RegExp(r'[^0-9]'), ''),
-            );
-            if (memKB != null) {
-              ramGB = (memKB / 1024 / 1024).ceil();
-            }
-          }
-        }
-      } catch (_) {
-        // Fallback to default
-      }
+      developer.log('📱 Device: $cpuCores CPU cores');
 
-      developer.log('📱 Device: $cpuCores CPU cores, ~${ramGB}GB RAM');
-
-      // Calculate batch size based on device capabilities
-      // Aggressive sizing for maximum throughput while maintaining stability
-      // Server can handle 6-10 img/sec with batching, so larger batches = better
+      // Base config purely on CPU cores - RAM throttling happens in real-time
       int batchSize;
+      int maxConcurrent;
 
-      if (ramGB <= 3 || cpuCores <= 4) {
-        // Low-end device: 15 images per batch
-        batchSize = 15;
-      } else if (ramGB <= 6 || cpuCores <= 6) {
-        // Mid-range device: 30 images per batch
+      if (cpuCores <= 4) {
         batchSize = 30;
-      } else if (ramGB <= 8 || cpuCores <= 8) {
-        // Mid-high device: 50 images per batch
+        maxConcurrent = 4;
+      } else if (cpuCores <= 6) {
         batchSize = 50;
-      } else {
-        // High-end device: 75 images per batch (8+ cores or 8+ GB RAM)
+        maxConcurrent = 5;
+      } else if (cpuCores <= 8) {
         batchSize = 75;
+        maxConcurrent = 6;
+      } else {
+        // 8+ cores - maximum throughput
+        batchSize = 100;
+        maxConcurrent = 8;
       }
 
-      developer.log('⚙️ Initial batch size: $batchSize (aggressive adaptive)');
-      return batchSize;
+      return {'batchSize': batchSize, 'maxConcurrent': maxConcurrent};
     } catch (e) {
       developer.log('Failed to detect device specs: $e');
-      // Conservative fallback for unknown devices
-      return 5;
+      return {'batchSize': 20, 'maxConcurrent': 3};
+    }
+  }
+
+  /// Start background memory monitoring timer
+  /// Updates cached values every 1 second - uses ProcessInfo (zero file I/O)
+  void _startMemoryMonitor() {
+    _memoryMonitorTimer?.cancel();
+    _memoryMonitorTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _updateCachedMemoryState();
+    });
+    // Initial update
+    _updateCachedMemoryState();
+  }
+
+  /// Stop memory monitoring
+  void _stopMemoryMonitor() {
+    _memoryMonitorTimer?.cancel();
+    _memoryMonitorTimer = null;
+  }
+
+  /// Update cached memory state using ProcessInfo (zero file I/O)
+  void _updateCachedMemoryState() {
+    try {
+      // ===== RAM MONITORING =====
+      // Use Dart's ProcessInfo - direct syscall, no file I/O
+      final currentRss = ProcessInfo.currentRss; // in bytes
+      final maxRss = ProcessInfo.maxRss; // in bytes
+
+      // Convert to MB
+      final usedMB = (currentRss / 1024 / 1024).ceil();
+      final peakMB = (maxRss / 1024 / 1024).ceil();
+
+      // Target memory ceiling for our app
+      const int targetMaxMB = 400;
+
+      if (usedMB > targetMaxMB * 1.5) {
+        _cachedMemoryPressure = 'critical'; // >600MB
+      } else if (usedMB > targetMaxMB * 1.25) {
+        _cachedMemoryPressure = 'high'; // >500MB
+      } else if (usedMB > targetMaxMB) {
+        _cachedMemoryPressure = 'moderate'; // >400MB
+      } else if (usedMB > targetMaxMB * 0.5) {
+        _cachedMemoryPressure = 'normal'; // 200-400MB
+      } else {
+        _cachedMemoryPressure = 'low'; // <200MB
+      }
+
+      _currentRamUsageMB = usedMB.toDouble();
+      if (peakMB > _peakRamUsageMB) {
+        _peakRamUsageMB = peakMB.toDouble();
+      }
+
+      // ===== CPU MONITORING =====
+      // Read /proc/self/stat to get process CPU time
+      // Format: pid comm state ... (field 14 = utime, field 15 = stime)
+      _updateCpuUsage();
+    } catch (_) {
+      _cachedMemoryPressure = 'normal';
+    }
+  }
+
+  /// Read actual CPU usage percentage from /proc/self/stat
+  /// Returns normalized value where 100% = all cores saturated
+  /// Uses moving average to smooth out spikes
+  void _updateCpuUsage() {
+    try {
+      if (!Platform.isAndroid && !Platform.isLinux) {
+        // CPU monitoring only works on Linux-based systems
+        _cachedCpuUsagePercent = 0;
+        return;
+      }
+
+      // Cache core count on first call
+      if (_cpuCoreCount == 0) {
+        _cpuCoreCount = Platform.numberOfProcessors;
+        if (_cpuCoreCount <= 0) _cpuCoreCount = 4; // Fallback
+      }
+
+      final statFile = File('/proc/self/stat');
+      if (!statFile.existsSync()) {
+        _cachedCpuUsagePercent = 0;
+        return;
+      }
+
+      final statContent = statFile.readAsStringSync();
+      // Skip past the comm field (which can contain spaces and parentheses)
+      final afterComm = statContent.indexOf(') ');
+      if (afterComm == -1) return;
+
+      final fields = statContent.substring(afterComm + 2).split(' ');
+      // Fields are now: state(0), ppid(1), ... utime(11), stime(12)
+      // utime = fields[11], stime = fields[12] (0-indexed after comm)
+      if (fields.length < 13) return;
+
+      final utime = int.tryParse(fields[11]) ?? 0;
+      final stime = int.tryParse(fields[12]) ?? 0;
+      final totalCpuTime =
+          utime + stime; // in clock ticks (USER_HZ, typically 100/sec)
+
+      final now = DateTime.now();
+      final elapsedMs = now.difference(_lastCpuCheck).inMilliseconds;
+
+      if (_lastCpuTime > 0 && elapsedMs > 100) {
+        // Need at least 100ms for meaningful sample
+        // Calculate CPU usage since last check
+        final cpuTimeDelta = totalCpuTime - _lastCpuTime;
+        // Convert ticks to milliseconds (USER_HZ typically 100 = 10ms/tick)
+        // This is best-effort - some devices may use different USER_HZ
+        final cpuMs = cpuTimeDelta * 10;
+
+        // Raw CPU % (can exceed 100% on multi-core)
+        final rawCpuPercent = (cpuMs / elapsedMs) * 100;
+
+        // Normalize by core count: 100% = all cores saturated
+        // e.g., 400% raw on 8 cores = 50% normalized
+        final normalizedPercent = (rawCpuPercent / _cpuCoreCount).clamp(
+          0.0,
+          100.0,
+        );
+
+        // Add to moving average buffer
+        _cpuSamples.add(normalizedPercent);
+        if (_cpuSamples.length > _cpuSampleWindow) {
+          _cpuSamples.removeAt(0);
+        }
+
+        // Calculate moving average to smooth out spikes
+        final avgCpu = _cpuSamples.reduce((a, b) => a + b) / _cpuSamples.length;
+        _cachedCpuUsagePercent = avgCpu;
+      }
+
+      _lastCpuTime = totalCpuTime;
+      _lastCpuCheck = now;
+    } catch (_) {
+      // CPU monitoring failed - default to 0 (won't throttle based on CPU)
+      // This is best-effort telemetry, not hard truth
+      _cachedCpuUsagePercent = 0;
+    }
+  }
+
+  /// Adjust concurrency based on cached memory pressure
+  int _adjustConcurrencyForMemory(String pressure, int maxConcurrent) {
+    switch (pressure) {
+      case 'critical':
+        return 1; // Minimum - one batch at a time
+      case 'high':
+        return (maxConcurrent * 0.25).ceil().clamp(1, 2);
+      case 'moderate':
+        return (maxConcurrent * 0.5).ceil().clamp(2, 4);
+      case 'normal':
+        return maxConcurrent;
+      case 'low':
+        return (maxConcurrent * 1.25).ceil().clamp(
+          1,
+          10,
+        ); // Boost when RAM is plentiful
+      default:
+        return maxConcurrent;
     }
   }
 
@@ -4044,7 +4545,8 @@ class GalleryScreenState extends State<GalleryScreen>
       if (searchQuery.isEmpty) return true;
 
       if (searchQuery.trim().toLowerCase() == 'none') {
-        return tags.isEmpty;
+        // Show photos with no tags OR those marked as unreadable
+        return tags.isEmpty || (tags.length == 1 && tags.first == 'unreadable');
       }
 
       final searchTerms = searchQuery
@@ -4745,9 +5247,12 @@ class GalleryScreenState extends State<GalleryScreen>
 
     WidgetsBinding.instance.removeObserver(this);
     _photoChangesSubscription?.cancel();
+    _cleanupForegroundTaskListener();
     _fallbackPollingTimer?.cancel();
     _dotAnimationTimer?.cancel();
     _autoScanRetryTimer?.cancel();
+    _stuckPhotosRecheckTimer?.cancel();
+    _memoryMonitorTimer?.cancel();
     _progressRefreshTimer?.cancel();
     _smoothProgressTimer?.cancel();
     _fastScrollerHideTimer?.cancel();
@@ -4766,6 +5271,8 @@ class GalleryScreenState extends State<GalleryScreen>
     _showScrollToTop.dispose();
     _showFastScrollerNotifier.dispose();
     _showActionButtons.dispose();
+    // Stop foreground service if still running
+    ScanForegroundService.stopService();
     super.dispose();
   }
 
@@ -4887,7 +5394,9 @@ class GalleryScreenState extends State<GalleryScreen>
                       Text(
                         'Loading your photos...',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white.withValues(alpha: 0.9)
+                              : Colors.deepOrange,
                           fontSize: 18,
                           fontWeight: FontWeight.w500,
                         ),
@@ -5050,7 +5559,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                     children: [
                                       GestureDetector(
                                         onTap: () {
-                                          // Toggle tooltip - dismiss if already showing
+                                          // Show tooltip with status
                                           if (_badgeTooltipEntry != null) {
                                             _dismissTooltip();
                                             return;
@@ -5061,9 +5570,10 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         100)
                                                     .toStringAsFixed(0)
                                               : '0';
-                                          final status =
-                                              (_scanning || _validating)
+                                          final status = _scanning
                                               ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
+                                              : _validating
+                                              ? 'Validating...'
                                               : photoTags.isNotEmpty
                                               ? '${photoTags.length} photos scanned ($pct%)'
                                               : 'No photos scanned yet';
@@ -5120,7 +5630,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                           ),
                                         ),
                                       ),
-                                      // Hide loading dots during "final touches" to avoid redundancy
+                                      // Show loading dots during scanning/validating
                                       if ((_scanning || _validating) &&
                                           !_showFinalTouches)
                                         Padding(
@@ -5258,6 +5768,19 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   int.tryParse(pct) ?? 0;
                                               if (pctNum >= 100) {
                                                 return const SizedBox.shrink();
+                                              }
+
+                                              // Show "Paused" when paused, otherwise percentage
+                                              if (_scanPaused) {
+                                                return Text(
+                                                  'Paused',
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    color:
+                                                        Colors.amber.shade700,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                );
                                               }
 
                                               // Always show percentage during scanning (except at 100%)
@@ -5398,7 +5921,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                               }
                                               final key = p.basename(u);
                                               final tags = photoTags[key] ?? [];
-                                              return tags.isEmpty;
+                                              // Include unreadable photos in count
+                                              return tags.isEmpty ||
+                                                  (tags.length == 1 &&
+                                                      tags.first ==
+                                                          'unreadable');
                                             }).length;
                                           } else {
                                             // Include synonyms in count
@@ -5734,7 +6261,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   ),
                                                   const SizedBox(width: 8),
                                                   Text(
-                                                    'Select',
+                                                    _isSelectMode
+                                                        ? 'Deselect'
+                                                        : 'Select',
                                                     style: TextStyle(
                                                       color: _isSelectMode
                                                           ? Colors.blue.shade700
@@ -5750,6 +6279,78 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ),
                                             ),
                                           ),
+                                          // Select All button - visible when in select mode
+                                          if (_isSelectMode) ...[
+                                            const SizedBox(width: 8),
+                                            GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  // Select all visible photos
+                                                  _updateCachedFilteredList();
+                                                  for (final url
+                                                      in _cachedFilteredUrls) {
+                                                    final key = p.basename(url);
+                                                    _selectedKeys.add(key);
+                                                  }
+                                                });
+                                                _updateSelectionCount();
+                                              },
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green.shade50,
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                  border: Border.all(
+                                                    color:
+                                                        Colors.green.shade400,
+                                                    width: 2,
+                                                  ),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: Colors.black
+                                                          .withValues(
+                                                            alpha: 0.1,
+                                                          ),
+                                                      blurRadius: 4,
+                                                      offset: const Offset(
+                                                        0,
+                                                        2,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.select_all,
+                                                      color:
+                                                          Colors.green.shade700,
+                                                      size: 20,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      'Select All',
+                                                      style: TextStyle(
+                                                        color: Colors
+                                                            .green
+                                                            .shade700,
+                                                        fontSize: 16,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                           if (_isSelectMode &&
                                               _selectedKeys.isNotEmpty) ...[
                                             const SizedBox(width: 12),
@@ -6211,433 +6812,448 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
 
                           // Floating controls overlay - bottom right (menu buttons)
-                          Positioned(
-                            top: 56,
-                            right: 8,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: Icon(
-                                      showDebug
-                                          ? Icons.bug_report_sharp
-                                          : Icons.bug_report,
-                                      color: Colors.white,
+                          // Only visible when developer buttons are enabled in settings
+                          if (_showDevButtons)
+                            Positioned(
+                              top: 56,
+                              right: 8,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: Icon(
+                                        showDebug
+                                            ? Icons.bug_report_sharp
+                                            : Icons.bug_report,
+                                        color: Colors.white,
+                                      ),
+                                      onPressed: () => setState(
+                                        () => showDebug = !showDebug,
+                                      ),
                                     ),
-                                    onPressed: () =>
-                                        setState(() => showDebug = !showDebug),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.camera_alt,
-                                      color: Colors.white,
-                                    ),
-                                    tooltip: 'Scan now',
-                                    onPressed: () {
-                                      showModalBottomSheet(
-                                        context: context,
-                                        builder: (ctx) {
-                                          return SafeArea(
-                                            child: SingleChildScrollView(
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.photo_library,
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.camera_alt,
+                                        color: Colors.white,
+                                      ),
+                                      tooltip: 'Scan now',
+                                      onPressed: () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          builder: (ctx) {
+                                            return SafeArea(
+                                              child: SingleChildScrollView(
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.photo_library,
+                                                      ),
+                                                      title: const Text(
+                                                        'Scan missing images',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        _manualScan(
+                                                          force: false,
+                                                        );
+                                                      },
                                                     ),
-                                                    title: const Text(
-                                                      'Scan missing images',
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.verified,
+                                                        color:
+                                                            Colors.deepPurple,
+                                                      ),
+                                                      title: const Text(
+                                                        'Validate all classifications',
+                                                      ),
+                                                      subtitle: const Text(
+                                                        'Re-check all tagged photos with CLIP',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        _validateAllClassifications();
+                                                      },
                                                     ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      _manualScan(force: false);
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.verified,
-                                                      color: Colors.deepPurple,
-                                                    ),
-                                                    title: const Text(
-                                                      'Validate all classifications',
-                                                    ),
-                                                    subtitle: const Text(
-                                                      'Re-check all tagged photos with CLIP',
-                                                    ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      _validateAllClassifications();
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.delete_forever,
-                                                    ),
-                                                    title: const Text(
-                                                      'Remove all persisted tags',
-                                                    ),
-                                                    subtitle: const Text(
-                                                      'Clears saved scan results for all photos',
-                                                    ),
-                                                    onTap: () async {
-                                                      Navigator.pop(ctx);
-                                                      final confirm = await showDialog<bool>(
-                                                        context: context,
-                                                        builder: (dctx) => AlertDialog(
-                                                          title: const Text(
-                                                            'Confirm',
-                                                          ),
-                                                          content: const Text(
-                                                            'Are you sure you want to remove all persisted tags? '
-                                                            'This cannot be undone.',
-                                                          ),
-                                                          actions: [
-                                                            TextButton(
-                                                              onPressed: () =>
-                                                                  Navigator.pop(
-                                                                    dctx,
-                                                                    false,
-                                                                  ),
-                                                              child: const Text(
-                                                                'Cancel',
-                                                              ),
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.delete_forever,
+                                                      ),
+                                                      title: const Text(
+                                                        'Remove all persisted tags',
+                                                      ),
+                                                      subtitle: const Text(
+                                                        'Clears saved scan results for all photos',
+                                                      ),
+                                                      onTap: () async {
+                                                        Navigator.pop(ctx);
+                                                        final confirm = await showDialog<bool>(
+                                                          context: context,
+                                                          builder: (dctx) => AlertDialog(
+                                                            title: const Text(
+                                                              'Confirm',
                                                             ),
-                                                            TextButton(
-                                                              onPressed: () =>
-                                                                  Navigator.pop(
-                                                                    dctx,
-                                                                    true,
-                                                                  ),
-                                                              child: const Text(
-                                                                'Remove',
-                                                              ),
+                                                            content: const Text(
+                                                              'Are you sure you want to remove all persisted tags? '
+                                                              'This cannot be undone.',
                                                             ),
-                                                          ],
-                                                        ),
-                                                      );
-                                                      if (confirm != true) {
-                                                        return;
-                                                      }
-                                                      try {
-                                                        // Block any new scans during clearing
-                                                        _clearingTags = true;
-
-                                                        // Clear server tags first
-                                                        // IMMEDIATELY stop any ongoing scanning/validation and ALL timers
-                                                        _scanning = false;
-                                                        _validating = false;
-                                                        _validationCancelled =
-                                                            true;
-                                                        _progressRefreshTimer
-                                                            ?.cancel();
-                                                        _smoothProgressTimer
-                                                            ?.cancel();
-                                                        _dotAnimationTimer
-                                                            ?.cancel();
-                                                        _autoScanRetryTimer
-                                                            ?.cancel();
-                                                        _autoScanRetryTimer =
-                                                            null;
-                                                        developer.log(
-                                                          '🛑 Stopped scanning/validation and all timers for tag clear',
-                                                        );
-
-                                                        try {
-                                                          await http
-                                                              .delete(
-                                                                Uri.parse(
-                                                                  '${ApiService.baseUrl}/tags-db/',
-                                                                ),
-                                                                headers: {
-                                                                  'Content-Type':
-                                                                      'application/json',
-                                                                },
-                                                              )
-                                                              .timeout(
-                                                                const Duration(
-                                                                  seconds: 10,
-                                                                ),
-                                                              );
-                                                          developer.log(
-                                                            '🗑️ Cleared server tags database',
-                                                          );
-                                                        } catch (e) {
-                                                          developer.log(
-                                                            '⚠️ Failed to clear server tags: $e',
-                                                          );
-                                                        }
-
-                                                        // Clear all local tags at once (much faster)
-                                                        final removed =
-                                                            await TagStore.clearAllTags();
-
-                                                        // Verify storage is actually empty
-                                                        final remainingCount =
-                                                            await TagStore.getStoredTagCount();
-                                                        if (remainingCount >
-                                                            0) {
-                                                          developer.log(
-                                                            '⚠️ WARNING: $remainingCount tags still in storage after clear!',
-                                                          );
-                                                        }
-
-                                                        // Clear in-memory tags AND detections
-                                                        photoTags.clear();
-                                                        photoAllDetections
-                                                            .clear();
-
-                                                        // Invalidate cached filtered list so it rebuilds
-                                                        _lastPhotoTagsLength =
-                                                            -1;
-                                                        _cachedFilteredUrls
-                                                            .clear();
-
-                                                        // Reset ALL scan/validation state to allow fresh re-scan
-                                                        _validationComplete =
-                                                            false;
-                                                        _validationCancelled =
-                                                            false;
-                                                        _validating = false;
-                                                        _scanning = false;
-                                                        _hasScannedAtLeastOneBatch =
-                                                            false;
-                                                        _scanProgress = 0.0;
-                                                        _scanProcessed = 0;
-                                                        _scanTotal = 0;
-                                                        _scannedCountNotifier
-                                                                .value =
-                                                            0;
-                                                        _galleryReadyShown =
-                                                            false;
-
-                                                        // Update UI to show cleared state
-                                                        if (mounted) {
-                                                          setState(() {});
-                                                        }
-
-                                                        // Show snackbar
-                                                        if (mounted) {
-                                                          _showSnackBar(
-                                                            'Removed $removed local tags. Starting fresh scan...',
-                                                          );
-                                                        }
-
-                                                        // Wait briefly to let UI update
-                                                        developer.log(
-                                                          '🔄 Waiting 1 second before starting fresh scan...',
-                                                        );
-                                                        await Future.delayed(
-                                                          const Duration(
-                                                            seconds: 1,
+                                                            actions: [
+                                                              TextButton(
+                                                                onPressed: () =>
+                                                                    Navigator.pop(
+                                                                      dctx,
+                                                                      false,
+                                                                    ),
+                                                                child:
+                                                                    const Text(
+                                                                      'Cancel',
+                                                                    ),
+                                                              ),
+                                                              TextButton(
+                                                                onPressed: () =>
+                                                                    Navigator.pop(
+                                                                      dctx,
+                                                                      true,
+                                                                    ),
+                                                                child:
+                                                                    const Text(
+                                                                      'Remove',
+                                                                    ),
+                                                              ),
+                                                            ],
                                                           ),
                                                         );
-
-                                                        // Verify tags are still cleared before starting scan
-                                                        if (photoTags
-                                                            .isNotEmpty) {
-                                                          developer.log(
-                                                            '⚠️ Tags not empty after clear (${photoTags.length}). Aborting rescan.',
-                                                          );
-                                                          _clearingTags = false;
+                                                        if (confirm != true) {
                                                           return;
                                                         }
+                                                        try {
+                                                          // Block any new scans during clearing
+                                                          _clearingTags = true;
 
-                                                        // NOTE: Keep _clearingTags = true until _manualScan completes
-                                                        // This prevents the retry timer from triggering validation
-                                                        // during the gap between now and when _manualScan sets _scanning = true
-
-                                                        if (mounted) {
+                                                          // Clear server tags first
+                                                          // IMMEDIATELY stop any ongoing scanning/validation and ALL timers
+                                                          _scanning = false;
+                                                          _validating = false;
+                                                          _validationCancelled =
+                                                              true;
+                                                          _progressRefreshTimer
+                                                              ?.cancel();
+                                                          _smoothProgressTimer
+                                                              ?.cancel();
+                                                          _dotAnimationTimer
+                                                              ?.cancel();
+                                                          _autoScanRetryTimer
+                                                              ?.cancel();
+                                                          _autoScanRetryTimer =
+                                                              null;
                                                           developer.log(
-                                                            '🔄 Starting fresh scan of ALL photos after tag clear',
+                                                            '🛑 Stopped scanning/validation and all timers for tag clear',
                                                           );
-                                                          // Use force scan to bypass TagStore checks
-                                                          // TagStore was just cleared so checks would be stale
-                                                          await _manualScan(
-                                                            force: true,
-                                                          );
-                                                        }
 
-                                                        // Now that scan has started (or completed), allow other operations
-                                                        _clearingTags = false;
-
-                                                        // Force validation state to false to prevent immediate validation
-                                                        _validating = false;
-                                                        _validationComplete =
-                                                            false;
-
-                                                        // Restart the retry timer in case scan failed or to continue retrying
-                                                        _startAutoScanRetryTimer();
-                                                      } catch (e) {
-                                                        _clearingTags =
-                                                            false; // Reset flag on error
-                                                        developer.log(
-                                                          'Failed to remove tags: $e',
-                                                        );
-                                                        if (mounted) {
-                                                          _showSnackBar(
-                                                            'Failed to remove tags',
-                                                          );
-                                                        }
-                                                      }
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.refresh,
-                                                    ),
-                                                    title: const Text(
-                                                      'Force rescan all device images',
-                                                    ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      _manualScan(force: true);
-                                                    },
-                                                  ),
-                                                  const Divider(),
-                                                  const Padding(
-                                                    padding:
-                                                        EdgeInsets.symmetric(
-                                                          horizontal: 16,
-                                                          vertical: 8,
-                                                        ),
-                                                    child: Text(
-                                                      'Developer Testing',
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        color: Colors.grey,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.auto_awesome,
-                                                      color: Colors.amber,
-                                                    ),
-                                                    title: const Text(
-                                                      'Test sparkles effect',
-                                                    ),
-                                                    subtitle: const Text(
-                                                      'Simulate "Final touches" animation',
-                                                    ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      // Trigger final touches animation by simulating 100%
-                                                      setState(() {
-                                                        _scanning = true;
-                                                        // Ensure we have a valid photo count for the test
-                                                        if (_cachedLocalPhotoCount ==
-                                                            0) {
-                                                          _cachedLocalPhotoCount =
-                                                              100; // Set a dummy count
-                                                        }
-                                                        _scannedCountNotifier
-                                                                .value =
-                                                            _cachedLocalPhotoCount;
-                                                        // Set to 5 seconds ago to immediately trigger the effect
-                                                        _reached100At =
-                                                            DateTime.now()
-                                                                .subtract(
+                                                          try {
+                                                            await http
+                                                                .delete(
+                                                                  Uri.parse(
+                                                                    '${ApiService.baseUrl}/tags-db/',
+                                                                  ),
+                                                                  headers: {
+                                                                    'Content-Type':
+                                                                        'application/json',
+                                                                  },
+                                                                )
+                                                                .timeout(
                                                                   const Duration(
-                                                                    seconds: 5,
+                                                                    seconds: 10,
                                                                   ),
                                                                 );
-                                                      });
-
-                                                      // Auto-dismiss after 10 seconds
-                                                      Future.delayed(
-                                                        const Duration(
-                                                          seconds: 10,
-                                                        ),
-                                                        () {
-                                                          if (mounted) {
-                                                            setState(() {
-                                                              _scanning = false;
-                                                              _reached100At =
-                                                                  null;
-                                                            });
+                                                            developer.log(
+                                                              '🗑️ Cleared server tags database',
+                                                            );
+                                                          } catch (e) {
+                                                            developer.log(
+                                                              '⚠️ Failed to clear server tags: $e',
+                                                            );
                                                           }
-                                                        },
-                                                      );
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.play_circle,
-                                                      color: Colors.blue,
+
+                                                          // Clear all local tags at once (much faster)
+                                                          final removed =
+                                                              await TagStore.clearAllTags();
+
+                                                          // Verify storage is actually empty
+                                                          final remainingCount =
+                                                              await TagStore.getStoredTagCount();
+                                                          if (remainingCount >
+                                                              0) {
+                                                            developer.log(
+                                                              '⚠️ WARNING: $remainingCount tags still in storage after clear!',
+                                                            );
+                                                          }
+
+                                                          // Clear in-memory tags AND detections
+                                                          photoTags.clear();
+                                                          photoAllDetections
+                                                              .clear();
+
+                                                          // Invalidate cached filtered list so it rebuilds
+                                                          _lastPhotoTagsLength =
+                                                              -1;
+                                                          _cachedFilteredUrls
+                                                              .clear();
+
+                                                          // Reset ALL scan/validation state to allow fresh re-scan
+                                                          _validationComplete =
+                                                              false;
+                                                          _validationCancelled =
+                                                              false;
+                                                          _validating = false;
+                                                          _scanning = false;
+                                                          _hasScannedAtLeastOneBatch =
+                                                              false;
+                                                          _scanProgress = 0.0;
+                                                          _scanProcessed = 0;
+                                                          _scanTotal = 0;
+                                                          _scannedCountNotifier
+                                                                  .value =
+                                                              0;
+                                                          _galleryReadyShown =
+                                                              false;
+
+                                                          // Update UI to show cleared state
+                                                          if (mounted) {
+                                                            setState(() {});
+                                                          }
+
+                                                          // Show snackbar
+                                                          if (mounted) {
+                                                            _showSnackBar(
+                                                              'Removed $removed local tags. Starting fresh scan...',
+                                                            );
+                                                          }
+
+                                                          // Wait briefly to let UI update
+                                                          developer.log(
+                                                            '🔄 Waiting 1 second before starting fresh scan...',
+                                                          );
+                                                          await Future.delayed(
+                                                            const Duration(
+                                                              seconds: 1,
+                                                            ),
+                                                          );
+
+                                                          // Verify tags are still cleared before starting scan
+                                                          if (photoTags
+                                                              .isNotEmpty) {
+                                                            developer.log(
+                                                              '⚠️ Tags not empty after clear (${photoTags.length}). Aborting rescan.',
+                                                            );
+                                                            _clearingTags =
+                                                                false;
+                                                            return;
+                                                          }
+
+                                                          // NOTE: Keep _clearingTags = true until _manualScan completes
+                                                          // This prevents the retry timer from triggering validation
+                                                          // during the gap between now and when _manualScan sets _scanning = true
+
+                                                          if (mounted) {
+                                                            developer.log(
+                                                              '🔄 Starting fresh scan of ALL photos after tag clear',
+                                                            );
+                                                            // Use force scan to bypass TagStore checks
+                                                            // TagStore was just cleared so checks would be stale
+                                                            await _manualScan(
+                                                              force: true,
+                                                            );
+                                                          }
+
+                                                          // Now that scan has started (or completed), allow other operations
+                                                          _clearingTags = false;
+
+                                                          // Force validation state to false to prevent immediate validation
+                                                          _validating = false;
+                                                          _validationComplete =
+                                                              false;
+
+                                                          // Restart the retry timer in case scan failed or to continue retrying
+                                                          _startAutoScanRetryTimer();
+                                                        } catch (e) {
+                                                          _clearingTags =
+                                                              false; // Reset flag on error
+                                                          developer.log(
+                                                            'Failed to remove tags: $e',
+                                                          );
+                                                          if (mounted) {
+                                                            _showSnackBar(
+                                                              'Failed to remove tags',
+                                                            );
+                                                          }
+                                                        }
+                                                      },
                                                     ),
-                                                    title: const Text(
-                                                      'Show intro video',
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.refresh,
+                                                      ),
+                                                      title: const Text(
+                                                        'Force rescan all device images',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        _manualScan(
+                                                          force: true,
+                                                        );
+                                                      },
                                                     ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      Navigator.push(
-                                                        context,
-                                                        MaterialPageRoute(
-                                                          builder: (context) =>
-                                                              IntroVideoScreen(
-                                                                onVideoFinished:
-                                                                    () {
-                                                                      Navigator.pop(
-                                                                        context,
-                                                                      );
-                                                                    },
-                                                              ),
+                                                    const Divider(),
+                                                    const Padding(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                            horizontal: 16,
+                                                            vertical: 8,
+                                                          ),
+                                                      child: Text(
+                                                        'Developer Testing',
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: Colors.grey,
                                                         ),
-                                                      );
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.info,
-                                                      color: Colors.green,
+                                                      ),
                                                     ),
-                                                    title: const Text(
-                                                      'Show onboarding',
-                                                    ),
-                                                    onTap: () {
-                                                      Navigator.pop(ctx);
-                                                      Navigator.push(
-                                                        context,
-                                                        MaterialPageRoute(
-                                                          builder: (context) =>
-                                                              OnboardingScreen(
-                                                                onGetStarted: () {
-                                                                  Navigator.pop(
-                                                                    context,
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.auto_awesome,
+                                                        color: Colors.amber,
+                                                      ),
+                                                      title: const Text(
+                                                        'Test sparkles effect',
+                                                      ),
+                                                      subtitle: const Text(
+                                                        'Simulate "Final touches" animation',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        // Trigger final touches animation by simulating 100%
+                                                        setState(() {
+                                                          _scanning = true;
+                                                          // Ensure we have a valid photo count for the test
+                                                          if (_cachedLocalPhotoCount ==
+                                                              0) {
+                                                            _cachedLocalPhotoCount =
+                                                                100; // Set a dummy count
+                                                          }
+                                                          _scannedCountNotifier
+                                                                  .value =
+                                                              _cachedLocalPhotoCount;
+                                                          // Set to 5 seconds ago to immediately trigger the effect
+                                                          _reached100At =
+                                                              DateTime.now()
+                                                                  .subtract(
+                                                                    const Duration(
+                                                                      seconds:
+                                                                          5,
+                                                                    ),
                                                                   );
-                                                                },
-                                                              ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  ),
-                                                  ListTile(
-                                                    leading: const Icon(
-                                                      Icons.cancel,
+                                                        });
+
+                                                        // Auto-dismiss after 10 seconds
+                                                        Future.delayed(
+                                                          const Duration(
+                                                            seconds: 10,
+                                                          ),
+                                                          () {
+                                                            if (mounted) {
+                                                              setState(() {
+                                                                _scanning =
+                                                                    false;
+                                                                _reached100At =
+                                                                    null;
+                                                              });
+                                                            }
+                                                          },
+                                                        );
+                                                      },
                                                     ),
-                                                    title: const Text('Cancel'),
-                                                    onTap: () =>
-                                                        Navigator.pop(ctx),
-                                                  ),
-                                                ],
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.play_circle,
+                                                        color: Colors.blue,
+                                                      ),
+                                                      title: const Text(
+                                                        'Show intro video',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        Navigator.push(
+                                                          context,
+                                                          MaterialPageRoute(
+                                                            builder: (context) =>
+                                                                IntroVideoScreen(
+                                                                  onVideoFinished: () {
+                                                                    Navigator.pop(
+                                                                      context,
+                                                                    );
+                                                                  },
+                                                                ),
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.info,
+                                                        color: Colors.green,
+                                                      ),
+                                                      title: const Text(
+                                                        'Show onboarding',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        Navigator.push(
+                                                          context,
+                                                          MaterialPageRoute(
+                                                            builder: (context) =>
+                                                                OnboardingScreen(
+                                                                  onGetStarted: () {
+                                                                    Navigator.pop(
+                                                                      context,
+                                                                    );
+                                                                  },
+                                                                ),
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                        Icons.cancel,
+                                                      ),
+                                                      title: const Text(
+                                                        'Cancel',
+                                                      ),
+                                                      onTap: () =>
+                                                          Navigator.pop(ctx),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
-                                            ),
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ],
+                                            );
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
 
                           // Scroll to top button
                           Positioned(

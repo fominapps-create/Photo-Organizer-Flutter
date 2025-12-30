@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/api_service.dart';
 import 'pricing_screen.dart';
 import 'trash_screen.dart';
 import 'privacy_policy_screen.dart';
@@ -27,10 +26,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   late bool _scanOnWifi;
   late bool _autoscanAutoStart;
-  bool _uploadConsent = false;
-  bool _serverOnline = false;
-  bool _checkingServer = false;
-  String _serverUrl = '';
+  // Note: Server-related fields commented out for free tier
+  // bool _uploadConsent = false;
+  // bool _serverOnline = false;
+  // bool _checkingServer = false;
+  // String _serverUrl = '';
+  bool _showDevButtons = false; // Developer tools (camera/bug buttons)
 
   @override
   void initState() {
@@ -44,8 +45,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _scanOnWifi = prefs.getBool('scan_on_wifi_only') ?? true;
-      _autoscanAutoStart = prefs.getBool('autoscan_auto_start') ?? false;
-      _uploadConsent = prefs.getBool('server_upload_consent') ?? false;
+      _autoscanAutoStart =
+          prefs.getBool('autoscan_auto_start') ??
+          true; // Default ON for free tier
+      _showDevButtons = prefs.getBool('show_dev_buttons') ?? false;
     });
   }
 
@@ -59,33 +62,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('autoscan_auto_start', val);
   }
 
-  Future<void> _saveUploadConsent(bool val) async {
+  // Note: Commented out for free tier - no server uploads
+  // Future<void> _saveUploadConsent(bool val) async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   await prefs.setBool('server_upload_consent', val);
+  // }
+
+  Future<void> _saveDevButtons(bool val) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('server_upload_consent', val);
+    await prefs.setBool('show_dev_buttons', val);
   }
 
+  // Note: Server status check commented out for free tier
+  // ignore: unused_element
   Future<void> _checkServerStatus() async {
-    if (!mounted) return;
-    setState(() {
-      _checkingServer = true;
-      _serverUrl = ApiService.baseUrl.isNotEmpty
-          ? ApiService.baseUrl
-          : 'Not configured';
-    });
-
-    final online = await ApiService.pingServer(
-      timeout: const Duration(seconds: 3),
-      retries: 1,
-    );
-
-    if (!mounted) return;
-    setState(() {
-      _serverOnline = online;
-      _checkingServer = false;
-      _serverUrl = ApiService.baseUrl.isNotEmpty
-          ? ApiService.baseUrl
-          : 'Not configured';
-    });
+    // Server functionality disabled for free tier
+    // This method is kept for potential future premium tier
   }
 
   Future<void> _toggleTheme(bool value) async {
@@ -127,100 +119,101 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: ListView(
         children: [
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text(
-              'Network',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-          // Server Status Indicator
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _serverOnline
-                  ? Colors.green.withValues(alpha: 0.1)
-                  : Colors.red.withValues(alpha: 0.1),
-              border: Border.all(
-                color: _serverOnline ? Colors.green : Colors.red,
-                width: 1.5,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      _checkingServer
-                          ? Icons.sync
-                          : (_serverOnline ? Icons.check_circle : Icons.error),
-                      color: _checkingServer
-                          ? Colors.orange
-                          : (_serverOnline ? Colors.green : Colors.red),
-                      size: 24,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _checkingServer
-                                ? 'Checking server...'
-                                : (_serverOnline
-                                      ? 'Server Online'
-                                      : 'Server Offline'),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _serverUrl,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh),
-                      onPressed: _checkingServer ? null : _checkServerStatus,
-                      tooltip: 'Test connection',
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (_serverUrl.startsWith('http://') &&
-              !(_serverUrl.contains('localhost') ||
-                  _serverUrl.contains('127.0.0.1') ||
-                  _serverUrl.contains('10.0.2.2') ||
-                  _serverUrl.contains('192.168.')))
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.1),
-                border: Border.all(color: Colors.orange),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Warning: Using an HTTP server on the public internet. For Play Store compliance and security, prefer HTTPS for remote servers.',
-                style: TextStyle(fontSize: 12),
-              ),
-            ),
+          // Server section hidden for free tier (on-device only)
+          // const Padding(
+          //   padding: EdgeInsets.all(16.0),
+          //   child: Text(
+          //     'Network',
+          //     style: TextStyle(
+          //       fontSize: 14,
+          //       fontWeight: FontWeight.w600,
+          //       color: Colors.grey,
+          //     ),
+          //   ),
+          // ),
+          // Server Status Indicator - hidden for free tier
+          // Container(
+          //   margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          //   padding: const EdgeInsets.all(16),
+          //   decoration: BoxDecoration(
+          //     color: _serverOnline
+          //         ? Colors.green.withValues(alpha: 0.1)
+          //         : Colors.red.withValues(alpha: 0.1),
+          //     border: Border.all(
+          //       color: _serverOnline ? Colors.green : Colors.red,
+          //       width: 1.5,
+          //     ),
+          //     borderRadius: BorderRadius.circular(12),
+          //   ),
+          //   child: Column(
+          //     crossAxisAlignment: CrossAxisAlignment.start,
+          //     children: [
+          //       Row(
+          //         children: [
+          //           Icon(
+          //             _checkingServer
+          //                 ? Icons.sync
+          //                 : (_serverOnline ? Icons.check_circle : Icons.error),
+          //             color: _checkingServer
+          //                 ? Colors.orange
+          //                 : (_serverOnline ? Colors.green : Colors.red),
+          //             size: 24,
+          //           ),
+          //           const SizedBox(width: 12),
+          //           Expanded(
+          //             child: Column(
+          //               crossAxisAlignment: CrossAxisAlignment.start,
+          //               children: [
+          //                 Text(
+          //                   _checkingServer
+          //                       ? 'Checking server...'
+          //                       : (_serverOnline
+          //                             ? 'Server Online'
+          //                             : 'Server Offline'),
+          //                   style: const TextStyle(
+          //                     fontWeight: FontWeight.bold,
+          //                     fontSize: 16,
+          //                   ),
+          //                 ),
+          //                 const SizedBox(height: 4),
+          //                 Text(
+          //                   _serverUrl,
+          //                   style: TextStyle(
+          //                     fontSize: 12,
+          //                     color: Colors.grey[600],
+          //                   ),
+          //                 ),
+          //               ],
+          //             ),
+          //           ),
+          //           IconButton(
+          //             icon: const Icon(Icons.refresh),
+          //             onPressed: _checkingServer ? null : _checkServerStatus,
+          //             tooltip: 'Test connection',
+          //           ),
+          //         ],
+          //       ),
+          //     ],
+          //   ),
+          // ),
+          // if (_serverUrl.startsWith('http://') &&
+          //     !(_serverUrl.contains('localhost') ||
+          //         _serverUrl.contains('127.0.0.1') ||
+          //         _serverUrl.contains('10.0.2.2') ||
+          //         _serverUrl.contains('192.168.')))
+          //   Container(
+          //     margin: const EdgeInsets.symmetric(horizontal: 16),
+          //     padding: const EdgeInsets.all(12),
+          //     decoration: BoxDecoration(
+          //       color: Colors.orange.withValues(alpha: 0.1),
+          //       border: Border.all(color: Colors.orange),
+          //       borderRadius: BorderRadius.circular(8),
+          //     ),
+          //     child: const Text(
+          //       'Warning: Using an HTTP server on the public internet. For Play Store compliance and security, prefer HTTPS for remote servers.',
+          //       style: TextStyle(fontSize: 12),
+          //     ),
+          //   ),
           SwitchListTile(
             title: const Text('Scan photos only on Wi‑Fi'),
             subtitle: const Text(
@@ -245,17 +238,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
             secondary: const Icon(Icons.playlist_play),
           ),
-          SwitchListTile(
-            title: const Text('Allow server uploads'),
-            subtitle: const Text(
-              'Upload selected photos to your configured server for enhanced AI tags',
+          // Server upload toggle hidden for free tier (no server-based features)
+          // SwitchListTile(
+          //   title: const Text('Allow server uploads'),
+          //   subtitle: const Text(
+          //     'Upload selected photos to your configured server for enhanced AI tags',
+          //   ),
+          //   value: _uploadConsent,
+          //   onChanged: (v) async {
+          //     setState(() => _uploadConsent = v);
+          //     await _saveUploadConsent(v);
+          //   },
+          //   secondary: const Icon(Icons.cloud_upload_outlined),
+          // ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text(
+              'Developer',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey,
+              ),
             ),
-            value: _uploadConsent,
+          ),
+          SwitchListTile(
+            title: const Text('Show developer buttons'),
+            subtitle: const Text(
+              'Show camera and debug buttons in gallery (for testers)',
+            ),
+            value: _showDevButtons,
             onChanged: (v) async {
-              setState(() => _uploadConsent = v);
-              await _saveUploadConsent(v);
+              setState(() => _showDevButtons = v);
+              await _saveDevButtons(v);
             },
-            secondary: const Icon(Icons.cloud_upload_outlined),
+            secondary: const Icon(Icons.bug_report),
           ),
           const Divider(),
           const Padding(
@@ -293,32 +311,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: const Icon(Icons.privacy_tip_outlined),
             title: const Text('Privacy Policy'),
             subtitle: const Text('Learn how your data is handled'),
-            onTap: () {
+            onTap: () async {
               final url = AppLinks.kPrivacyPolicyUrl.trim();
+              // Capture navigator before async gap to avoid use_build_context_synchronously
+              final navigator = Navigator.of(context);
+
               if (url.isNotEmpty) {
                 final uri = Uri.parse(url);
-                launchUrl(uri, mode: LaunchMode.externalApplication)
-                    .then((ok) {
-                      if (!ok) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const PrivacyPolicyScreen(),
-                          ),
-                        );
-                      }
-                    })
-                    .catchError((_) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const PrivacyPolicyScreen(),
-                        ),
-                      );
-                    });
+                try {
+                  final ok = await launchUrl(
+                    uri,
+                    mode: LaunchMode.externalApplication,
+                  );
+                  if (!ok && mounted) {
+                    navigator.push(
+                      MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyScreen(),
+                      ),
+                    );
+                  }
+                } catch (_) {
+                  if (!mounted) return;
+                  navigator.push(
+                    MaterialPageRoute(
+                      builder: (_) => const PrivacyPolicyScreen(),
+                    ),
+                  );
+                }
               } else {
-                Navigator.push(
-                  context,
+                navigator.push(
                   MaterialPageRoute(
                     builder: (_) => const PrivacyPolicyScreen(),
                   ),

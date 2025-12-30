@@ -18,7 +18,9 @@ class LocalTaggingService {
   /// Initialize the ML Kit labeler (lazy singleton)
   static ImageLabeler get labeler {
     _labeler ??= ImageLabeler(
-      options: ImageLabelerOptions(confidenceThreshold: 0.7),
+      // Lower threshold = faster inference, catches more objects
+      // 0.6 provides good balance of speed and accuracy
+      options: ImageLabelerOptions(confidenceThreshold: 0.6),
     );
     return _labeler!;
   }
@@ -134,35 +136,74 @@ class LocalTaggingService {
   static LocalTagResult _mapLabelsToCategories(List<ImageLabel> labels) {
     final Set<String> categories = {};
     final List<String> allDetections = [];
+    bool hasScreenshot = false;
 
+    // Track confidence scores for conflict resolution
+    double bestPeopleConfidence = 0.0;
+    double bestAnimalConfidence = 0.0;
+    String? bestPeopleLabel;
+    String? bestAnimalLabel;
+
+    // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
       final text = label.label.toLowerCase();
+      final confidence = label.confidence;
       // Store original label for display (no percentage needed)
       allDetections.add(label.label);
 
-      // PEOPLE - highest priority
+      // Check ALL categories independently (not else-if)
       if (_isPeopleLabel(text)) {
         categories.add('people');
+        developer.log('👤 People label matched: "$text"');
+        if (confidence > bestPeopleConfidence) {
+          bestPeopleConfidence = confidence;
+          bestPeopleLabel = text;
+        }
       }
-      // ANIMALS
-      else if (_isAnimalLabel(text)) {
+      if (_isAnimalLabel(text)) {
         categories.add('animals');
+        if (confidence > bestAnimalConfidence) {
+          bestAnimalConfidence = confidence;
+          bestAnimalLabel = text;
+        }
       }
-      // FOOD
-      else if (_isFoodLabel(text)) {
+      if (_isFoodLabel(text)) {
         categories.add('food');
       }
-      // DOCUMENT
-      else if (_isDocumentLabel(text)) {
+      if (_isDocumentLabel(text)) {
         categories.add('document');
       }
-      // SCENERY
-      else if (_isSceneryLabel(text)) {
+      if (_isSceneryLabel(text)) {
         categories.add('scenery');
+      }
+      // Track screenshot detection for subtag
+      if (text.contains('screenshot') || text.contains('screen')) {
+        hasScreenshot = true;
+      }
+    }
+
+    // CONFLICT RESOLUTION: When both people AND animals detected, check confidence
+    // This prevents animal photos being tagged as people due to weak body-part labels
+    if (categories.contains('people') && categories.contains('animals')) {
+      // If animal confidence is significantly higher, remove people
+      // Or if people detection is based on weak/generic labels
+      if (bestAnimalConfidence > bestPeopleConfidence + 0.1) {
+        // Animal label is more confident - likely an animal photo
+        categories.remove('people');
+        developer.log(
+          '🔄 Conflict: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
+        );
+      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '')) {
+        // People detection based on generic label that animals share
+        categories.remove('people');
+        developer.log(
+          '🔄 Conflict: Removed weak people label "$bestPeopleLabel" - animal detected',
+        );
       }
     }
 
     // Priority order: people > animals > food > document > scenery
+    // If person is detected, that MUST be the main category (even if document/screenshot also detected)
     final prioritized = <String>[];
     if (categories.contains('people')) prioritized.add('people');
     if (categories.contains('animals')) prioritized.add('animals');
@@ -170,17 +211,34 @@ class LocalTaggingService {
     if (categories.contains('document')) prioritized.add('document');
     if (categories.contains('scenery')) prioritized.add('scenery');
 
+    // Build final tags: main category first
+    final resultTags = <String>[];
+    if (prioritized.isNotEmpty) {
+      resultTags.add(prioritized.first);
+      // Add screenshot as secondary tag if detected and main category is people
+      if (hasScreenshot && prioritized.first == 'people') {
+        resultTags.add('screenshot');
+      }
+    } else {
+      // Log when no category matched - helps debug misses
+      developer.log(
+        '⚠️ No category matched for labels: ${allDetections.join(", ")}',
+      );
+    }
+
     // Return result with both tags and raw detections
     return LocalTagResult(
-      tags: prioritized.isNotEmpty ? [prioritized.first] : [],
+      tags: resultTags.isNotEmpty ? resultTags : [],
       allDetections: allDetections,
     );
   }
 
   // ============ Label Mapping Functions ============
 
+  /// Strong people labels - definitely indicate humans
   static bool _isPeopleLabel(String label) {
     const peopleKeywords = [
+      // Strong human-specific labels
       'person',
       'people',
       'human',
@@ -202,14 +260,110 @@ class LocalTaggingService {
       'teenager',
       'elder',
       'senior',
-      // Body parts
+      // Events/gatherings (typically involve people)
+      'event',
+      'party',
+      'wedding',
+      'ceremony',
+      'celebration',
+      'gathering',
+      'audience',
+      'concert',
+      'festival',
+      'parade',
+      'meeting',
+      'conference',
+      'graduation',
+      'birthday',
+      'team',
+      'sport',
+      'player',
+      'athlete',
+      'spectator',
+      'social',
+      'recreation',
+      // Performance/theater (always involves people)
+      'performance',
+      'theater',
+      'theatre',
+      'stage',
+      'actor',
+      'actress',
+      'performer',
+      'show',
+      'drama',
+      'play',
+      'musical',
+      'opera',
+      'ballet',
+      'dance',
+      'dancer',
+      // Clothing/fashion (strongly indicates person - animals don't wear these)
+      'fashion',
+      'dress',
+      'clothing',
+      'shirt',
+      'pants',
+      'jeans',
+      'jacket',
+      'coat',
+      'sweater',
+      'skirt',
+      'shoe',
+      'sneaker',
+      'boot',
+      'hat',
+      'cap',
+      'glasses',
+      'sunglasses',
+      'goggle', // goggles, swimming goggles, ski goggles
+      'eyewear',
+      'watch',
+      'jewelry',
+      'necklace',
+      'bracelet',
+      'suit',
+      'tie',
+      'scarf',
+      'glove',
+      'sock',
+      'belt',
+      // Actions/poses/emotions specific to humans
+      'smiling',
+      'laughing',
+      'posing',
+      'dancing',
+      'singing',
+      'clapping',
+      'waving',
+      'fun', // typically implies human activity
+      'cool', // often describes person/style
+      'happy',
+      'joy',
+      'playing',
+      'leisure', // leisure activities involve people
+      'walking', // person walking
+      'jogging',
+      'hiking',
+      'cycling',
+      'swimming',
+      'exercising',
+      'workout',
+      'fitness',
+    ];
+    return peopleKeywords.any((k) => label.contains(k));
+  }
+
+  /// Weak people labels - could match animals or other objects
+  /// Used for conflict resolution when both people and animals detected
+  static bool _isWeakPeopleLabel(String label) {
+    const weakLabels = [
+      // Body parts that animals/mascots can also have
       'finger',
       'hand',
+      'thumb',
       'nail',
       'arm',
-      'leg',
-      'foot',
-      'feet',
       'eye',
       'ear',
       'nose',
@@ -218,10 +372,21 @@ class LocalTaggingService {
       'hair',
       'skin',
       'body',
-      'thumb',
+      'leg',
+      'foot',
+      'feet',
       'toe',
+      // Generic actions animals can do too
+      'sitting',
+      'standing',
+      'walking',
+      'running',
+      // Items that can appear without people
+      'bag',
+      'handbag',
+      'backpack',
     ];
-    return peopleKeywords.any((k) => label.contains(k));
+    return weakLabels.any((k) => label.contains(k));
   }
 
   static bool _isAnimalLabel(String label) {

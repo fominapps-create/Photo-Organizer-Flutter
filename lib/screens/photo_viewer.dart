@@ -309,15 +309,15 @@ class _PhotoViewerState extends State<PhotoViewer>
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           if (widget.onAddToAlbum != null)
-            _buildActionButton(Icons.photo_album, 'Album', Colors.green, () {
+            _buildActionButton(Icons.folder, 'Album', Colors.orange, () {
               widget.onAddToAlbum?.call(_currentPhoto.url);
             }),
           if (widget.onShare != null)
-            _buildActionButton(Icons.share, 'Share', Colors.blue, () {
+            _buildActionButton(Icons.share, 'Share', Colors.orange, () {
               widget.onShare?.call(_currentPhoto.url);
             }),
           if (widget.onDelete != null)
-            _buildActionButton(Icons.delete, 'Delete', Colors.red, () {
+            _buildActionButton(Icons.delete, 'Delete', Colors.orange, () {
               widget.onDelete?.call(_currentPhoto.url);
             }),
         ],
@@ -562,6 +562,15 @@ class _PhotoViewerState extends State<PhotoViewer>
 
     // Get safe area padding for bottom navigation bar
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Background colors that adapt to theme
+    final bgColor = isDark
+        ? Colors.black.withValues(alpha: 0.75)
+        : Colors.black.withValues(alpha: 0.65);
+    final labelBgColor = isDark
+        ? Colors.white.withValues(alpha: 0.15)
+        : Colors.black.withValues(alpha: 0.3);
 
     return Positioned(
       left: 0,
@@ -573,9 +582,11 @@ class _PhotoViewerState extends State<PhotoViewer>
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
             colors: [
-              Colors.black.withValues(alpha: 0.85),
-              Colors.black.withValues(alpha: 0.0),
+              bgColor,
+              bgColor.withValues(alpha: bgColor.a * 0.8),
+              Colors.transparent,
             ],
+            stops: const [0.0, 0.7, 1.0],
           ),
         ),
         padding: EdgeInsets.fromLTRB(16, 48, 16, 128 + 32 + bottomPadding),
@@ -654,15 +665,19 @@ class _PhotoViewerState extends State<PhotoViewer>
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
+                      color: labelBgColor,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: Colors.white.withValues(alpha: 0.4),
                       ),
                     ),
                     child: Text(
                       displayObj,
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   );
                 }).toList(),

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:io';
 import 'dart:developer' as developer;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'local_tagging_service.dart';
 import 'api_service.dart';
@@ -10,6 +11,69 @@ import 'dart:convert';
 /// Free tier = local on-device processing
 /// Premium tier / Server configured = cloud processing
 class TaggingServiceFactory {
+  /// Cached device concurrency level
+  static int? _cachedConcurrency;
+
+  /// Get optimal concurrency for ML Kit based on device capabilities
+  static Future<int> _getOptimalConcurrency() async {
+    if (_cachedConcurrency != null) return _cachedConcurrency!;
+
+    int cpuCores = 4;
+    int ramGB = 4;
+
+    try {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isLinux)) {
+        // Read CPU cores
+        try {
+          final cpuInfo = await File('/proc/cpuinfo').readAsString();
+          final processors = cpuInfo
+              .split('\n')
+              .where((line) => line.startsWith('processor'))
+              .length;
+          if (processors > 0) cpuCores = processors;
+        } catch (_) {}
+
+        // Read RAM
+        try {
+          final memInfo = await File('/proc/meminfo').readAsString();
+          final memTotalLine = memInfo
+              .split('\n')
+              .firstWhere(
+                (line) => line.startsWith('MemTotal:'),
+                orElse: () => '',
+              );
+          if (memTotalLine.isNotEmpty) {
+            final memKB = int.tryParse(
+              memTotalLine.replaceAll(RegExp(r'[^0-9]'), ''),
+            );
+            if (memKB != null) {
+              ramGB = (memKB / 1024 / 1024).ceil();
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // Determine concurrency based on device tier
+    // Higher concurrency = more parallel ML Kit operations = faster scanning
+    int concurrency;
+    if (ramGB <= 3 || cpuCores <= 4) {
+      concurrency = 8; // Low-end: 8 parallel operations
+    } else if (ramGB <= 6 || cpuCores <= 6) {
+      concurrency = 12; // Mid-range: 12 parallel operations
+    } else if (ramGB <= 8 || cpuCores <= 8) {
+      concurrency = 16; // Mid-high: 16 parallel operations
+    } else {
+      concurrency = 20; // High-end: 20 parallel operations
+    }
+
+    developer.log(
+      '📱 Device: $cpuCores cores, ${ramGB}GB RAM → concurrency: $concurrency',
+    );
+    _cachedConcurrency = concurrency;
+    return concurrency;
+  }
+
   /// Check if server is available and configured
   static Future<bool> isServerAvailable() async {
     final baseUrl = ApiService.baseUrl;
@@ -49,9 +113,14 @@ class TaggingServiceFactory {
     final tempDirPath = tempDir.path;
     final tempFilesToDelete = <String>[];
 
-    // Process in parallel with higher concurrency for on-device processing
-    // ML Kit is efficient and can handle 6-8 concurrent operations
-    const concurrencyLimit = 6;
+    // Dynamic concurrency based on device capabilities
+    // Higher concurrency = faster processing, but more memory/CPU
+    // ML Kit is well-optimized and can handle high concurrency on modern devices
+    final concurrencyLimit = await _getOptimalConcurrency();
+    developer.log(
+      '🚀 Local ML Kit processing with concurrency: $concurrencyLimit',
+    );
+
     try {
       // Process items in chunks for controlled parallelism
       for (var i = 0; i < items.length; i += concurrencyLimit) {
