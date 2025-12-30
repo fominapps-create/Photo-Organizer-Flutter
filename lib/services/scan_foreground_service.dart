@@ -1,6 +1,7 @@
 import 'dart:developer' as developer;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    as local_notif;
 
 /// Manages foreground service for background photo scanning.
 /// Shows a persistent notification with progress while scanning.
@@ -14,7 +15,7 @@ class ScanForegroundService {
   static bool _isShuttingDown = false;
 
   // Local notifications plugin for post-shutdown messages
-  static FlutterLocalNotificationsPlugin? _localNotifications;
+  static local_notif.FlutterLocalNotificationsPlugin? _localNotifications;
 
   /// Initialize the foreground task system (call once at app start)
   static Future<void> init() async {
@@ -183,13 +184,13 @@ class ScanForegroundService {
   static Future<void> _initLocalNotifications() async {
     if (_localNotifications != null) return;
 
-    _localNotifications = FlutterLocalNotificationsPlugin();
+    _localNotifications = local_notif.FlutterLocalNotificationsPlugin();
 
-    const androidSettings = AndroidInitializationSettings(
+    const androidSettings = local_notif.AndroidInitializationSettings(
       '@mipmap/ic_launcher',
     );
-    const iosSettings = DarwinInitializationSettings();
-    const initSettings = InitializationSettings(
+    const iosSettings = local_notif.DarwinInitializationSettings();
+    const initSettings = local_notif.InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
@@ -210,16 +211,18 @@ class ScanForegroundService {
   static Future<void> showInterruptedNotification() async {
     await _initLocalNotifications();
 
-    const androidDetails = AndroidNotificationDetails(
+    const androidDetails = local_notif.AndroidNotificationDetails(
       'photo_scan_interrupted',
       'Scan Interrupted',
       channelDescription: 'Notification when photo scan is interrupted',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
+      importance: local_notif.Importance.defaultImportance,
+      priority: local_notif.Priority.defaultPriority,
       autoCancel: true,
     );
 
-    const notificationDetails = NotificationDetails(android: androidDetails);
+    const notificationDetails = local_notif.NotificationDetails(
+      android: androidDetails,
+    );
 
     await _localNotifications?.show(
       1001, // Unique ID for interrupted notification
