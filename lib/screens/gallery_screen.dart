@@ -75,7 +75,8 @@ class GalleryScreenState extends State<GalleryScreen>
   final Set<String> _selectedKeys = {};
   final Map<String, double> _textWidthCache = {};
   bool _scanning = false;
-  bool _scanPreparing = false; // True during initial ML Kit warmup before % starts
+  bool _scanPreparing =
+      false; // True during initial ML Kit warmup before % starts
   bool _clearingTags = false;
   bool _hasScannedAtLeastOneBatch = false;
   bool _validating = false;
@@ -252,7 +253,6 @@ class GalleryScreenState extends State<GalleryScreen>
     if (photoUrls.isEmpty) return;
 
     try {
-
       final xFiles = <XFile>[];
 
       for (final url in photoUrls) {
@@ -726,10 +726,7 @@ class GalleryScreenState extends State<GalleryScreen>
         margin: const EdgeInsets.only(bottom: 48, left: 16, right: 16),
         duration: duration ?? const Duration(seconds: 4),
         action: actionLabel != null && onAction != null
-            ? SnackBarAction(
-                label: actionLabel,
-                onPressed: onAction,
-              )
+            ? SnackBarAction(label: actionLabel, onPressed: onAction)
             : null,
       ),
     );
@@ -6322,13 +6319,13 @@ class GalleryScreenState extends State<GalleryScreen>
                                                   ),
                                               decoration: BoxDecoration(
                                                 color: _isSelectMode
-                                                    ? Colors.blue.shade50
+                                                    ? Colors.orange.shade50
                                                     : Colors.white,
                                                 borderRadius:
                                                     BorderRadius.circular(20),
                                                 border: Border.all(
                                                   color: _isSelectMode
-                                                      ? Colors.blue.shade400
+                                                      ? Colors.orange.shade400
                                                       : Colors.grey.shade300,
                                                   width: 2,
                                                 ),
@@ -6350,7 +6347,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         : Icons
                                                               .check_box_outline_blank,
                                                     color: _isSelectMode
-                                                        ? Colors.blue.shade700
+                                                        ? Colors.orange.shade700
                                                         : Colors.grey.shade600,
                                                     size: 20,
                                                   ),
@@ -6361,7 +6358,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         : 'Select',
                                                     style: TextStyle(
                                                       color: _isSelectMode
-                                                          ? Colors.blue.shade700
+                                                          ? Colors.orange.shade700
                                                           : Colors
                                                                 .grey
                                                                 .shade800,
@@ -6397,12 +6394,12 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       vertical: 8,
                                                     ),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.green.shade50,
+                                                  color: Colors.orange.shade50,
                                                   borderRadius:
                                                       BorderRadius.circular(20),
                                                   border: Border.all(
                                                     color:
-                                                        Colors.green.shade400,
+                                                        Colors.orange.shade400,
                                                     width: 2,
                                                   ),
                                                   boxShadow: [
@@ -6426,7 +6423,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     Icon(
                                                       Icons.select_all,
                                                       color:
-                                                          Colors.green.shade700,
+                                                          Colors.orange.shade700,
                                                       size: 20,
                                                     ),
                                                     const SizedBox(width: 8),
@@ -6434,7 +6431,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       'Select All',
                                                       style: TextStyle(
                                                         color: Colors
-                                                            .green
+                                                            .orange
                                                             .shade700,
                                                         fontSize: 16,
                                                         fontWeight:

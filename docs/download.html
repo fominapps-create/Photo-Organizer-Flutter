@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Filtored - Alpha Testing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 450px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+            text-align: center;
+        }
+        
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .beta-badge {
+            display: inline-block;
+            background: #ff6b6b;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        
+        p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+        
+        .password-section {
+            margin-bottom: 20px;
+        }
+        
+        .password-section label {
+            display: block;
+            text-align: left;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .password-input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        .password-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .error-message {
+            color: #ff6b6b;
+            font-size: 14px;
+            margin-top: 8px;
+            display: none;
+        }
+        
+        .unlock-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .unlock-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .download-section {
+            display: none;
+        }
+        
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 18px 32px;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 20px;
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(17, 153, 142, 0.3);
+        }
+        
+        .download-btn svg {
+            width: 24px;
+            height: 24px;
+        }
+        
+        .instructions {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: left;
+            margin-top: 20px;
+        }
+        
+        .instructions h3 {
+            color: #333;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        
+        .instructions ol {
+            color: #666;
+            padding-left: 20px;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .version-info {
+            margin-top: 20px;
+            color: #999;
+            font-size: 12px;
+        }
+        
+        .requirements {
+            background: #fff3cd;
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 15px;
+            text-align: left;
+        }
+        
+        .requirements h4 {
+            color: #856404;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .requirements ul {
+            color: #856404;
+            font-size: 13px;
+            padding-left: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <svg fill="white" viewBox="0 0 24 24" width="40" height="40"><path d="M12 15.2c1.77 0 3.2-1.43 3.2-3.2S13.77 8.8 12 8.8 8.8 10.23 8.8 12s1.43 3.2 3.2 3.2zm9-8.6h-3.17L16.5 5H7.5L6.17 6.6H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2v-12c0-1.1-.9-2-2-2zm-9 13c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/></svg>
+        </div>
+        <h1>Filtored</h1>
+        <span class="beta-badge">ALPHA TESTING</span>
+        
+        <!-- Password Section -->
+        <div id="passwordSection" class="password-section">
+            <p>Enter the alpha access code to download the app. Contact us if you don't have one!</p>
+            <label for="password">Access Code</label>
+            <input type="password" id="password" class="password-input" placeholder="Enter access code..." onkeypress="if(event.key==='Enter') checkPassword()">
+            <p id="errorMsg" class="error-message">Incorrect access code. Please try again.</p>
+            <br><br>
+            <button class="unlock-btn" onclick="checkPassword()">Unlock Download</button>
+        </div>
+        
+        <!-- Download Section (Hidden until correct password) -->
+        <div id="downloadSection" class="download-section">
+            <p>Thank you for being an alpha tester!<br>Download the app below and help us improve it.</p>
+            
+            <a href="filtored-alpha.apk" class="download-btn" download>
+                <svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                Download APK
+            </a>
+            
+            <div class="instructions">
+                <h3><svg fill="#333" viewBox="0 0 24 24" width="16" height="16" style="vertical-align: middle; margin-right: 6px;"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>Installation Steps:</h3>
+                <ol>
+                    <li>Download the APK file</li>
+                    <li>Open the downloaded file</li>
+                    <li>If prompted, allow "Install from unknown sources"</li>
+                    <li>Tap "Install" and wait for completion</li>
+                    <li>Open Filtored and enjoy!</li>
+                </ol>
+            </div>
+            
+            <div class="requirements">
+                <h4><svg fill="#856404" viewBox="0 0 24 24" width="14" height="14" style="vertical-align: middle; margin-right: 4px;"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>Requirements:</h4>
+                <ul>
+                    <li>Android 5.0 or higher</li>
+                    <li>~100MB storage space</li>
+                    <li>Internet optional (AI works offline)</li>
+                </ul>
+            </div>
+            
+            <p class="version-info">Version 0.2.4 (Alpha) - Last updated: December 31, 2025</p>
+        </div>
+    </div>
+    
+    <script>
+        // Simple password check - Change 'filtored2025' to your desired password
+        const ALPHA_PASSWORD = 'filtored2025';
+        
+        function checkPassword() {
+            const input = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+            
+            if (input === ALPHA_PASSWORD) {
+                document.getElementById('passwordSection').style.display = 'none';
+                document.getElementById('downloadSection').style.display = 'block';
+            } else {
+                errorMsg.style.display = 'block';
+                document.getElementById('password').style.borderColor = '#ff6b6b';
+            }
+        }
+    </script>
+</body>
+</html>

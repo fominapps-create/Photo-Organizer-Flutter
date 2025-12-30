@@ -146,10 +146,10 @@ class LocalTaggingService {
     String? bestPeopleLabel;
     String? bestAnimalLabel;
     String? bestFoodLabel;
-    
+
     // Track weak scenery labels (indoor/product labels that shouldn't trigger scenery)
     bool hasOnlyWeakScenery = true;
-    
+
     // Track if we have STRONG person indicators (face, person, human - not just clothing)
     bool hasStrongPersonLabel = false;
 
@@ -246,7 +246,9 @@ class LocalTaggingService {
     }
     if (hasStrongPeopleContext && !categories.contains('people')) {
       categories.add('people');
-      developer.log('👤 Added people category from context (beard/fun/event/etc)');
+      developer.log(
+        '👤 Added people category from context (beard/fun/event/etc)',
+      );
     }
 
     // CONFLICT RESOLUTION: When both people AND animals detected, check confidence
@@ -268,7 +270,8 @@ class LocalTaggingService {
             '🔄 Conflict: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
           );
         }
-      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '') && !hasStrongPeopleContext) {
+      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '') &&
+          !hasStrongPeopleContext) {
         // People detection based on generic label that animals share
         categories.remove('people');
         developer.log(
@@ -290,7 +293,9 @@ class LocalTaggingService {
 
     // WEAK PEOPLE FILTER: Remove people if ONLY weak labels detected (clothing, furniture, etc)
     // This prevents false positives like crates with labels, excel screenshots, cat photos
-    if (categories.contains('people') && !hasStrongPersonLabel && !hasStrongPeopleContext) {
+    if (categories.contains('people') &&
+        !hasStrongPersonLabel &&
+        !hasStrongPeopleContext) {
       categories.remove('people');
       developer.log(
         '🔄 Removed people - no strong person indicator found (only weak: ${bestPeopleLabel ?? "?"})',
@@ -303,9 +308,7 @@ class LocalTaggingService {
       // If we have other categories, remove scenery
       if (categories.length > 1) {
         categories.remove('scenery');
-        developer.log(
-          '🔄 Removed weak scenery (indoor/product labels only)',
-        );
+        developer.log('🔄 Removed weak scenery (indoor/product labels only)');
       } else {
         // If scenery is the only category and it's weak, return 'other'
         categories.remove('scenery');
@@ -319,13 +322,11 @@ class LocalTaggingService {
     // Just "text" or "writing" with a colorful/complex background is not a document
     if (categories.contains('document') && categories.length > 1) {
       // If we also detected people/animals/food, it's probably not a document
-      if (categories.contains('people') || 
-          categories.contains('animals') || 
+      if (categories.contains('people') ||
+          categories.contains('animals') ||
           categories.contains('food')) {
         categories.remove('document');
-        developer.log(
-          '🔄 Removed document - other primary content detected',
-        );
+        developer.log('🔄 Removed document - other primary content detected');
       }
     }
 
@@ -500,6 +501,11 @@ class LocalTaggingService {
       'mustache',
       'smiling',
       'laughing',
+      'eyelash',
+      'eyebrow',
+      'forehead',
+      'chin',
+      'cheek',
     ];
     return strongLabels.any((k) => label.contains(k));
   }

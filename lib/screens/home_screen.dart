@@ -403,97 +403,109 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          // Floating search button
-          Positioned(
-            right: 16,
-            bottom: 135,
-            child: GestureDetector(
-              onTap: () {
-                // Get tags sorted by popularity (most common first)
-                final suggestionsByPopularity =
-                    _galleryKey.currentState?.getSearchSuggestions(
-                      limit: 100,
-                    ) ??
-                    <String>[];
+          // Floating Filto button - hides when scrolling
+          ValueListenableBuilder<bool>(
+            valueListenable: _showNavBar,
+            builder: (context, showNavBar, child) {
+              return Positioned(
+                right: 16,
+                bottom: 135,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: showNavBar ? 1.0 : 0.0,
+                  child: IgnorePointer(
+                    ignoring: !showNavBar,
+                    child: GestureDetector(
+                      onTap: () {
+                        // Get tags sorted by popularity (most common first)
+                        final suggestionsByPopularity =
+                            _galleryKey.currentState?.getSearchSuggestions(
+                              limit: 100,
+                            ) ??
+                            <String>[];
 
-                // Open search screen with tags sorted by popularity
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SearchScreen(
-                      recommendedTags: suggestionsByPopularity,
-                      onTagSelected: (tag) {
-                        // Apply search filter in gallery
-                        if (_selectedIndex == 0) {
-                          _galleryKey.currentState?.searchByTag(tag);
-                        }
-                      },
-                    ),
-                  ),
-                );
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Background button circle
-                      Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: widget.isDarkMode
-                              ? Colors.grey.shade900
-                              : Colors.white,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
+                        // Open search screen with tags sorted by popularity
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => SearchScreen(
+                              recommendedTags: suggestionsByPopularity,
+                              onTagSelected: (tag) {
+                                // Apply search filter in gallery
+                                if (_selectedIndex == 0) {
+                                  _galleryKey.currentState?.searchByTag(tag);
+                                }
+                              },
                             ),
-                          ],
-                        ),
-                      ),
-                      // Omni button icon on top
-                      Image.asset(
-                        'assets/omni-button.png',
-                        width: 72,
-                        height: 72,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  // Floating label with white bg and orange text
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'Filto',
-                      style: TextStyle(
-                        color: Colors.orange.shade700,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 2,
-                            offset: const Offset(0, 1),
+                          ),
+                        );
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              // Background button circle
+                              Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: widget.isDarkMode
+                                      ? Colors.grey.shade900
+                                      : Colors.white,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.3),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Omni button icon on top
+                              Image.asset(
+                                'assets/omni-button.png',
+                                width: 72,
+                                height: 72,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // Floating label with white bg and orange text
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'Filto',
+                              style: TextStyle(
+                                color: Colors.orange.shade700,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 2,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ],
       ),
