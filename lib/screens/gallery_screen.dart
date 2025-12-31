@@ -6490,38 +6490,28 @@ class GalleryScreenState extends State<GalleryScreen>
                                       constraints: const BoxConstraints(
                                         maxWidth: 80,
                                       ),
-                                      child: ShaderMask(
-                                        shaderCallback: (bounds) =>
-                                            const LinearGradient(
-                                              begin: Alignment.centerLeft,
-                                              end: Alignment.centerRight,
-                                              colors: [
-                                                Colors.black87,
-                                                Color(0xFFC0C0C0),
-                                                Colors.black87,
-                                              ],
-                                              stops: [0.1, 0.5, 0.93],
-                                            ).createShader(bounds),
-                                        child: Text(
-                                          '1,000',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w900,
-                                            letterSpacing: 0.5,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
+                                      child: Text(
+                                        '1k',
+                                        style: TextStyle(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                  Brightness.dark
+                                              ? const Color(
+                                                  0xFFFF69B4,
+                                                ) // Bright pink in dark mode
+                                              : Colors.red, // Red in light mode
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.5,
                                         ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     const SizedBox(width: 4),
-                                    Transform.scale(
-                                      scale: 1.8,
-                                      child: Image.asset(
-                                        'assets/T Creadit Icon.png',
-                                        width: 30,
-                                        height: 30,
-                                      ),
+                                    Image.asset(
+                                      'assets/currency_v1.png',
+                                      width: 24,
+                                      height: 24,
                                     ),
                                   ],
                                 ),
