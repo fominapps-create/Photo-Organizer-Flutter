@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Dev Build - Filtored</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: #1a1a2e;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+            text-align: center;
+            color: #fff;
+        }
+        
+        .dev-badge {
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #aaa;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .version-box {
+            background: rgba(255, 107, 53, 0.2);
+            border: 1px solid rgba(255, 107, 53, 0.5);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .version-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #ff6b35;
+        }
+        
+        .scan-version {
+            font-size: 14px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .changes {
+            text-align: left;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .changes h3 {
+            color: #ff6b35;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        .changes ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .changes li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 13px;
+            color: #ccc;
+        }
+        
+        .changes li:last-child {
+            border-bottom: none;
+        }
+        
+        .changes li::before {
+            content: "→ ";
+            color: #ff6b35;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            padding: 18px 50px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 18px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 10px 30px rgba(255, 107, 53, 0.4);
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(255, 107, 53, 0.5);
+        }
+        
+        .warning {
+            background: rgba(255, 193, 7, 0.2);
+            border: 1px solid rgba(255, 193, 7, 0.5);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 25px;
+            font-size: 12px;
+            color: #ffc107;
+        }
+        
+        .timestamp {
+            margin-top: 20px;
+            font-size: 11px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="dev-badge">🔧 Developer Build</div>
+        
+        <h1>Filtored Dev</h1>
+        <p class="subtitle">Internal testing build - not for distribution</p>
+        
+        <div class="version-box">
+            <div class="version-number">v0.3.0-dev</div>
+            <div class="scan-version">Scan Logic: v0.4</div>
+        </div>
+        
+        <div class="changes">
+            <h3>Changes in this build:</h3>
+            <ul>
+                <li>Fixed event/party/christmas tagging as people</li>
+                <li>Eyelash moved to ambiguous (needs context)</li>
+                <li>Tier2 (clothing) alone won't trigger people</li>
+                <li>Background scan 25% slower to reduce heat</li>
+                <li>Foreground scan unchanged (full speed)</li>
+                <li>App version now from global constant</li>
+                <li>Scan version shown in settings & fullscreen</li>
+                <li>Search categories prioritized</li>
+                <li>Search dropdown taller (70%)</li>
+                <li>Dropdown only shows on tap</li>
+            </ul>
+        </div>
+        
+        <a href="https://github.com/anandnet/Filtored/releases/download/dev/app-release.apk" class="download-btn">
+            ⬇️ Download APK
+        </a>
+        
+        <div class="warning">
+            ⚠️ This build may have bugs. Do not share with alpha testers.
+        </div>
+        
+        <p class="timestamp">Built: December 31, 2025</p>
+    </div>
+</body>
+</html>
