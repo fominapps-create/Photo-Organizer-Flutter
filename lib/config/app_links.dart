@@ -7,5 +7,5 @@ class AppLinks {
   /// App version - used in settings and website
   /// Update this when releasing a new version
   /// For dev builds: dev.X.Y where X=dev revision, Y=scan logic version
-  static const String appVersion = '0.3.0-dev.3.7';
+  static const String appVersion = '0.3.9-dev';
 }
