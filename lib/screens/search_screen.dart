@@ -356,7 +356,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             children: [
                               Text(
                                 _searchController.text.isEmpty
-                                    ? 'Common Words'
+                                    ? 'Frequent Tags'
                                     : 'Suggestions',
                                 style: TextStyle(
                                   color: Colors.lightBlue.shade300,

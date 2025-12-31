@@ -151,17 +151,23 @@ class _TrashScreenState extends State<TrashScreen> {
 
     if (confirmed != true) return;
 
-    // Delete all files
+    // FIX #11: Delete all files using PhotoManager (works with MediaStore)
+    final idsToDelete = <String>[];
     for (final item in _trashItems) {
-      final path = item['path'] as String;
+      final id = item['id'] as String;
+      // Extract the asset ID from 'local:XXXX' format
+      if (id.startsWith('local:')) {
+        idsToDelete.add(id.substring('local:'.length));
+      }
+    }
+    
+    if (idsToDelete.isNotEmpty) {
       try {
-        final file = File(path);
-        if (await file.exists()) {
-          await file.delete();
-          developer.log('🗑️ Deleted file: $path');
-        }
+        // Request permanent deletion via PhotoManager
+        final deletedIds = await PhotoManager.editor.deleteWithIds(idsToDelete);
+        developer.log('🗑️ Permanently deleted ${deletedIds.length} files via PhotoManager');
       } catch (e) {
-        developer.log('❌ Error deleting file: $e');
+        developer.log('❌ Error deleting files via PhotoManager: $e');
       }
     }
 

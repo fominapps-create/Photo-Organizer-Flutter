@@ -4805,14 +4805,47 @@ class GalleryScreenState extends State<GalleryScreen>
     return _searchSynonyms[term.toLowerCase()] ?? [];
   }
 
+  /// Minimum confidence threshold for a detection to be searchable
+  static const double _searchConfidenceThreshold = 0.65;
+
+  /// Parse a detection string that may contain confidence (format: "Label:0.72" or just "Label")
+  /// Returns (label, confidence) tuple. If no confidence, returns 1.0 (assume high confidence)
+  static (String, double) _parseDetectionWithConfidence(String detection) {
+    final colonIndex = detection.lastIndexOf(':');
+    if (colonIndex > 0 && colonIndex < detection.length - 1) {
+      final label = detection.substring(0, colonIndex);
+      final confStr = detection.substring(colonIndex + 1);
+      final conf = double.tryParse(confStr);
+      if (conf != null) {
+        return (label, conf);
+      }
+    }
+    // No confidence stored - assume it's a legacy tag or main category (high confidence)
+    return (detection, 1.0);
+  }
+
+  /// Check if a detection matches a search term with confidence filtering
+  static bool _detectionMatchesSearch(String detection, String searchTerm) {
+    final (label, confidence) = _parseDetectionWithConfidence(detection);
+    // Only match if confidence is above threshold
+    if (confidence < _searchConfidenceThreshold) {
+      return false;
+    }
+    return label.toLowerCase().contains(searchTerm);
+  }
+
   /// Get all unique tags/detections from gallery sorted by popularity
   List<MapEntry<String, int>> _getTagsSortedByPopularity() {
     final tagCounts = <String, int>{};
 
     for (final entry in photoAllDetections.entries) {
       for (final detection in entry.value) {
-        final tag = detection.toLowerCase();
-        tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+        // Parse detection with confidence and only count high-confidence tags
+        final (label, confidence) = _parseDetectionWithConfidence(detection);
+        if (confidence >= _searchConfidenceThreshold) {
+          final tag = label.toLowerCase();
+          tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+        }
       }
     }
 
@@ -4829,13 +4862,14 @@ class GalleryScreenState extends State<GalleryScreen>
       ..sort((a, b) => b.value.compareTo(a.value));
 
     // ISSUE #5 FIX: Prioritize main categories + Unscanned at the top
-    // Order: People, Animals, Food, Scenery, Documents, Unscanned, then rest by popularity
+    // Order: People, Animals, Food, Scenery, Documents, Other, Unscanned, then rest by popularity
     const priorityCategories = [
       'people',
       'animals',
       'food',
       'scenery',
       'documents',
+      'other',
       'unscanned',
     ];
 
@@ -4933,7 +4967,7 @@ class GalleryScreenState extends State<GalleryScreen>
       return expandedTerms.any(
         (searchTerm) =>
             tags.any((t) => t.toLowerCase().contains(searchTerm)) ||
-            allDetections.any((d) => d.toLowerCase().contains(searchTerm)),
+            allDetections.any((d) => _detectionMatchesSearch(d, searchTerm)),
       );
     }).toList();
 
@@ -6403,9 +6437,7 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       .contains(term),
                                                 ) ||
                                                 allDetections.any(
-                                                  (d) => d
-                                                      .toLowerCase()
-                                                      .contains(term),
+                                                  (d) => _detectionMatchesSearch(d, term),
                                                 ),
                                           );
                                         }).length;

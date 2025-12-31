@@ -313,26 +313,14 @@ class _PhotoViewerState extends State<PhotoViewer>
 
     if (!hasCallbacks) return const SizedBox.shrink();
 
+    // FIX #8: Navbar hides on tap (controlled by _showControls in parent)
     return Positioned(
       left: 0,
       right: 0,
       bottom: 0,
+      // FIX #8: Plain black background, no gradient
       child: Container(
-        // FIX: Solid black safe zone behind action buttons for better visibility
-        decoration: BoxDecoration(
-          color: Colors.black,
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              Colors.black,
-              Colors.black,
-              Colors.black.withValues(alpha: 0.9),
-              Colors.transparent,
-            ],
-            stops: const [0.0, 0.5, 0.8, 1.0],
-          ),
-        ),
+        color: Colors.black,
         padding: EdgeInsets.only(
           left: 16,
           right: 16,
@@ -360,6 +348,7 @@ class _PhotoViewerState extends State<PhotoViewer>
     );
   }
 
+  // FIX #7: Simple icon + text, no wrapper/container
   Widget _buildActionButton(
     IconData icon,
     String label,
@@ -368,31 +357,20 @@ class _PhotoViewerState extends State<PhotoViewer>
   ) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.2),
-            width: 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

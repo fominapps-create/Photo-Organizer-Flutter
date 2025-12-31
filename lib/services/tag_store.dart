@@ -306,10 +306,12 @@ class TagStore {
   //         animal exclusions (vehicle/room/screenshot/instruments), cat+dog deduplication
   // "0.6" - Room/furniture not documents, baby in costume → people, UI fixes
   // "0.7" - Dog requires 0.85+ confidence (massive over-detection fix)
+  // "0.8" - Detections now store confidence (Label:0.72 format), search filters
+  //         low-confidence tags (<65%) so false positives like "flower" on food don't match
 
   /// Current scan logic version (minor version only)
   /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '0.7';
+  static const String scanMinorVersion = '0.8';
 
   static const String _scanVersionKey = 'scan_minor_version';
 

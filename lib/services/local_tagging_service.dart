@@ -178,8 +178,9 @@ class LocalTaggingService {
     for (final label in labels) {
       final text = label.label.toLowerCase();
       final confidence = label.confidence;
-      // Store original label for display (all labels above ML Kit threshold of 0.5)
-      allDetections.add(label.label);
+      // Store original label WITH confidence for search filtering
+      // Format: "Label:0.72" - allows filtering low-confidence tags from search
+      allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
 
       // Fix #3, #9, #10: Detect illustration indicators first
       if (_isIllustrationLabel(text)) {
@@ -246,19 +247,14 @@ class LocalTaggingService {
       }
       // Food detection with confidence tracking
       if (_isFoodLabel(text)) {
-        // Fix #6: Flower requires very high confidence (0.90+) to avoid food misclassification
-        if (text.contains('flower')) {
-          if (confidence >= 0.90) {
-            // Don't add food category for high-confidence flowers
-            developer.log('🌸 High-confidence flower ($confidence) - not food');
-          } else {
-            // Low confidence flower might actually be food
-            categories.add('food');
-            if (confidence > bestFoodConfidence) {
-              bestFoodConfidence = confidence;
-              bestFoodLabel = text;
-            }
-          }
+        // FIX #6: Flowers/plants are NEVER food
+        // Skip food detection entirely for flower/plant labels
+        if (text.contains('flower') ||
+            text.contains('petal') ||
+            text.contains('plant') ||
+            text.contains('bloom') ||
+            text.contains('blossom')) {
+          developer.log('🌸 Skipping food for flower/plant: "$text"');
         } else {
           categories.add('food');
           if (confidence > bestFoodConfidence) {
@@ -595,6 +591,26 @@ class LocalTaggingService {
         categories.add('people');
       }
       developer.log('👶 Baby/child in costume - prioritizing People over Animals');
+    }
+
+    // FIX #6: Flowers/plants should be Other, not Food
+    // If we detect multiple flower/plant indicators, it's likely a floral photo, not food
+    final flowerPlantIndicators = allDetections.where((d) {
+      final lower = d.toLowerCase();
+      return lower.contains('flower') ||
+          lower.contains('petal') ||
+          lower.contains('plant') ||
+          lower.contains('bloom') ||
+          lower.contains('blossom') ||
+          lower.contains('floral') ||
+          lower.contains('bouquet') ||
+          lower.contains('vase');
+    }).length;
+    
+    // If 2+ flower/plant indicators detected, this is flowers not food
+    if (flowerPlantIndicators >= 2 && categories.contains('food')) {
+      categories.remove('food');
+      developer.log('🌸 Removed food - $flowerPlantIndicators flower/plant indicators detected');
     }
 
     final prioritized = <String>[];
