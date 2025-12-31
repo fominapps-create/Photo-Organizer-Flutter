@@ -215,11 +215,16 @@ class _CustomImagePickerState extends State<CustomImagePicker> {
             onPressed: _toggleSelectAll,
             icon: Icon(
               _selectAll ? Icons.check_box : Icons.check_box_outline_blank,
-              color: Colors.blue,
+              // FIX #5: Checkbox orange when selected, black when not
+              color: _selectAll ? Colors.orange : Colors.black,
             ),
-            label: const Text(
+            label: Text(
               'Select All',
-              style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+              // FIX #5: Text orange when selected, black when not
+              style: TextStyle(
+                color: _selectAll ? Colors.orange : Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],

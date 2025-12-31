@@ -645,6 +645,9 @@ class LocalTaggingService {
       );
     }
 
+    // NOTE: Food is a CATEGORY derived from detected food items (cake, pie, etc.)
+    // It should NOT be added as an object or have confidence-based fallback
+
     final prioritized = <String>[];
     if (categories.contains('people')) prioritized.add('people');
     if (categories.contains('animals')) prioritized.add('animals');
@@ -723,10 +726,20 @@ class LocalTaggingService {
             .where((a) => a != bestAnimalLabel)
             .toList();
         for (final animalType in animalLabelsToRemove) {
-          // Remove from allDetections (case-insensitive match)
-          allDetections.removeWhere(
-            (d) => d.toLowerCase() == animalType.toLowerCase(),
-          );
+          // FIX #3: allDetections format is 'Label:0.72' so use startsWith to match
+          // Also handle case where confidence suffix might not be present (legacy data)
+          allDetections.removeWhere((d) {
+            final dLower = d.toLowerCase();
+            final animalLower = animalType.toLowerCase();
+            // Match 'cat:0.72' against 'cat' - check if label part matches
+            final colonIndex = dLower.lastIndexOf(':');
+            if (colonIndex > 0) {
+              final labelPart = dLower.substring(0, colonIndex);
+              return labelPart == animalLower;
+            }
+            // Legacy format without confidence
+            return dLower == animalLower;
+          });
         }
         developer.log(
           '🦊 Deduplicated animals ($dedupeReason) - kept "$bestAnimalLabel", removed: $animalLabelsToRemove',

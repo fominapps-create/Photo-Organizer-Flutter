@@ -60,6 +60,12 @@ class GalleryScreenState extends State<GalleryScreen>
   Map<String, List<String>> photoTags = {};
   Map<String, List<String>> photoAllDetections = {};
   Map<String, String> photoScanVersions = {}; // Track scan version per photo
+
+  /// Cached tag counts - updated incrementally during scan/delete operations
+  /// Key: lowercase tag name, Value: count of photos with that tag
+  /// Includes both category tags (people, food, etc.) and object tags (cake, dog, etc.)
+  final Map<String, int> _tagCounts = {};
+
   bool loading = true;
   final Map<String, AssetEntity> _localAssets = {};
   final Map<String, Uint8List> _thumbCache = {};
@@ -167,7 +173,41 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Refresh the trashed IDs cache - call this after restoring photos from trash
   Future<void> refreshTrashedIds() async {
+    final oldTrashedIds = Set<String>.from(_trashedIds);
     _trashedIds = await TrashStore.getTrashedIds();
+
+    // Find restored photos (were in trash, now not)
+    final restoredIds = oldTrashedIds.difference(_trashedIds);
+
+    if (restoredIds.isNotEmpty) {
+      developer.log(
+        '♻️ Detected ${restoredIds.length} restored photos, reloading their tags',
+      );
+
+      // Reload tags for restored photos from storage
+      final photoIDs = restoredIds
+          .map((id) => PhotoId.canonicalId(id))
+          .toList();
+      final tagsMap = await TagStore.loadAllTagsMap(photoIDs);
+      final detectionsMap = await TagStore.loadAllDetectionsMap(photoIDs);
+
+      for (final url in restoredIds) {
+        final key = p.basename(url);
+        final photoID = PhotoId.canonicalId(url);
+
+        if (tagsMap.containsKey(photoID)) {
+          final tags = tagsMap[photoID]!;
+          final detections = detectionsMap[photoID] ?? [];
+
+          photoTags[key] = tags;
+          photoAllDetections[key] = detections;
+
+          // Increment tag counts for restored photo
+          _incrementTagCounts(tags, detections);
+        }
+      }
+    }
+
     _cachedFilteredUrls.clear();
     _lastImageUrlsLength = -1; // Force recompute
     if (mounted) setState(() {});
@@ -330,6 +370,12 @@ class GalleryScreenState extends State<GalleryScreen>
       _trashedIds.add(photoUrl);
 
       final key = p.basename(photoUrl);
+
+      // Decrement tag counts before removing
+      final oldTags = photoTags[key] ?? [];
+      final oldDetections = photoAllDetections[key] ?? [];
+      _decrementTagCounts(oldTags, oldDetections);
+
       setState(() {
         photoTags.remove(key);
         photoAllDetections.remove(key);
@@ -1519,7 +1565,8 @@ class GalleryScreenState extends State<GalleryScreen>
                       liveMessage =
                           'Paused at $scannedCount/$_cachedLocalPhotoCount ($pct%)';
                     } else if (_scanning && pct == '0') {
-                      // FIX #2: Show "Preparing scan..." when at 0% to avoid looking stuck
+                      // FIX #2: Show "Preparing scan..." only when percentage would display as 0%
+                      // This suppresses "0%" display with a more informative message
                       liveMessage = 'Preparing scan...';
                       icon = const SizedBox(
                         width: 14,
@@ -2063,12 +2110,17 @@ class GalleryScreenState extends State<GalleryScreen>
       // Clear in-memory state
       photoTags.clear();
       photoAllDetections.clear();
+      _tagCounts.clear(); // Clear cached tag counts
       _scannedCountNotifier.value = 0;
 
       // Update UI
       if (mounted) {
+        // FIX #1: Keep _clearingTags true until scan starts, then transition to _scanPreparing
+        // This ensures 'Deleting tags...' shows until 'Preparing scan...' takes over
         setState(() {
           _clearingTags = false;
+          _scanPreparing =
+              true; // Immediately show 'Preparing scan...' to avoid gap
         });
 
         // Show brief message
@@ -2079,7 +2131,7 @@ class GalleryScreenState extends State<GalleryScreen>
           ),
         );
 
-        // Start fresh scan
+        // Start fresh scan - _scanPreparing will be set to false when actual scanning begins
         Future.microtask(() => _startAutoScanIfNeeded());
       }
     } catch (e) {
@@ -3128,6 +3180,10 @@ class GalleryScreenState extends State<GalleryScreen>
                 photoScanVersions[basename] = TagStore.scanMinorVersion;
                 batchTagsToSave[photoID] = tags;
                 batchDetectionsToSave[photoID] = allDetections;
+
+                // Update cached tag counts incrementally
+                _incrementTagCounts(tags, allDetections);
+
                 // Update scanned count notifier for live UI updates
                 _scannedCountNotifier.value = photoTags.length;
 
@@ -3242,6 +3298,10 @@ class GalleryScreenState extends State<GalleryScreen>
           photoScanVersions[basename] = TagStore.scanMinorVersion;
           batchTagsToSave[photoID] = tags;
           batchDetectionsToSave[photoID] = allDetections;
+
+          // Update cached tag counts incrementally
+          _incrementTagCounts(tags, allDetections);
+
           _scannedCountNotifier.value = photoTags.length;
 
           // Update notification progress (every 10 photos to reduce overhead)
@@ -4502,6 +4562,12 @@ class GalleryScreenState extends State<GalleryScreen>
           _localAssets.remove(id);
           _thumbCache.remove(id);
           final key = 'local:$id';
+
+          // Decrement tag counts before removing
+          final oldTags = photoTags[key] ?? [];
+          final oldDetections = photoAllDetections[key] ?? [];
+          _decrementTagCounts(oldTags, oldDetections);
+
           photoTags.remove(key);
           photoAllDetections.remove(key);
         }
@@ -4812,7 +4878,8 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Minimum confidence threshold for a detection to be searchable
   /// Set to 0.72 to filter out low-confidence false positives (e.g., dog on random objects)
-  static const double _searchConfidenceThreshold = 0.72;
+  // FIX #3: Objects below 86% confidence should not be searchable or suggested
+  static const double _searchConfidenceThreshold = 0.86;
 
   /// Parse a detection string that may contain confidence (format: "Label:0.72" or just "Label")
   /// Returns (label, confidence) tuple. If no confidence, returns 1.0 (assume high confidence)
@@ -4840,31 +4907,93 @@ class GalleryScreenState extends State<GalleryScreen>
     return label.toLowerCase().contains(searchTerm);
   }
 
-  /// Get all unique tags/detections from gallery sorted by popularity
-  List<MapEntry<String, int>> _getTagsSortedByPopularity() {
-    final tagCounts = <String, int>{};
+  // ============ TAG COUNT MANAGEMENT ============
 
+  /// Increment tag counts for a photo's tags and detections
+  /// Called when a photo is scanned and tagged
+  void _incrementTagCounts(List<String> tags, List<String> detections) {
+    // Count category tags
+    for (final tag in tags) {
+      final tagLower = tag.toLowerCase();
+      _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
+    }
+
+    // Count object detections (with confidence filtering)
+    for (final detection in detections) {
+      final (label, confidence) = _parseDetectionWithConfidence(detection);
+      if (confidence >= _searchConfidenceThreshold) {
+        final tagLower = label.toLowerCase();
+        _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
+      }
+    }
+  }
+
+  /// Decrement tag counts for a photo's tags and detections
+  /// Called when a photo is deleted or its tags are cleared
+  void _decrementTagCounts(List<String> tags, List<String> detections) {
+    // Decrement category tags
+    for (final tag in tags) {
+      final tagLower = tag.toLowerCase();
+      final current = _tagCounts[tagLower] ?? 0;
+      if (current > 1) {
+        _tagCounts[tagLower] = current - 1;
+      } else {
+        _tagCounts.remove(tagLower);
+      }
+    }
+
+    // Decrement object detections (with confidence filtering)
+    for (final detection in detections) {
+      final (label, confidence) = _parseDetectionWithConfidence(detection);
+      if (confidence >= _searchConfidenceThreshold) {
+        final tagLower = label.toLowerCase();
+        final current = _tagCounts[tagLower] ?? 0;
+        if (current > 1) {
+          _tagCounts[tagLower] = current - 1;
+        } else {
+          _tagCounts.remove(tagLower);
+        }
+      }
+    }
+  }
+
+  /// Rebuild tag counts from scratch (used after loading tags or clearing)
+  void _rebuildTagCounts() {
+    _tagCounts.clear();
+
+    // Count from photoTags (categories)
+    for (final entry in photoTags.entries) {
+      for (final tag in entry.value) {
+        final tagLower = tag.toLowerCase();
+        _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
+      }
+    }
+
+    // Count from photoAllDetections (objects with confidence filtering)
     for (final entry in photoAllDetections.entries) {
       for (final detection in entry.value) {
-        // Parse detection with confidence and only count high-confidence tags
         final (label, confidence) = _parseDetectionWithConfidence(detection);
         if (confidence >= _searchConfidenceThreshold) {
-          final tag = label.toLowerCase();
-          tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+          final tagLower = label.toLowerCase();
+          _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
         }
       }
     }
 
-    // Also count main category tags
-    for (final entry in photoTags.entries) {
-      for (final tag in entry.value) {
-        final tagLower = tag.toLowerCase();
-        tagCounts[tagLower] = (tagCounts[tagLower] ?? 0) + 1;
-      }
+    developer.log('📊 Rebuilt tag counts: ${_tagCounts.length} unique tags');
+  }
+
+  /// Get all unique tags/detections from gallery sorted by popularity
+  /// Now uses cached _tagCounts for efficiency
+  List<MapEntry<String, int>> _getTagsSortedByPopularity() {
+    // Use cached counts if available, otherwise rebuild
+    if (_tagCounts.isEmpty &&
+        (photoTags.isNotEmpty || photoAllDetections.isNotEmpty)) {
+      _rebuildTagCounts();
     }
 
     // Sort by count descending
-    final sorted = tagCounts.entries.toList()
+    final sorted = _tagCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     // ISSUE #5 FIX: Prioritize main categories + Unscanned at the top
@@ -4889,11 +5018,17 @@ class GalleryScreenState extends State<GalleryScreen>
         // Use actual count or 1 if not present (for Unscanned which might not be counted)
         prioritized.add(match);
       } else if (cat == 'unscanned') {
-        // FIX #1: Only include Unscanned if there are actually unscanned photos
-        final hasUnscannedPhotos =
-            _scannedCountNotifier.value < _cachedLocalPhotoCount;
-        if (hasUnscannedPhotos) {
-          prioritized.add(const MapEntry('unscanned', 0));
+        // FIX #6: Only include Unscanned if there are actually unscanned photos
+        // Calculate actual unscanned count, not just check if scanned < total
+        final unscannedCount = imageUrls.where((u) {
+          if (_trashedIds.contains(u)) return false;
+          final key = p.basename(u);
+          final tags = photoTags[key] ?? [];
+          return tags.isEmpty ||
+              (tags.length == 1 && tags.first == 'unreadable');
+        }).length;
+        if (unscannedCount > 0) {
+          prioritized.add(MapEntry('unscanned', unscannedCount));
         }
       }
     }
@@ -5099,6 +5234,9 @@ class GalleryScreenState extends State<GalleryScreen>
     }
     developer.log('📂 Mapped $loaded tags to photoTags map');
     developer.log('📂 photoTags AFTER load has ${photoTags.length} entries');
+
+    // Rebuild tag counts after loading all tags
+    _rebuildTagCounts();
   }
 
   /// Sync all tags from server database to local storage
@@ -5290,6 +5428,11 @@ class GalleryScreenState extends State<GalleryScreen>
         // Don't remove from imageUrls - they'll be filtered by _trashedIds
         // This prevents them from reappearing on reload
         for (final key in _selectedKeys) {
+          // Decrement tag counts before removing
+          final oldTags = photoTags[key] ?? [];
+          final oldDetections = photoAllDetections[key] ?? [];
+          _decrementTagCounts(oldTags, oldDetections);
+
           photoTags.remove(key);
           photoAllDetections.remove(key);
         }
