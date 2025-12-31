@@ -63,6 +63,8 @@ class GalleryScreenState extends State<GalleryScreen>
   final Map<String, Uint8List> _thumbCache = {};
   Map<String, List<String>> albums = {};
   String searchQuery = '';
+  final Set<String> _disabledFilterTags =
+      {}; // Tags toggled off but not removed
   bool showDebug = false;
   bool _showDevButtons =
       false; // Developer buttons (camera/bug) - toggled in settings
@@ -78,6 +80,7 @@ class GalleryScreenState extends State<GalleryScreen>
   bool _scanPreparing =
       false; // True during initial ML Kit warmup before % starts
   bool _clearingTags = false;
+  bool _rescanPending = false; // True when version upgrade rescan is pending
   bool _hasScannedAtLeastOneBatch = false;
   bool _validating = false;
   bool _validationComplete = false;
@@ -126,7 +129,6 @@ class GalleryScreenState extends State<GalleryScreen>
   double _avgBatchTimeMs = 0.0;
   double _imagesPerSecond = 0.0;
   late AnimationController _starAnimationController;
-  late Animation<double> _starRotation;
   StreamSubscription<dynamic>? _photoChangesSubscription;
   static const _photoChangesChannel = EventChannel(
     'com.example.photo_organizer/photo_changes',
@@ -979,9 +981,6 @@ class GalleryScreenState extends State<GalleryScreen>
       vsync: this,
       duration: const Duration(seconds: 4), // Twice as slow
     )..repeat();
-    _starRotation = Tween<double>(begin: 0, end: 2 * 3.14159).animate(
-      CurvedAnimation(parent: _starAnimationController, curve: Curves.linear),
-    );
 
     _scrollController.addListener(_scrollListener);
     _searchController = TextEditingController(text: searchQuery);
@@ -996,6 +995,16 @@ class GalleryScreenState extends State<GalleryScreen>
     });
     _loadAllImages();
     _loadAlbums();
+
+    // Safety net: if loading is stuck for too long (e.g., permission dialog race condition),
+    // force a reload. This handles edge cases on fresh install where permission grant
+    // might cause activity recreation issues.
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && loading && imageUrls.isEmpty) {
+        developer.log('⚠️ Loading stuck for 10s - forcing reload');
+        _loadAllImages();
+      }
+    });
 
     // Use PhotoManager's built-in change notification (more reliable than custom ContentObserver)
     PhotoManager.addChangeCallback(_onPhotoLibraryChanged);
@@ -1062,8 +1071,14 @@ class GalleryScreenState extends State<GalleryScreen>
         // Stop the notification when user comes back to app
         ScanForegroundService.stopService();
       }
-      // Check for new photos when app comes back
-      _checkForGalleryChanges();
+      // Safety: if loading is stuck after permission dialog, force reload
+      if (loading && imageUrls.isEmpty) {
+        developer.log('⚠️ Loading stuck on resume - forcing reload');
+        _loadAllImages();
+      } else {
+        // Check for new photos when app comes back
+        _checkForGalleryChanges();
+      }
     } else if (state == AppLifecycleState.paused) {
       // App going to background - start foreground service if scanning
       developer.log('📸 App paused - going to background');
@@ -1190,7 +1205,9 @@ class GalleryScreenState extends State<GalleryScreen>
       }
 
       // Show gallery immediately - load tags in background
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
       developer.log('Total photos in gallery: ${imageUrls.length}');
 
       // Load tags in background (non-blocking) and refresh UI when done
@@ -1198,6 +1215,9 @@ class GalleryScreenState extends State<GalleryScreen>
         if (mounted) {
           setState(() {}); // Refresh to show loaded tags
           developer.log('📂 Tags loaded in background, UI refreshed');
+
+          // Check if rescan is needed due to updated classification logic
+          _checkForRescanNeeded();
         }
       });
 
@@ -1446,7 +1466,14 @@ class GalleryScreenState extends State<GalleryScreen>
                     String liveMessage;
                     Widget? icon;
 
-                    if (_scanPreparing) {
+                    if (_rescanPending) {
+                      liveMessage = 'Update available - rescanning soon...';
+                      icon = const Icon(
+                        Icons.auto_awesome,
+                        color: Colors.amber,
+                        size: 14,
+                      );
+                    } else if (_scanPreparing) {
                       liveMessage = 'Preparing to scan...';
                       icon = const SizedBox(
                         width: 14,
@@ -1457,32 +1484,15 @@ class GalleryScreenState extends State<GalleryScreen>
                         ),
                       );
                     } else if (_scanning && stuckAt100) {
-                      liveMessage =
-                          '100% - $scannedCount/$_cachedLocalPhotoCount photos scanned';
-                      icon = AnimatedBuilder(
-                        animation: _starRotation,
-                        builder: (context, child) {
-                          return Transform.rotate(
-                            angle: _starRotation.value,
-                            child: ShaderMask(
-                              shaderCallback: (bounds) => const LinearGradient(
-                                colors: [
-                                  Colors.yellow,
-                                  Colors.orange,
-                                  Colors.pink,
-                                  Colors.purple,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ).createShader(bounds),
-                              child: const Icon(
-                                Icons.star,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
-                          );
-                        },
+                      // Tooltip just says "Scanning..." - no star (star is for grid footer only)
+                      liveMessage = 'Scanning...';
+                      icon = const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       );
                     } else if (_scanning && _scanPaused) {
                       liveMessage =
@@ -1904,6 +1914,143 @@ class GalleryScreenState extends State<GalleryScreen>
     }
   }
 
+  /// Check if photos need to be rescanned due to updated classification logic
+  /// Shows a dialog to the user if rescan is recommended
+  bool _hasShownRescanDialog = false;
+
+  Future<void> _checkForRescanNeeded() async {
+    // Only show once per session
+    if (_hasShownRescanDialog) return;
+
+    // Check if we have any scanned photos
+    if (photoTags.isEmpty) {
+      // No photos scanned yet, save current version and return
+      await TagStore.saveScanVersion();
+      return;
+    }
+
+    // Check if rescan is needed
+    final needsRescan = await TagStore.needsRescanForNewLogic();
+    if (!needsRescan) return;
+
+    _hasShownRescanDialog = true;
+
+    // Set rescan pending flag immediately so UI shows correct state
+    setState(() {
+      _rescanPending = true;
+    });
+
+    final savedVersion = await TagStore.getSavedScanVersion();
+    final changes = TagStore.getScanVersionChanges(savedVersion);
+
+    if (!mounted) return;
+
+    // Show dialog after a short delay to let gallery settle
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.auto_awesome, color: Colors.amber),
+              SizedBox(width: 8),
+              Expanded(child: Text('Improved Scanning')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This update includes improved photo classification:',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 12),
+              Text(changes, style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 16),
+              const Text(
+                'Your photos will be rescanned automatically to apply the improvements.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Got it'),
+            ),
+          ],
+        ),
+      ).then((_) async {
+        if (mounted) {
+          // Automatically rescan after dialog is dismissed
+          developer.log(
+            '🔄 Starting automatic rescan for new classification logic',
+          );
+
+          // Stop any current scan
+          _scanning = false;
+
+          // Clear tags and trigger rescan
+          await _performClearAllTagsAndRescan();
+
+          // Save new scan version after clearing (will be saved again after scan completes)
+          await TagStore.saveScanVersion();
+        }
+      });
+    });
+  }
+
+  /// Clear all tags and start fresh rescan
+  Future<void> _performClearAllTagsAndRescan() async {
+    if (!mounted) return;
+
+    setState(() {
+      _clearingTags = true;
+      _rescanPending = false; // Clear pending flag as rescan is starting
+    });
+
+    try {
+      // Clear local tags
+      final cleared = await TagStore.clearAllTags();
+      developer.log('🗑️ Cleared $cleared local tags for rescan');
+
+      // Clear in-memory state
+      photoTags.clear();
+      photoAllDetections.clear();
+      _scannedCountNotifier.value = 0;
+
+      // Update UI
+      if (mounted) {
+        setState(() {
+          _clearingTags = false;
+        });
+
+        // Show brief message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tags cleared. Rescanning with improved logic...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // Start fresh scan
+        Future.microtask(() => _startAutoScanIfNeeded());
+      }
+    } catch (e) {
+      developer.log('❌ Error clearing tags for rescan: $e');
+      if (mounted) {
+        setState(() {
+          _clearingTags = false;
+        });
+      }
+    }
+  }
+
   Future<void> _startAutoScanIfNeeded() async {
     developer.log('🎯 _startAutoScanIfNeeded() ENTRY');
     // Only scan if there are local images and we aren't already scanning
@@ -2100,6 +2247,9 @@ class GalleryScreenState extends State<GalleryScreen>
     _progressRefreshTimer = null;
     _smoothProgressTimer?.cancel();
     _smoothProgressTimer = null;
+
+    // Save scan version after successful scan
+    await TagStore.saveScanVersion();
 
     setState(() {
       _scanning = false;
@@ -4330,12 +4480,20 @@ class GalleryScreenState extends State<GalleryScreen>
         '📷 Permission status: ${perm.name} (isAuth: ${perm.isAuth})',
       );
 
+      // After permission dialog, widget might be unmounted due to activity recreation
+      if (!mounted) {
+        developer.log('⚠️ Widget unmounted after permission request');
+        return;
+      }
+
       // Accept limited permission (Android 14+) - don't show dialog every time
       if (!perm.isAuth && perm != PermissionState.limited) {
         developer.log('❌ Permission denied: ${perm.name}');
-        setState(() {
-          _setImageUrls([]);
-        });
+        if (mounted) {
+          setState(() {
+            _setImageUrls([]);
+          });
+        }
         return;
       }
 
@@ -4360,16 +4518,18 @@ class GalleryScreenState extends State<GalleryScreen>
         // Try filesystem fallback
         try {
           final pics = await _discoverPicturesFromFs();
-          if (pics.isNotEmpty) {
+          if (pics.isNotEmpty && mounted) {
             setState(() {
               _setImageUrls(pics);
             });
             return;
           }
         } catch (_) {}
-        setState(() {
-          _setImageUrls([]);
-        });
+        if (mounted) {
+          setState(() {
+            _setImageUrls([]);
+          });
+        }
         return;
       }
 
@@ -4402,16 +4562,18 @@ class GalleryScreenState extends State<GalleryScreen>
         try {
           final pics = await _discoverPicturesFromFs();
           developer.log('📂 Filesystem found ${pics.length} photos');
-          if (pics.isNotEmpty) {
+          if (pics.isNotEmpty && mounted) {
             setState(() {
               _setImageUrls(pics);
             });
             return;
           }
         } catch (_) {}
-        setState(() {
-          _setImageUrls([]);
-        });
+        if (mounted) {
+          setState(() {
+            _setImageUrls([]);
+          });
+        }
         return;
       }
 
@@ -4443,15 +4605,17 @@ class GalleryScreenState extends State<GalleryScreen>
         urls.add('local:$id');
       }
       developer.log('✅ Loaded ${urls.length} photo URLs');
-      setState(() {
-        _setImageUrls(urls);
-      });
+      if (mounted) {
+        setState(() {
+          _setImageUrls(urls);
+        });
+      }
 
       if (urls.isEmpty) {
         // fallback to filesystem scan if MediaStore returned no assets
         try {
           final pics = await _discoverPicturesFromFs();
-          if (pics.isNotEmpty) {
+          if (pics.isNotEmpty && mounted) {
             setState(() {
               _setImageUrls(pics);
             });
@@ -4462,9 +4626,11 @@ class GalleryScreenState extends State<GalleryScreen>
     } catch (e, stack) {
       developer.log('❌ Error loading device photos: $e');
       developer.log('Stack trace: $stack');
-      setState(() {
-        _setImageUrls([]);
-      });
+      if (mounted) {
+        setState(() {
+          _setImageUrls([]);
+        });
+      }
     }
   }
 
@@ -4651,8 +4817,13 @@ class GalleryScreenState extends State<GalleryScreen>
       final searchTerms = searchQuery
           .split(' ')
           .where((term) => term.isNotEmpty)
+          // Skip disabled filter tags (toggled off but not removed)
+          .where((term) => !_disabledFilterTags.contains(term.toLowerCase()))
           .map((term) => term.toLowerCase())
           .toList();
+
+      // If all tags are disabled, show all photos
+      if (searchTerms.isEmpty) return true;
 
       // Expand search terms with synonyms
       final expandedTerms = <String>{};
@@ -5779,14 +5950,41 @@ class GalleryScreenState extends State<GalleryScreen>
                                           },
                                         ),
                                       ),
-                                      // Show loading dots during scanning/validating
-                                      if ((_scanning || _validating) &&
+                                      // Show loading dots during scanning/validating or rescan pending
+                                      if ((_scanning ||
+                                              _validating ||
+                                              _rescanPending) &&
                                           !_showFinalTouches)
                                         Padding(
                                           padding: const EdgeInsets.only(
                                             top: 4,
                                           ), // 4px rule
-                                          child: _buildLoadingDots(),
+                                          child: _rescanPending
+                                              ? Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.auto_awesome,
+                                                      color:
+                                                          Colors.amber.shade600,
+                                                      size: 12,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      'Rescan pending...',
+                                                      style: TextStyle(
+                                                        fontSize: 9,
+                                                        color: Colors
+                                                            .amber
+                                                            .shade700,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                )
+                                              : _buildLoadingDots(),
                                         ),
                                       // Show scan progress percentage during scanning
                                       if (_scanning)
@@ -6054,157 +6252,209 @@ class GalleryScreenState extends State<GalleryScreen>
                                 scrollDirection: Axis.horizontal,
                                 child: Row(
                                   children: [
-                                    ...searchQuery
-                                        .split(' ')
-                                        .where((tag) => tag.isNotEmpty)
-                                        .map((tag) {
-                                          // Count photos matching this specific tag (including synonyms)
-                                          final tagLower = tag.toLowerCase();
-                                          final int count;
+                                    ...searchQuery.split(' ').where((tag) => tag.isNotEmpty).map((
+                                      tag,
+                                    ) {
+                                      // Count photos matching this specific tag (including synonyms)
+                                      final tagLower = tag.toLowerCase();
+                                      final int count;
 
-                                          // Special handling for "unscanned" filter
-                                          if (tagLower == 'unscanned') {
-                                            count = imageUrls.where((u) {
-                                              if (_trashedIds.contains(u)) {
-                                                return false;
-                                              }
-                                              final key = p.basename(u);
-                                              final tags = photoTags[key] ?? [];
-                                              // Include unreadable photos in count
-                                              return tags.isEmpty ||
-                                                  (tags.length == 1 &&
-                                                      tags.first ==
-                                                          'unreadable');
-                                            }).length;
-                                          } else {
-                                            // Include synonyms in count
-                                            final searchTerms = <String>{
-                                              tagLower,
-                                            };
-                                            searchTerms.addAll(
-                                              _getSearchSynonyms(tagLower),
-                                            );
-
-                                            count = imageUrls.where((u) {
-                                              if (_trashedIds.contains(u)) {
-                                                return false;
-                                              }
-                                              final key = p.basename(u);
-                                              final tags = photoTags[key] ?? [];
-                                              final allDetections =
-                                                  photoAllDetections[key] ?? [];
-                                              return searchTerms.any(
-                                                (term) =>
-                                                    tags.any(
-                                                      (t) => t
-                                                          .toLowerCase()
-                                                          .contains(term),
-                                                    ) ||
-                                                    allDetections.any(
-                                                      (d) => d
-                                                          .toLowerCase()
-                                                          .contains(term),
-                                                    ),
-                                              );
-                                            }).length;
+                                      // Special handling for "unscanned" filter
+                                      if (tagLower == 'unscanned') {
+                                        count = imageUrls.where((u) {
+                                          if (_trashedIds.contains(u)) {
+                                            return false;
                                           }
+                                          final key = p.basename(u);
+                                          final tags = photoTags[key] ?? [];
+                                          // Include unreadable photos in count
+                                          return tags.isEmpty ||
+                                              (tags.length == 1 &&
+                                                  tags.first == 'unreadable');
+                                        }).length;
+                                      } else {
+                                        // Include synonyms in count
+                                        final searchTerms = <String>{tagLower};
+                                        searchTerms.addAll(
+                                          _getSearchSynonyms(tagLower),
+                                        );
 
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 8,
-                                            ),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8, // 4px rule
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  colors: [
-                                                    Colors.lightBlue.shade400,
-                                                    Colors.lightBlue.shade600,
-                                                  ],
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
+                                        count = imageUrls.where((u) {
+                                          if (_trashedIds.contains(u)) {
+                                            return false;
+                                          }
+                                          final key = p.basename(u);
+                                          final tags = photoTags[key] ?? [];
+                                          final allDetections =
+                                              photoAllDetections[key] ?? [];
+                                          return searchTerms.any(
+                                            (term) =>
+                                                tags.any(
+                                                  (t) => t
+                                                      .toLowerCase()
+                                                      .contains(term),
+                                                ) ||
+                                                allDetections.any(
+                                                  (d) => d
+                                                      .toLowerCase()
+                                                      .contains(term),
                                                 ),
-                                                borderRadius:
-                                                    BorderRadius.circular(20),
-                                                border: Border.all(
-                                                  color:
-                                                      Colors.lightBlue.shade300,
-                                                  width: 1.5,
-                                                ),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: Colors.black
-                                                        .withValues(alpha: 0.2),
-                                                    blurRadius: 8,
-                                                    offset: const Offset(
-                                                      0,
-                                                      4,
-                                                    ), // 4px rule
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Text(
-                                                    '$tag ($count)',
-                                                    style: TextStyle(
-                                                      color:
-                                                          Theme.of(
-                                                                context,
-                                                              ).brightness ==
-                                                              Brightness.dark
-                                                          ? Colors.white
-                                                          : Colors.black87,
-                                                      fontSize: 15,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(
-                                                    width: 8,
-                                                  ), // 4px rule
-                                                  GestureDetector(
-                                                    onTap: () {
-                                                      setState(() {
-                                                        final tags = searchQuery
-                                                            .split(' ')
-                                                            .where(
-                                                              (t) =>
-                                                                  t != tag &&
-                                                                  t.isNotEmpty,
-                                                            )
-                                                            .toList();
-                                                        searchQuery = tags.join(
-                                                          ' ',
-                                                        );
-                                                        _searchController.text =
-                                                            searchQuery;
-                                                      });
-                                                      widget.onSearchChanged
-                                                          ?.call();
-                                                    },
-                                                    child: Icon(
-                                                      Icons.close,
-                                                      size: 16,
-                                                      color:
-                                                          Theme.of(
-                                                                context,
-                                                              ).brightness ==
-                                                              Brightness.dark
-                                                          ? Colors.white
-                                                          : Colors.black87,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
                                           );
-                                        }),
+                                        }).length;
+                                      }
+
+                                      final isDisabled = _disabledFilterTags
+                                          .contains(tagLower);
+
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 8,
+                                        ),
+                                        child: GestureDetector(
+                                          // Tap chip to toggle on/off
+                                          onTap: () {
+                                            setState(() {
+                                              if (isDisabled) {
+                                                _disabledFilterTags.remove(
+                                                  tagLower,
+                                                );
+                                              } else {
+                                                _disabledFilterTags.add(
+                                                  tagLower,
+                                                );
+                                              }
+                                              // Clear cache to force re-filter
+                                              _cachedFilteredUrls.clear();
+                                            });
+                                          },
+                                          child: AnimatedContainer(
+                                            duration: const Duration(
+                                              milliseconds: 200,
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8, // 4px rule
+                                            ),
+                                            decoration: BoxDecoration(
+                                              gradient: isDisabled
+                                                  ? null // No gradient when disabled
+                                                  : LinearGradient(
+                                                      colors: [
+                                                        Colors
+                                                            .lightBlue
+                                                            .shade400,
+                                                        Colors
+                                                            .lightBlue
+                                                            .shade600,
+                                                      ],
+                                                      begin: Alignment.topLeft,
+                                                      end:
+                                                          Alignment.bottomRight,
+                                                    ),
+                                              color: isDisabled
+                                                  ? (Theme.of(
+                                                              context,
+                                                            ).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.grey.shade700
+                                                        : Colors.grey.shade400)
+                                                  : null,
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: isDisabled
+                                                    ? Colors.grey.shade500
+                                                    : Colors.lightBlue.shade300,
+                                                width: 1.5,
+                                              ),
+                                              boxShadow: isDisabled
+                                                  ? null // No shadow when disabled
+                                                  : [
+                                                      BoxShadow(
+                                                        color: Colors.black
+                                                            .withValues(
+                                                              alpha: 0.2,
+                                                            ),
+                                                        blurRadius: 8,
+                                                        offset: const Offset(
+                                                          0,
+                                                          4,
+                                                        ), // 4px rule
+                                                      ),
+                                                    ],
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                AnimatedDefaultTextStyle(
+                                                  duration: const Duration(
+                                                    milliseconds: 200,
+                                                  ),
+                                                  style: TextStyle(
+                                                    color: isDisabled
+                                                        ? Colors.grey.shade300
+                                                        : (Theme.of(
+                                                                    context,
+                                                                  ).brightness ==
+                                                                  Brightness
+                                                                      .dark
+                                                              ? Colors.white
+                                                              : Colors.black87),
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w600,
+                                                    decoration: isDisabled
+                                                        ? TextDecoration
+                                                              .lineThrough
+                                                        : null,
+                                                  ),
+                                                  child: Text('$tag ($count)'),
+                                                ),
+                                                const SizedBox(
+                                                  width: 8,
+                                                ), // 4px rule
+                                                GestureDetector(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      final tags = searchQuery
+                                                          .split(' ')
+                                                          .where(
+                                                            (t) =>
+                                                                t != tag &&
+                                                                t.isNotEmpty,
+                                                          )
+                                                          .toList();
+                                                      searchQuery = tags.join(
+                                                        ' ',
+                                                      );
+                                                      _searchController.text =
+                                                          searchQuery;
+                                                      // Also remove from disabled set
+                                                      _disabledFilterTags
+                                                          .remove(tagLower);
+                                                    });
+                                                    widget.onSearchChanged
+                                                        ?.call();
+                                                  },
+                                                  child: Icon(
+                                                    Icons.close,
+                                                    size: 16,
+                                                    color: isDisabled
+                                                        ? Colors.grey.shade400
+                                                        : (Theme.of(
+                                                                    context,
+                                                                  ).brightness ==
+                                                                  Brightness
+                                                                      .dark
+                                                              ? Colors.white
+                                                              : Colors.black87),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
                                   ],
                                 ),
                               ),
@@ -7604,7 +7854,57 @@ class GalleryScreenState extends State<GalleryScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      // Scan version info
+                      FutureBuilder<String>(
+                        future: TagStore.getSavedScanVersion(),
+                        builder: (context, snapshot) {
+                          final savedVersion = snapshot.data ?? '?';
+                          final currentVersion = TagStore.scanMinorVersion;
+                          final isOutdated =
+                              savedVersion.isNotEmpty &&
+                              savedVersion != currentVersion;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Scan version: $savedVersion',
+                                  style: TextStyle(
+                                    color: isOutdated
+                                        ? Colors.orange
+                                        : Colors.green,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '(current: $currentVersion)',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.5),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                if (isOutdated) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(
+                                    Icons.warning,
+                                    color: Colors.orange,
+                                    size: 14,
+                                  ),
+                                  const Text(
+                                    ' outdated',
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 4),
                       Expanded(
                         child: SingleChildScrollView(
                           child: Column(

@@ -18,9 +18,9 @@ class LocalTaggingService {
   /// Initialize the ML Kit labeler (lazy singleton)
   static ImageLabeler get labeler {
     _labeler ??= ImageLabeler(
-      // Lower threshold = faster inference, catches more objects
-      // 0.6 provides good balance of speed and accuracy
-      options: ImageLabelerOptions(confidenceThreshold: 0.6),
+      // Lower threshold = catches more objects including body parts
+      // 0.5 helps detect people in complex scenes (person with phone, etc.)
+      options: ImageLabelerOptions(confidenceThreshold: 0.5),
     );
     return _labeler!;
   }
@@ -147,6 +147,12 @@ class LocalTaggingService {
     String? bestAnimalLabel;
     String? bestFoodLabel;
 
+    // Track detected animal types (cat, dog, bird, etc.) for deduplication
+    // When multiple animals are detected but there's likely only 1, keep the best
+    final Set<String> detectedAnimalTypes = {};
+    // Track all animal confidences for smart deduplication
+    final Map<String, double> animalConfidences = {};
+
     // Track weak scenery labels (indoor/product labels that shouldn't trigger scenery)
     bool hasOnlyWeakScenery = true;
 
@@ -156,16 +162,34 @@ class LocalTaggingService {
     // Track if we have STRONG food indicators (actual food items, not just context)
     bool hasStrongFoodLabel = false;
 
+    // Fix #3, #9, #10: Tier-based people detection
+    // Tier 0: Photo-specific terms (selfie, portrait) - one is enough
+    // Tier 1: Human-specific body parts (hand, finger, arm) - one is enough IF no illustration
+    // Tier 2: Clothing/accessories/actions - need 2+ OR 1+context
+    bool hasTier0Label = false; // Explicit photo terms
+    bool hasTier1Label = false; // Human-specific body parts
+    int tier2Count = 0; // Clothing, accessories, actions
+    bool hasIllustrationIndicator = false; // Cartoon, toy, logo, etc.
+    bool hasAmbiguousBodyPart =
+        false; // ear, eye, nose - could be human or animal
+    bool hasFurOrAnimalIndicator = false; // fur, paw, tail - indicates animal
+
     // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
       final text = label.label.toLowerCase();
       final confidence = label.confidence;
-      // Store original label for display (no percentage needed)
+      // Store original label for display (all labels above ML Kit threshold of 0.5)
       allDetections.add(label.label);
+
+      // Fix #3, #9, #10: Detect illustration indicators first
+      if (_isIllustrationLabel(text)) {
+        hasIllustrationIndicator = true;
+        developer.log('🎨 Illustration indicator: "$text"');
+      }
 
       // Check ALL categories independently (not else-if)
       if (_isPeopleLabel(text)) {
-        categories.add('people');
+        // Don't add to categories yet - we'll use tier system
         developer.log('👤 People label matched: "$text"');
         if (confidence > bestPeopleConfidence) {
           bestPeopleConfidence = confidence;
@@ -175,6 +199,23 @@ class LocalTaggingService {
         if (_isStrongPersonLabel(text)) {
           hasStrongPersonLabel = true;
         }
+
+        // Fix #3, #9, #10: Classify into tiers
+        if (_isTier0PeopleLabel(text)) {
+          hasTier0Label = true;
+          developer.log('  → Tier 0 (photo-specific): "$text"');
+        } else if (_isTier1PeopleLabel(text)) {
+          hasTier1Label = true;
+          developer.log('  → Tier 1 (human body part): "$text"');
+        } else if (_isAmbiguousBodyPart(text)) {
+          hasAmbiguousBodyPart = true;
+          developer.log('  → Ambiguous body part: "$text"');
+        } else if (_isTier2PeopleLabel(text)) {
+          tier2Count++;
+          developer.log(
+            '  → Tier 2 (clothing/action): "$text" (count: $tier2Count)',
+          );
+        }
       }
       if (_isAnimalLabel(text)) {
         categories.add('animals');
@@ -182,12 +223,20 @@ class LocalTaggingService {
           bestAnimalConfidence = confidence;
           bestAnimalLabel = text;
         }
+        // Track all detected animal types with their confidences for smart deduplication
+        detectedAnimalTypes.add(text);
+        animalConfidences[text] = confidence;
+      }
+      // Fix #9: Check for fur/animal indicators early (needed for tier decision)
+      if (_isAnimalIndicator(text)) {
+        hasFurOrAnimalIndicator = true;
+        developer.log('🐾 Animal indicator: "$text"');
       }
       // Food detection with confidence tracking
       if (_isFoodLabel(text)) {
-        // Flower requires high confidence (0.75+) to avoid food misclassification
+        // Fix #6: Flower requires very high confidence (0.90+) to avoid food misclassification
         if (text.contains('flower')) {
-          if (confidence >= 0.75) {
+          if (confidence >= 0.90) {
             // Don't add food category for high-confidence flowers
             developer.log('🌸 High-confidence flower ($confidence) - not food');
           } else {
@@ -233,11 +282,54 @@ class LocalTaggingService {
       }
     }
 
+    // Fix #3, #9, #10: TIER-BASED PEOPLE DECISION
+    // Decide if this is really a "people" photo based on tier system
+    bool shouldAddPeople = false;
+    String tierReason = '';
+
+    if (hasIllustrationIndicator) {
+      // Illustrations/cartoons/toys are NOT people (even with human-like features)
+      shouldAddPeople = false;
+      tierReason = 'illustration detected';
+      developer.log('🎨 Not adding people - $tierReason');
+    } else if (hasTier0Label) {
+      // Tier 0: Explicit photo terms like selfie, portrait - definitely people
+      shouldAddPeople = true;
+      tierReason = 'Tier 0 (photo-specific term)';
+    } else if (hasTier1Label && !hasFurOrAnimalIndicator) {
+      // Tier 1: Human-specific body parts (hand, finger, arm) without animal indicators
+      shouldAddPeople = true;
+      tierReason = 'Tier 1 (human body part, no fur/animal)';
+    } else if (hasAmbiguousBodyPart &&
+        !hasFurOrAnimalIndicator &&
+        tier2Count >= 1) {
+      // Ambiguous parts (ear, eye) + at least one clothing/action = people
+      shouldAddPeople = true;
+      tierReason = 'ambiguous body part + Tier 2 context';
+    } else if (tier2Count >= 2) {
+      // Tier 2: Need 2+ clothing/accessories/actions (e.g., jeans + smile)
+      shouldAddPeople = true;
+      tierReason = 'Tier 2 combo ($tier2Count items)';
+    } else if (tier2Count == 1 && hasStrongPersonLabel) {
+      // 1 tier2 item + strong person label = people
+      shouldAddPeople = true;
+      tierReason = 'Tier 2 + strong person label';
+    }
+
+    if (shouldAddPeople) {
+      categories.add('people');
+      developer.log('👤 Added people via tier system: $tierReason');
+    } else if (hasTier1Label || tier2Count > 0 || hasAmbiguousBodyPart) {
+      developer.log(
+        '🚫 Not adding people - insufficient evidence (T0:$hasTier0Label, T1:$hasTier1Label, T2:$tier2Count, ambig:$hasAmbiguousBodyPart, illust:$hasIllustrationIndicator)',
+      );
+    }
+
     // SECOND PASS: Check for strong people indicators that may have been missed
     // If we have beard, fun, event, party etc. without explicit 'person', add people
     bool hasStrongPeopleContext = false;
     bool hasBodyParts = false;
-    bool hasFurOrAnimalIndicator = false;
+    // Note: hasFurOrAnimalIndicator already set in first pass via _isAnimalIndicator()
     for (final label in labels) {
       final text = label.label.toLowerCase();
       if (text.contains('beard') ||
@@ -263,19 +355,6 @@ class LocalTaggingService {
           text.contains('skin') ||
           text.contains('muscle')) {
         hasBodyParts = true;
-      }
-      // Check for fur/animal indicators
-      if (text.contains('fur') ||
-          text.contains('paw') ||
-          text.contains('snout') ||
-          text.contains('tail') ||
-          text.contains('whisker') ||
-          text.contains('feather') ||
-          text.contains('beak') ||
-          text.contains('wing') ||
-          text.contains('hoof') ||
-          text.contains('claw')) {
-        hasFurOrAnimalIndicator = true;
       }
     }
     // FOOD PRIORITY FIX: Don't add people from weak context (celebration/party) when strong food detected
@@ -450,6 +529,61 @@ class LocalTaggingService {
     // Add screenshot to allDetections if detected (so it shows as an object)
     if (hasScreenshot && !allDetections.contains('Screenshot')) {
       allDetections.add('Screenshot');
+    }
+
+    // ANIMAL DEDUPLICATION: Smart logic for single vs multiple animals
+    // - If illustration/cartoon → likely 1 animal, keep best only
+    // - If confidence gap is large (>15%) → likely 1 animal, keep best only
+    // - If confidences are similar → likely multiple animals, keep all
+    if (detectedAnimalTypes.length > 1) {
+      bool shouldDeduplicate = false;
+      String dedupeReason = '';
+
+      // Case 1: Illustration/cartoon - ML Kit often confused (fox = cat + dog)
+      if (hasIllustrationIndicator) {
+        shouldDeduplicate = true;
+        dedupeReason = 'illustration detected';
+      }
+      // Case 2: Large confidence gap - likely 1 animal misidentified
+      else if (bestAnimalLabel != null) {
+        // Find second-best confidence
+        double secondBestConfidence = 0.0;
+        String? secondBestLabel;
+        for (final entry in animalConfidences.entries) {
+          if (entry.key != bestAnimalLabel &&
+              entry.value > secondBestConfidence) {
+            secondBestConfidence = entry.value;
+            secondBestLabel = entry.key;
+          }
+        }
+        // If gap is >15%, likely 1 animal
+        final confidenceGap = bestAnimalConfidence - secondBestConfidence;
+        if (confidenceGap > 0.15) {
+          shouldDeduplicate = true;
+          dedupeReason =
+              'confidence gap ${(confidenceGap * 100).toInt()}% ($bestAnimalLabel: ${(bestAnimalConfidence * 100).toInt()}% vs ${secondBestLabel ?? "?"}: ${(secondBestConfidence * 100).toInt()}%)';
+        } else {
+          developer.log(
+            '🐾 Multiple animals detected with similar confidence - keeping all: ${animalConfidences.entries.map((e) => "${e.key}: ${(e.value * 100).toInt()}%").join(", ")}',
+          );
+        }
+      }
+
+      if (shouldDeduplicate) {
+        // Keep only the best animal label in allDetections
+        final animalLabelsToRemove = detectedAnimalTypes
+            .where((a) => a != bestAnimalLabel)
+            .toList();
+        for (final animalType in animalLabelsToRemove) {
+          // Remove from allDetections (case-insensitive match)
+          allDetections.removeWhere(
+            (d) => d.toLowerCase() == animalType.toLowerCase(),
+          );
+        }
+        developer.log(
+          '🦊 Deduplicated animals ($dedupeReason) - kept "$bestAnimalLabel", removed: $animalLabelsToRemove',
+        );
+      }
     }
 
     // Return result with both tags and raw detections
@@ -679,7 +813,7 @@ class LocalTaggingService {
   /// Used for conflict resolution when both people and animals detected
   static bool _isWeakPeopleLabel(String label) {
     const weakLabels = [
-      // Body parts that animals/mascots can also have
+      // Body parts that animals can also have
       'finger',
       'hand',
       'thumb',
@@ -742,53 +876,402 @@ class LocalTaggingService {
   }
 
   static bool _isAnimalLabel(String label) {
+    // EXCLUSIONS: Plants are NOT animals
+    const plantExclusions = [
+      'plant',
+      'flower',
+      'petal',
+      'leaf',
+      'tree',
+      'bush',
+      'shrub',
+      'grass',
+      'fern',
+      'moss',
+      'vine',
+      'bloom',
+      'blossom',
+      'flora',
+      'garden',
+      'botanical',
+    ];
+
+    // Check exclusions first - plants are NOT animals
+    if (plantExclusions.any((k) => label.contains(k))) {
+      return false;
+    }
+
     const animalKeywords = [
+      // Generic
       'animal',
       'pet',
-      'dog',
-      'cat',
-      'bird',
-      'fish',
-      'horse',
-      'cow',
-      'sheep',
-      'goat',
-      'pig',
-      'chicken',
-      'duck',
-      'rabbit',
-      'hamster',
-      'turtle',
-      'snake',
-      'lizard',
-      'frog',
-      'insect',
-      'butterfly',
-      'bee',
-      'elephant',
-      'lion',
-      'tiger',
-      'bear',
-      'monkey',
-      'zebra',
-      'giraffe',
-      'deer',
-      'wolf',
-      'fox',
-      'squirrel',
-      'mouse',
-      'rat',
-      'parrot',
-      'puppy',
-      'kitten',
       'wildlife',
       'mammal',
       'reptile',
+      'amphibian',
+      'creature',
+      'beast',
+      // Pets / Domestic
+      'dog',
+      'cat',
+      'puppy',
+      'kitten',
+      'hamster',
+      'rabbit',
+      'bunny',
+      'guinea pig',
+      'ferret',
+      'gerbil',
+      'chinchilla',
+      'goldfish',
+      'parrot',
+      'parakeet',
+      'canary',
+      'cockatiel',
+      'budgie',
+      // Farm animals
+      'horse',
+      'pony',
+      'donkey',
+      'mule',
+      'cow',
+      'cattle',
+      'bull',
+      'calf',
+      'sheep',
+      'lamb',
+      'goat',
+      'pig',
+      'hog',
+      'boar',
+      'chicken',
+      'rooster',
+      'hen',
+      'chick',
+      'duck',
+      'goose',
+      'turkey',
+      'llama',
+      'alpaca',
+      // Wild mammals - Africa/Asia
+      'elephant',
+      'lion',
+      'tiger',
+      'leopard',
+      'cheetah',
+      'jaguar',
+      'panther',
+      'hyena',
+      'zebra',
+      'giraffe',
+      'hippo',
+      'hippopotamus',
+      'rhino',
+      'rhinoceros',
+      'gorilla',
+      'chimpanzee',
+      'chimp',
+      'orangutan',
+      'baboon',
+      'mandrill',
+      'monkey',
+      'ape',
+      'primate',
+      'camel',
+      'buffalo',
+      'bison',
+      'antelope',
+      'gazelle',
+      'wildebeest',
+      'warthog',
+      'meerkat',
+      // Wild mammals - Americas
+      'bear',
+      'grizzly',
+      'panda',
+      'wolf',
+      'coyote',
+      'fox',
+      'deer',
+      'elk',
+      'moose',
+      'caribou',
+      'reindeer',
+      'bison',
+      'cougar',
+      'puma',
+      'mountain lion',
+      'bobcat',
+      'lynx',
+      'raccoon',
+      'skunk',
+      'opossum',
+      'armadillo',
+      'porcupine',
+      'beaver',
+      'otter',
+      'badger',
+      'wolverine',
+      'weasel',
+      'mink',
+      'ferret',
+      // Wild mammals - Australia/Other
+      'kangaroo',
+      'koala',
+      'wombat',
+      'platypus',
+      'wallaby',
+      'tasmanian',
+      'dingo',
+      'sloth',
+      'anteater',
+      'tapir',
+      'capybara',
+      'lemur',
+      'mongoose',
+      // Small mammals
+      'squirrel',
+      'chipmunk',
+      'mouse',
+      'mice',
+      'rat',
+      'mole',
+      'shrew',
+      'hedgehog',
+      'bat',
+      'hare',
+      // Marine mammals
+      'dolphin',
+      'whale',
+      'orca',
+      'porpoise',
+      'seal',
+      'sea lion',
+      'walrus',
+      'manatee',
+      'dugong',
+      // Birds - Common
+      'bird',
+      'sparrow',
+      'robin',
+      'cardinal',
+      'bluejay',
+      'finch',
+      'crow',
+      'raven',
+      'magpie',
+      'pigeon',
+      'dove',
+      'seagull',
+      'gull',
+      'pelican',
+      'heron',
+      'crane',
+      'stork',
+      'egret',
+      'flamingo',
+      'swan',
+      'goose',
+      // Birds - Raptors
+      'owl',
+      'eagle',
+      'hawk',
+      'falcon',
+      'vulture',
+      'condor',
+      'kite',
+      'osprey',
+      // Birds - Tropical/Exotic
+      'penguin',
+      'toucan',
+      'macaw',
+      'cockatoo',
+      'peacock',
+      'peafowl',
+      'pheasant',
+      'quail',
+      'ostrich',
+      'emu',
+      'kiwi',
+      'hummingbird',
+      'kingfisher',
+      'woodpecker',
+      'puffin',
+      'albatross',
+      // Reptiles
+      'turtle',
+      'tortoise',
+      'snake',
+      'python',
+      'cobra',
+      'viper',
+      'boa',
+      'lizard',
+      'gecko',
+      'iguana',
+      'chameleon',
+      'komodo',
+      'monitor',
+      'skink',
+      'crocodile',
+      'alligator',
+      'caiman',
+      'dinosaur',
+      // Amphibians
+      'frog',
+      'toad',
+      'salamander',
+      'newt',
+      'axolotl',
+      // Fish
+      'fish',
+      'salmon',
+      'trout',
+      'tuna',
+      'bass',
+      'cod',
+      'carp',
+      'catfish',
+      'goldfish',
+      'koi',
+      'betta',
+      'guppy',
+      'angelfish',
+      'clownfish',
+      'piranha',
+      'barracuda',
+      'swordfish',
+      'marlin',
+      'eel',
+      'ray',
+      'stingray',
+      'manta',
+      // Sharks
+      'shark',
+      // Invertebrates - Marine
+      'crab',
+      'lobster',
+      'shrimp',
+      'prawn',
+      'crawfish',
+      'crayfish',
+      'octopus',
+      'squid',
+      'jellyfish',
+      'starfish',
+      'sea star',
+      'seahorse',
+      'sea urchin',
+      'coral',
+      'anemone',
+      'clam',
+      'oyster',
+      'mussel',
+      'scallop',
+      'snail',
+      'slug',
+      'nautilus',
+      // Insects
+      'insect',
+      'bug',
+      'butterfly',
+      'moth',
+      'bee',
+      'wasp',
+      'hornet',
+      'ant',
+      'termite',
+      'beetle',
+      'ladybug',
+      'ladybird',
+      'firefly',
+      'dragonfly',
+      'damselfly',
+      'grasshopper',
+      'cricket',
+      'locust',
+      'mantis',
+      'cockroach',
+      'fly',
+      'mosquito',
+      'gnat',
+      'flea',
+      'tick',
+      'caterpillar',
+      'larva',
+      'maggot',
+      'cicada',
+      // Arachnids
+      'spider',
+      'tarantula',
+      'scorpion',
+      // Other invertebrates
+      'worm',
+      'earthworm',
+      'leech',
+      'centipede',
+      'millipede',
     ];
     return animalKeywords.any((k) => label.contains(k));
   }
 
   static bool _isFoodLabel(String label) {
+    // EXCLUSIONS: Items that should NEVER trigger food category
+    // Fix #2: Footwear (flipflops tagged as food)
+    // Fix #4: Packaging/products (napkins, toys)
+    // Fix #5: Accessories (hair accessories, tableware without food)
+    // Fix #7: Hygiene products (tampax)
+    const foodExclusions = [
+      // Footwear
+      'flipflop',
+      'flip flop',
+      'sandal',
+      'shoe',
+      'slipper',
+      'sneaker',
+      'boot',
+      'heel',
+      'loafer',
+      'footwear',
+      // Packaging/products (not actual food)
+      'package',
+      'packaging',
+      'wrapper',
+      'napkin',
+      'tissue',
+      'paper towel',
+      'towel',
+      'toy',
+      'product',
+      // Hygiene products
+      'tampon',
+      'pad',
+      'hygiene',
+      'sanitary',
+      'diaper',
+      'wipe',
+      // Hair accessories (tableware without food)
+      'hair clip',
+      'hairclip',
+      'hairband',
+      'hair band',
+      'scrunchie',
+      'barrette',
+      'headband',
+      'hair tie',
+      'bobby pin',
+      'hair accessory',
+      // Other non-food items
+      'accessory',
+      'decoration',
+      'ornament',
+    ];
+
+    // Check exclusions first - if any exclusion matches, NOT food
+    if (foodExclusions.any((k) => label.contains(k))) {
+      return false;
+    }
+
     const foodKeywords = [
       'food',
       'meal',
@@ -824,6 +1307,12 @@ class LocalTaggingService {
       'juice',
       'wine',
       'beer',
+      // Fix #1: Add bottle/container for beverages
+      'bottle',
+      'cup',
+      'glass',
+      'mug',
+      'can',
       'apple',
       'banana',
       'orange',
@@ -1066,5 +1555,279 @@ class LocalTaggingService {
       'phone',
     ];
     return weakLabels.any((k) => label.contains(k));
+  }
+
+  // ============ Fix #3, #9, #10: Tier-based People Detection ============
+
+  /// Illustration indicators - if detected, suppress people classification
+  /// Cartoons, drawings, toys should NOT be tagged as people
+  static bool _isIllustrationLabel(String label) {
+    const illustrationKeywords = [
+      'cartoon',
+      'illustration',
+      'drawing',
+      'animation',
+      'artwork',
+      'character',
+      'anime',
+      'comic',
+      'sketch',
+      'painting',
+      'art',
+      'graphic',
+      'logo',
+      'icon',
+      'vector',
+      'clipart',
+      'doodle',
+      'caricature',
+      'puppet',
+      'figurine',
+      'toy',
+      'doll',
+      'statue',
+      'sculpture',
+      'mannequin',
+    ];
+    return illustrationKeywords.any((k) => label.contains(k));
+  }
+
+  /// Tier 0: Photo-specific terms - definitely a real photo of people
+  /// One match is enough to confirm people
+  static bool _isTier0PeopleLabel(String label) {
+    const tier0Keywords = [
+      'selfie',
+      'portrait',
+      'headshot',
+      'mugshot',
+      'photo of person',
+      'photo of people',
+      'group photo',
+      'family photo',
+    ];
+    return tier0Keywords.any((k) => label.contains(k));
+  }
+
+  /// Tier 1: Human-specific body parts - animals don't have these
+  /// One match is enough IF no illustration/animal indicators
+  static bool _isTier1PeopleLabel(String label) {
+    const tier1Keywords = [
+      // Human-specific body parts (animals have paws, not hands)
+      'hand',
+      'finger',
+      'thumb',
+      'palm',
+      'wrist',
+      'arm',
+      'elbow',
+      'shoulder',
+      // Human facial features with specific terms
+      'beard',
+      'mustache',
+      'moustache',
+      'eyebrow',
+      'eyelash',
+      'forehead',
+      'chin',
+      'cheek',
+      'jaw',
+      // Human hair (animals have fur)
+      'hair',
+      'hairstyle',
+      'haircut',
+      // Specific human terms
+      'person',
+      'human',
+      'man',
+      'woman',
+      'child',
+      'kid',
+      'baby',
+      'boy',
+      'girl',
+      'adult',
+      'teenager',
+      'elder',
+      'senior',
+      'crowd',
+      'group',
+      'family',
+      'couple',
+      'people',
+      'face', // ML Kit uses 'face' for humans
+      'skin', // Animals have fur, not skin (as label)
+    ];
+    return tier1Keywords.any((k) => label.contains(k));
+  }
+
+  /// Ambiguous body parts - could be human OR animal
+  /// Need additional context (Tier 2 or animal indicator) to decide
+  static bool _isAmbiguousBodyPart(String label) {
+    const ambiguousKeywords = [
+      'ear',
+      'eye',
+      'nose',
+      'mouth',
+      'lip',
+      'tongue',
+      'head',
+      'neck',
+      'back',
+      'leg',
+      'foot',
+      'feet',
+      'toe',
+      'body',
+    ];
+    return ambiguousKeywords.any((k) => label.contains(k));
+  }
+
+  /// Tier 2: Clothing, accessories, actions - need 2+ or 1+context
+  /// Single match could be false positive (jeans on crates, etc.)
+  static bool _isTier2PeopleLabel(String label) {
+    // EXCLUSIONS: Holiday decorations and objects are NOT people
+    const tier2Exclusions = [
+      'christmas',
+      'xmas',
+      'holiday',
+      'ornament',
+      'decoration',
+      'decor',
+      'tree', // christmas tree
+      'wreath',
+      'garland',
+      'tinsel',
+      'lights',
+      'candle',
+      'gift',
+      'present',
+      'ribbon',
+      'bow',
+    ];
+
+    // If it's a holiday decoration context, don't count as people
+    if (tier2Exclusions.any((k) => label.contains(k))) {
+      return false;
+    }
+
+    const tier2Keywords = [
+      // Clothing (could be on hangers, in store, etc.)
+      'dress',
+      'jacket',
+      'coat',
+      'sweater',
+      'shirt',
+      'blouse',
+      'suit',
+      'tuxedo',
+      'gown',
+      'hoodie',
+      'cardigan',
+      'vest',
+      'uniform',
+      'costume',
+      'jeans',
+      'pants',
+      'trousers',
+      'shorts',
+      'skirt',
+      'legging',
+      // Accessories
+      'shoe',
+      'sneaker',
+      'boot',
+      'hat',
+      'cap',
+      'glasses',
+      'sunglasses',
+      'watch',
+      'jewelry',
+      'necklace',
+      'bracelet',
+      'tie',
+      'scarf',
+      'glove',
+      'bag',
+      'handbag',
+      'backpack',
+      'purse',
+      // Nails/manicure (human-specific grooming)
+      'nail',
+      'manicure',
+      'pedicure',
+      'fingernail',
+      // Actions/states (could be descriptions, not actual people)
+      'fun',
+      'smile',
+      'smiling',
+      'happy',
+      'joy',
+      'laugh',
+      'laughing',
+      'walking',
+      'sitting',
+      'standing',
+      'running',
+      'dancing',
+      'posing',
+      // Events/contexts
+      'party',
+      'wedding',
+      'celebration',
+      'event',
+      'gathering',
+      'meeting',
+      'concert',
+      'festival',
+      'ceremony',
+      'graduation',
+      'birthday',
+      // Sports/leisure
+      'sport',
+      'athlete',
+      'player',
+      'team',
+      'crew',
+      'leisure',
+      'recreation',
+      'workout',
+      'fitness',
+      'exercise',
+      // Technology in human context (person using phone/laptop)
+      'phone',
+      'mobile',
+      'smartphone',
+      'laptop',
+      'tablet',
+      'selfie',
+    ];
+    return tier2Keywords.any((k) => label.contains(k));
+  }
+
+  /// Animal-specific indicators - if detected with ambiguous body parts, it's an animal
+  static bool _isAnimalIndicator(String label) {
+    const animalIndicators = [
+      'fur',
+      'paw',
+      'snout',
+      'muzzle',
+      'tail',
+      'whisker',
+      'feather',
+      'beak',
+      'wing',
+      'hoof',
+      'claw',
+      'fang',
+      'mane',
+      'antler',
+      'horn',
+      'scale',
+      'fin',
+      'gill',
+      'shell',
+      'tentacle',
+    ];
+    return animalIndicators.any((k) => label.contains(k));
   }
 }

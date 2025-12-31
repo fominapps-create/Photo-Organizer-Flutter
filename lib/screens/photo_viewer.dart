@@ -593,8 +593,8 @@ class _PhotoViewerState extends State<PhotoViewer>
         constrained: true,
         clipBehavior: Clip.hardEdge,
         minScale: 1.0,
-        // 2 pinches worth of zoom (1.0 -> 1.7 -> 3.0)
-        maxScale: 3.0,
+        // 3 pinches worth of zoom (1.0 -> 2.4 -> 6.0)
+        maxScale: 6.0,
         // Require a meaningful scale change before zooming starts
         // This gives users time to place their second finger
         scaleEnabled: true,

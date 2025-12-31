@@ -248,4 +248,123 @@ class TagStore {
 
     return result;
   }
+
+  // ============ Scan Version Tracking (Hybrid Approach) ============
+  //
+  // VERSIONING CONVENTION:
+  // - Uses MINOR version from app version (e.g., "0.2" from "0.2.8")
+  // - Triggers rescan on MINOR version change (0.2.x → 0.3.x)
+  // - Triggers rescan on MAJOR version change (0.x → 1.x, 1.x → 2.x)
+  // - Patch versions (0.2.8 → 0.2.9) do NOT trigger rescan
+  //
+  // WHEN TO UPDATE scanMinorVersion:
+  // - Changed ML Kit confidence thresholds
+  // - Added/removed keywords from detection lists
+  // - Modified tier-based logic (people/animals/food)
+  // - Changed category mapping rules
+  // - Major version releases (1.0, 2.0, etc.)
+  //
+  // WHEN NOT TO UPDATE:
+  // - UI changes, bug fixes unrelated to scanning
+  // - Performance optimizations that don't change results
+  // - New features that don't affect existing photo tags
+  //
+  // VERSION HISTORY:
+  // "0.1" - Initial ML Kit implementation
+  // "0.2" - Tier-based people detection, animal deduplication, 280 animal keywords
+  // "0.3" - Fixed gallery loading on fresh install, improved mounted checks
+
+  /// Current scan logic version (minor version only)
+  /// Update this when classification logic changes significantly
+  static const String scanMinorVersion = '0.3';
+
+  static const String _scanVersionKey = 'scan_minor_version';
+
+  /// Get the scan version that was used for the last scan
+  static Future<String> getSavedScanVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_scanVersionKey) ??
+        ''; // empty = never scanned or pre-versioning
+  }
+
+  /// Save the current scan version after a scan completes
+  static Future<void> saveScanVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_scanVersionKey, scanMinorVersion);
+  }
+
+  /// Check if a rescan is needed due to logic changes
+  /// Triggers rescan when:
+  /// - Minor version changes (0.2 → 0.3)
+  /// - Major version changes (0.x → 1.x, 1.x → 2.x)
+  static Future<bool> needsRescanForNewLogic() async {
+    final savedVersion = await getSavedScanVersion();
+    if (savedVersion.isEmpty) return false; // First time user, no rescan needed
+
+    // Parse versions
+    final savedParts = savedVersion
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final currentParts = scanMinorVersion
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+
+    final savedMajor = savedParts.isNotEmpty ? savedParts[0] : 0;
+    final savedMinor = savedParts.length > 1 ? savedParts[1] : 0;
+    final currentMajor = currentParts.isNotEmpty ? currentParts[0] : 0;
+    final currentMinor = currentParts.length > 1 ? currentParts[1] : 0;
+
+    // Rescan if major version changed (0.x → 1.x, 1.x → 2.x, etc.)
+    if (currentMajor > savedMajor) return true;
+
+    // Rescan if minor version changed within same major (0.2 → 0.3, 1.0 → 1.1)
+    if (currentMajor == savedMajor && currentMinor > savedMinor) return true;
+
+    return false;
+  }
+
+  /// Get description of what changed between versions
+  static String getScanVersionChanges(String fromVersion) {
+    final changes = <String>[];
+
+    // Parse versions for comparison
+    final fromParts = fromVersion
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final fromMajor = fromParts.isNotEmpty ? fromParts[0] : 0;
+    final fromMinor = fromParts.length > 1 ? fromParts[1] : 0;
+
+    final toParts = scanMinorVersion
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final toMajor = toParts.isNotEmpty ? toParts[0] : 0;
+
+    // Major version upgrade gets special messaging
+    if (toMajor > fromMajor) {
+      changes.add('🎉 Major update with redesigned classification!');
+      changes.add('• All-new scanning engine');
+      changes.add('• Significantly improved accuracy');
+    }
+
+    // Add changes for each version upgrade
+    if (fromMajor == 0 && fromMinor < 2) {
+      changes.add('• Improved people detection (tier-based system)');
+      changes.add('• Smarter animal identification');
+      changes.add('• Better food/flower classification');
+      changes.add('• Expanded animal keyword coverage (280+ animals)');
+    }
+    // Future version changes go here:
+    // if (fromMajor == 0 && fromMinor < 3) {
+    //   changes.add('• [v0.3 improvements]');
+    // }
+    // if (fromMajor < 1) {
+    //   changes.add('• [v1.0 major improvements]');
+    // }
+
+    return changes.isEmpty ? 'Bug fixes and improvements' : changes.join('\n');
+  }
 }

@@ -280,120 +280,172 @@ class _SearchScreenState extends State<SearchScreen> {
                   ],
                 ),
               ),
-              // Dropdown suggestions (shows popular when empty, filtered when typing)
-              if (_filteredSuggestions.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.grey.shade900
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.lightBlue.shade300.withValues(alpha: 0.3),
-                      width: 1,
+              // Show loading indicator while tags are being fetched
+              if (_loadingTags)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Center(
+                    child: SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Colors.lightBlue.shade300,
+                      ),
                     ),
                   ),
-                  constraints: const BoxConstraints(maxHeight: 280),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header showing context
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                        child: Text(
-                          _searchController.text.isEmpty
-                              ? 'Common Words'
-                              : 'Suggestions',
-                          style: TextStyle(
-                            color: Colors.lightBlue.shade300,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                )
+              // Dropdown suggestions (shows popular when empty, filtered when typing)
+              // Fix #8: Made dropdown floating with scrollbar, can cover more of page
+              else if (_filteredSuggestions.isNotEmpty)
+                Flexible(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade900
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.lightBlue.shade300.withValues(alpha: 0.3),
+                        width: 1,
                       ),
-                      Flexible(
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          padding: EdgeInsets.zero,
-                          itemCount: _filteredSuggestions.length,
-                          itemBuilder: (context, index) {
-                            final tag = _filteredSuggestions[index];
-                            final isAlreadySelected = _selectedTags.contains(
-                              tag,
-                            );
-                            return InkWell(
-                              onTap: () {
-                                setState(() {
-                                  if (isAlreadySelected) {
-                                    _selectedTags.remove(tag);
-                                  } else {
-                                    _selectedTags.add(tag);
-                                  }
-                                  _searchController.clear();
-                                  // Keep dropdown open - just refresh suggestions
-                                  _onSearchChanged();
-                                });
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isAlreadySelected
-                                      ? Colors.lightBlue.shade100.withValues(
-                                          alpha: 0.3,
-                                        )
-                                      : null,
-                                  border:
-                                      index < _filteredSuggestions.length - 1
-                                      ? Border(
-                                          bottom: BorderSide(
-                                            color: Colors.white.withValues(
-                                              alpha: 0.1,
-                                            ),
-                                            width: 1,
-                                          ),
-                                        )
-                                      : null,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        tag,
-                                        style: GoogleFonts.poppins(
-                                          color:
-                                              Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? Colors.white
-                                              : Colors.black87,
-                                          fontSize: 16,
-                                          fontWeight: isAlreadySelected
-                                              ? FontWeight.w600
-                                              : FontWeight.w400,
-                                        ),
-                                      ),
-                                    ),
-                                    if (isAlreadySelected)
-                                      Icon(
-                                        Icons.check,
-                                        color: Colors.lightBlue.shade400,
-                                        size: 20,
-                                      ),
-                                  ],
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    // Allow dropdown to expand up to 70% of screen height
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.5,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header showing context
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                _searchController.text.isEmpty
+                                    ? 'Common Words'
+                                    : 'Suggestions',
+                                style: TextStyle(
+                                  color: Colors.lightBlue.shade300,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            );
-                          },
+                              // Scroll indicator
+                              if (_filteredSuggestions.length > 5)
+                                Text(
+                                  '${_filteredSuggestions.length} items',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade500,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        Flexible(
+                          child: Scrollbar(
+                            thumbVisibility: true,
+                            thickness: 6,
+                            radius: const Radius.circular(3),
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              padding: const EdgeInsets.only(right: 8),
+                              itemCount: _filteredSuggestions.length,
+                              itemBuilder: (context, index) {
+                                final tag = _filteredSuggestions[index];
+                                final isAlreadySelected = _selectedTags
+                                    .contains(tag);
+                                return InkWell(
+                                  onTap: () {
+                                    setState(() {
+                                      if (isAlreadySelected) {
+                                        _selectedTags.remove(tag);
+                                      } else {
+                                        _selectedTags.add(tag);
+                                      }
+                                      _searchController.clear();
+                                      // Keep dropdown open - just refresh suggestions
+                                      _onSearchChanged();
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isAlreadySelected
+                                          ? Colors.lightBlue.shade100
+                                                .withValues(alpha: 0.3)
+                                          : null,
+                                      border:
+                                          index <
+                                              _filteredSuggestions.length - 1
+                                          ? Border(
+                                              bottom: BorderSide(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.1,
+                                                ),
+                                                width: 1,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            tag,
+                                            style: GoogleFonts.poppins(
+                                              color:
+                                                  Theme.of(
+                                                        context,
+                                                      ).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87,
+                                              fontSize: 16,
+                                              fontWeight: isAlreadySelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w400,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isAlreadySelected)
+                                          Icon(
+                                            Icons.check,
+                                            color: Colors.lightBlue.shade400,
+                                            size: 20,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              if (_filteredSuggestions.isNotEmpty) const SizedBox(height: 16),
+              if (!_loadingTags && _filteredSuggestions.isNotEmpty)
+                const SizedBox(height: 16),
               // Selected tags display (if any)
               if (_selectedTags.isNotEmpty)
                 Padding(
@@ -402,22 +454,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     spacing: 8,
                     runSpacing: 8,
                     children: _selectedTags
-                        .map(
-                          (tag) => Chip(
-                            label: Text(tag),
-                            deleteIcon: const Icon(Icons.close, size: 18),
-                            onDeleted: () {
-                              setState(() {
-                                _selectedTags.remove(tag);
-                              });
-                            },
-                            backgroundColor: Colors.lightBlue.shade100,
-                            labelStyle: TextStyle(
-                              color: Colors.lightBlue.shade700,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        )
+                        .map((tag) => _buildTagChip(tag))
                         .toList(),
                   ),
                 ),

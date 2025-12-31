@@ -550,3 +550,60 @@ You’re NOT limiting yourself now — you’re actually future-proofing your de
 📌 Final Bottom-Line
 
 If you build the architecture exactly like I described (stable IDs + groups as logical collections), then adding bulk-delete, bulk-move, and cloud-backup later is 100% possible and not hard.
+---
+
+## Scan Version Tracking (Hybrid Approach)
+
+### Overview
+When classification logic changes significantly between app versions, users with existing scanned photos need to be prompted to rescan. We use a **hybrid approach** based on the minor version number.
+
+### How It Works
+- Uses **minor version** from app version (e.g., `"0.2"` from `0.2.8`)
+- Triggers rescan prompt on **minor version** change (`0.2.x` → `0.3.x`)
+- Triggers rescan prompt on **major version** change (`0.x` → `1.x`, `1.x` → `2.x`)
+- Patch versions (`0.2.8` → `0.2.9`) do **NOT** trigger rescan
+
+### Location
+- **File:** `lib/services/tag_store.dart`
+- **Constant:** `TagStore.scanMinorVersion`
+
+### When to Update `scanMinorVersion`
+✅ **DO update** when:
+- Changed ML Kit confidence thresholds
+- Added/removed keywords from detection lists (people, animals, food, etc.)
+- Modified tier-based logic (people/animals/food classification)
+- Changed category mapping rules
+- Fixed significant classification bugs
+
+❌ **DO NOT update** when:
+- UI changes or bug fixes unrelated to scanning
+- Performance optimizations that don't change tag results
+- New features that don't affect existing photo tags
+- Documentation changes
+
+### Version History
+| Version | App Version | Changes |
+|---------|-------------|---------|
+| `"0.1"` | 0.1.x | Initial ML Kit implementation |
+| `"0.2"` | 0.2.x | Tier-based people detection, animal deduplication, 280 animal keywords, food exclusions |
+
+### Updating for New Versions
+1. Update `scanMinorVersion` in `tag_store.dart`:
+   ```dart
+   static const String scanMinorVersion = '0.3'; // Was '0.2'
+   ```
+
+2. Add change description in `getScanVersionChanges()`:
+   ```dart
+   if (fromMajor == 0 && fromMinor < 3) {
+     changes.add('• [v0.3 improvements]');
+   }
+   ```
+
+3. Update this documentation with the new version entry.
+
+### User Experience
+1. On app update, after tags load, checks if `savedVersion != currentVersion`
+2. Shows friendly dialog explaining improvements
+3. User can **"Skip"** (won't ask again) or **"Rescan All"**
+4. If rescan chosen: clears tags, shows progress, rescans all photos
