@@ -1494,8 +1494,8 @@ class GalleryScreenState extends State<GalleryScreen>
                         ),
                       );
                     } else if (_clearingTags) {
-                      // FIX #3: Show status when removing tags for rescan
-                      liveMessage = 'Removing tags for rescan...';
+                      // FIX #1: Show status when removing tags for rescan
+                      liveMessage = 'Deleting tags...';
                       icon = const SizedBox(
                         width: 14,
                         height: 14,
@@ -1518,6 +1518,17 @@ class GalleryScreenState extends State<GalleryScreen>
                     } else if (_scanning && _scanPaused) {
                       liveMessage =
                           'Paused at $scannedCount/$_cachedLocalPhotoCount ($pct%)';
+                    } else if (_scanning && pct == 0) {
+                      // FIX #2: Show "Preparing scan..." when at 0% to avoid looking stuck
+                      liveMessage = 'Preparing scan...';
+                      icon = const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      );
                     } else if (_scanning) {
                       liveMessage =
                           'Scanning $scannedCount/$_cachedLocalPhotoCount ($pct%)';

@@ -222,14 +222,21 @@ class LocalTaggingService {
         if (_isNonAnimalPattern(text)) {
           developer.log('🎨 Skipping animal for pattern/texture: "$text"');
         } else {
-          categories.add('animals');
-          if (confidence > bestAnimalConfidence) {
-            bestAnimalConfidence = confidence;
-            bestAnimalLabel = text;
+          // FIX #5: Dogs are massively over-detected - require very high confidence
+          // Dogs are detected on random objects, furniture, patterns - need 0.85+
+          final isDog = text.contains('dog') && !text.contains('hot dog');
+          if (isDog && confidence < 0.85) {
+            developer.log('🐕 Skipping low-confidence dog ($confidence < 0.85): "$text"');
+          } else {
+            categories.add('animals');
+            if (confidence > bestAnimalConfidence) {
+              bestAnimalConfidence = confidence;
+              bestAnimalLabel = text;
+            }
+            // Track all detected animal types with their confidences for smart deduplication
+            detectedAnimalTypes.add(text);
+            animalConfidences[text] = confidence;
           }
-          // Track all detected animal types with their confidences for smart deduplication
-          detectedAnimalTypes.add(text);
-          animalConfidences[text] = confidence;
         }
       }
       // Fix #9: Check for fur/animal indicators early (needed for tier decision)

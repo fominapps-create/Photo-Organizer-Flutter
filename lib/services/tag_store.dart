@@ -305,10 +305,11 @@ class TagStore {
   // "0.5" - Improved classification: event/party/pattern exclusions, body part detection,
   //         animal exclusions (vehicle/room/screenshot/instruments), cat+dog deduplication
   // "0.6" - Room/furniture not documents, baby in costume → people, UI fixes
+  // "0.7" - Dog requires 0.85+ confidence (massive over-detection fix)
 
   /// Current scan logic version (minor version only)
   /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '0.6';
+  static const String scanMinorVersion = '0.7';
 
   static const String _scanVersionKey = 'scan_minor_version';
 

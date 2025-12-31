@@ -255,13 +255,20 @@ class _SearchScreenState extends State<SearchScreen> {
                               color: Colors.lightBlue.shade300,
                             ),
                             suffixIcon: _selectedTags.isNotEmpty
-                                // FIX #2: Show search button instead of X when tags are selected
-                                ? IconButton(
-                                    icon: Icon(
-                                      Icons.search,
-                                      color: Colors.lightBlue.shade300,
+                                // FIX #4: Show orange arrow button when tags are selected
+                                ? Container(
+                                    margin: const EdgeInsets.only(right: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange,
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    onPressed: _performSearch,
+                                    child: IconButton(
+                                      icon: const Icon(
+                                        Icons.arrow_forward,
+                                        color: Colors.white,
+                                      ),
+                                      onPressed: _performSearch,
+                                    ),
                                   )
                                 : (_searchController.text.isNotEmpty
                                     ? IconButton(
