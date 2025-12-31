@@ -1483,8 +1483,9 @@ class GalleryScreenState extends State<GalleryScreen>
                         color: Colors.amber,
                         size: 14,
                       );
-                    } else if (_scanPreparing) {
-                      liveMessage = 'Preparing to scan...';
+                    } else if (_clearingTags) {
+                      // FIX #1: Show status when removing tags for rescan
+                      liveMessage = 'Deleting tags...';
                       icon = const SizedBox(
                         width: 14,
                         height: 14,
@@ -1493,9 +1494,8 @@ class GalleryScreenState extends State<GalleryScreen>
                           color: Colors.white,
                         ),
                       );
-                    } else if (_clearingTags) {
-                      // FIX #1: Show status when removing tags for rescan
-                      liveMessage = 'Deleting tags...';
+                    } else if (_scanPreparing) {
+                      liveMessage = 'Preparing to scan...';
                       icon = const SizedBox(
                         width: 14,
                         height: 14,
@@ -1518,7 +1518,7 @@ class GalleryScreenState extends State<GalleryScreen>
                     } else if (_scanning && _scanPaused) {
                       liveMessage =
                           'Paused at $scannedCount/$_cachedLocalPhotoCount ($pct%)';
-                    } else if (_scanning && pct == 0) {
+                    } else if (_scanning && pct == '0') {
                       // FIX #2: Show "Preparing scan..." when at 0% to avoid looking stuck
                       liveMessage = 'Preparing scan...';
                       icon = const SizedBox(
@@ -2024,6 +2024,11 @@ class GalleryScreenState extends State<GalleryScreen>
           developer.log(
             '🔄 Starting automatic rescan for new classification logic',
           );
+
+          // FIX #1: Set clearing state immediately so status shows during deletion
+          setState(() {
+            _clearingTags = true;
+          });
 
           // Stop any current scan
           _scanning = false;
@@ -4806,7 +4811,8 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Minimum confidence threshold for a detection to be searchable
-  static const double _searchConfidenceThreshold = 0.65;
+  /// Set to 0.72 to filter out low-confidence false positives (e.g., dog on random objects)
+  static const double _searchConfidenceThreshold = 0.72;
 
   /// Parse a detection string that may contain confidence (format: "Label:0.72" or just "Label")
   /// Returns (label, confidence) tuple. If no confidence, returns 1.0 (assume high confidence)
@@ -4903,7 +4909,7 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Get search suggestions based on existing tags, sorted by popularity
-  List<String> getSearchSuggestions({String? prefix, int limit = 20}) {
+  List<String> getSearchSuggestions({String? prefix, int limit = 50}) {
     final sorted = _getTagsSortedByPopularity();
 
     if (prefix == null || prefix.isEmpty) {
@@ -6437,7 +6443,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       .contains(term),
                                                 ) ||
                                                 allDetections.any(
-                                                  (d) => _detectionMatchesSearch(d, term),
+                                                  (d) =>
+                                                      _detectionMatchesSearch(
+                                                        d,
+                                                        term,
+                                                      ),
                                                 ),
                                           );
                                         }).length;

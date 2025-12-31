@@ -160,12 +160,14 @@ class _TrashScreenState extends State<TrashScreen> {
         idsToDelete.add(id.substring('local:'.length));
       }
     }
-    
+
     if (idsToDelete.isNotEmpty) {
       try {
         // Request permanent deletion via PhotoManager
         final deletedIds = await PhotoManager.editor.deleteWithIds(idsToDelete);
-        developer.log('🗑️ Permanently deleted ${deletedIds.length} files via PhotoManager');
+        developer.log(
+          '🗑️ Permanently deleted ${deletedIds.length} files via PhotoManager',
+        );
       } catch (e) {
         developer.log('❌ Error deleting files via PhotoManager: $e');
       }

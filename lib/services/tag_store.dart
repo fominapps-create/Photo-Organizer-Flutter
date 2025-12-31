@@ -308,10 +308,12 @@ class TagStore {
   // "0.7" - Dog requires 0.85+ confidence (massive over-detection fix)
   // "0.8" - Detections now store confidence (Label:0.72 format), search filters
   //         low-confidence tags (<65%) so false positives like "flower" on food don't match
+  // "0.9" - Pedestrian/walker/jogger → People, 2+ clothing items → People,
+  //         Screenshots with text → Other (not Scenery), search threshold 0.72
 
   /// Current scan logic version (minor version only)
   /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '0.8';
+  static const String scanMinorVersion = '0.9';
 
   static const String _scanVersionKey = 'scan_minor_version';
 

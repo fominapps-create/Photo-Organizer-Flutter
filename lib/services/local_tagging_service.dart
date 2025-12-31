@@ -137,6 +137,8 @@ class LocalTaggingService {
     final Set<String> categories = {};
     final List<String> allDetections = [];
     bool hasScreenshot = false;
+    bool hasTextLabel =
+        false; // Track if text/writing detected (screenshot indicator)
 
     // Track confidence scores for conflict resolution
     double bestPeopleConfidence = 0.0;
@@ -227,7 +229,9 @@ class LocalTaggingService {
           // Dogs are detected on random objects, furniture, patterns - need 0.85+
           final isDog = text.contains('dog') && !text.contains('hot dog');
           if (isDog && confidence < 0.85) {
-            developer.log('🐕 Skipping low-confidence dog ($confidence < 0.85): "$text"');
+            developer.log(
+              '🐕 Skipping low-confidence dog ($confidence < 0.85): "$text"',
+            );
           } else {
             categories.add('animals');
             if (confidence > bestAnimalConfidence) {
@@ -279,16 +283,37 @@ class LocalTaggingService {
       }
       // Scenery detection - track if we have strong vs weak labels
       // FIX #14: Require higher confidence for scenery (sky often low confidence)
+      // FIX: Skip scenery for screenshots with text (monochromatic backgrounds look like sky)
       if (_isSceneryLabel(text) && confidence >= 0.55) {
         if (!_isWeakSceneryLabel(text)) {
           hasOnlyWeakScenery = false;
         }
+        // Don't add scenery yet - we'll check for screenshot+text combo after the loop
         categories.add('scenery');
       }
       // Track screenshot detection for subtag
       if (text.contains('screenshot') || text.contains('screen')) {
         hasScreenshot = true;
       }
+      // Track text detection (screenshots often have text with sky-like backgrounds)
+      if (text.contains('text') ||
+          text.contains('font') ||
+          text.contains('writing') ||
+          text.contains('letter') ||
+          text.contains('number') ||
+          text.contains('handwriting')) {
+        hasTextLabel = true;
+      }
+    }
+
+    // FIX: Screenshots with text should NOT be scenery - classify as Other
+    // Monochromatic screenshot backgrounds often get detected as "sky"
+    if ((hasScreenshot || hasTextLabel) && categories.contains('scenery')) {
+      categories.remove('scenery');
+      categories.add('other');
+      developer.log(
+        '🖼️ Changed scenery → other - screenshot/text detected (sky-like background)',
+      );
     }
 
     // Fix #3, #9, #10: TIER-BASED PEOPLE DECISION
@@ -320,10 +345,11 @@ class LocalTaggingService {
       // 2+ tier2 items (clothing) + ambiguous body part = likely people
       shouldAddPeople = true;
       tierReason = 'Tier 2 combo + body part ($tier2Count items)';
-    } else if (tier2Count >= 3 && !hasFurOrAnimalIndicator) {
-      // 3+ tier2 items without animal indicators = very likely people
+    } else if (tier2Count >= 2 && !hasFurOrAnimalIndicator) {
+      // FIX: 2+ tier2 clothing items (sweater, pants, shoes) = definitely people
+      // Animals don't wear clothes, so 2+ clothing items is strong evidence
       shouldAddPeople = true;
-      tierReason = 'Strong Tier 2 combo ($tier2Count items, no animal)';
+      tierReason = 'Tier 2 clothing combo ($tier2Count items, no animal)';
     } else if (hasAmbiguousBodyPart && !hasFurOrAnimalIndicator) {
       // FIX: Ambiguous body parts (ear, leg, foot, body) without fur = likely human
       // Animals would have fur/paw/tail indicators alongside these
@@ -560,7 +586,9 @@ class LocalTaggingService {
     });
     if (categories.contains('document') && hasRoomOrFurniture) {
       categories.remove('document');
-      developer.log('🔄 Removed document - room/furniture detected (should be Other)');
+      developer.log(
+        '🔄 Removed document - room/furniture detected (should be Other)',
+      );
     }
 
     // Priority order: people > animals > food > document > scenery
@@ -590,7 +618,9 @@ class LocalTaggingService {
       if (!categories.contains('people')) {
         categories.add('people');
       }
-      developer.log('👶 Baby/child in costume - prioritizing People over Animals');
+      developer.log(
+        '👶 Baby/child in costume - prioritizing People over Animals',
+      );
     }
 
     // FIX #6: Flowers/plants should be Other, not Food
@@ -606,11 +636,13 @@ class LocalTaggingService {
           lower.contains('bouquet') ||
           lower.contains('vase');
     }).length;
-    
+
     // If 2+ flower/plant indicators detected, this is flowers not food
     if (flowerPlantIndicators >= 2 && categories.contains('food')) {
       categories.remove('food');
-      developer.log('🌸 Removed food - $flowerPlantIndicators flower/plant indicators detected');
+      developer.log(
+        '🌸 Removed food - $flowerPlantIndicators flower/plant indicators detected',
+      );
     }
 
     final prioritized = <String>[];
@@ -1866,6 +1898,17 @@ class LocalTaggingService {
       'people',
       'face', // ML Kit uses 'face' for humans
       'skin', // Animals have fur, not skin (as label)
+      // FIX: Walking/street human labels - person from behind
+      'pedestrian',
+      'walker',
+      'jogger',
+      'runner',
+      'cyclist', // person on bike
+      'commuter',
+      'passerby',
+      'traveler',
+      'tourist',
+      'hiker',
     ];
     return tier1Keywords.any((k) => label.contains(k));
   }

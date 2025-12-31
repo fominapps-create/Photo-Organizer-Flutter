@@ -183,8 +183,8 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        // FIX: Prevent keyboard from resizing the layout and shrinking dropdown
-        resizeToAvoidBottomInset: false,
+        // Allow keyboard to push content up so search button stays visible
+        resizeToAvoidBottomInset: true,
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -255,35 +255,39 @@ class _SearchScreenState extends State<SearchScreen> {
                               color: Colors.lightBlue.shade300,
                             ),
                             suffixIcon: _selectedTags.isNotEmpty
-                                // FIX #4: Show orange arrow button when tags are selected
+                                // FIX #4: Show orange round button when tags are selected
                                 ? Container(
-                                    margin: const EdgeInsets.only(right: 8),
-                                    decoration: BoxDecoration(
+                                    margin: const EdgeInsets.only(right: 4),
+                                    width: 40,
+                                    height: 40,
+                                    decoration: const BoxDecoration(
                                       color: Colors.orange,
-                                      borderRadius: BorderRadius.circular(8),
+                                      shape: BoxShape.circle,
                                     ),
                                     child: IconButton(
+                                      padding: EdgeInsets.zero,
                                       icon: const Icon(
                                         Icons.arrow_forward,
                                         color: Colors.white,
+                                        size: 22,
                                       ),
                                       onPressed: _performSearch,
                                     ),
                                   )
                                 : (_searchController.text.isNotEmpty
-                                    ? IconButton(
-                                        icon: Icon(
-                                          Icons.close,
-                                          color: Colors.lightBlue.shade300,
-                                        ),
-                                        onPressed: () {
-                                          setState(() {
-                                            _searchController.clear();
-                                            _onSearchChanged();
-                                          });
-                                        },
-                                      )
-                                    : null),
+                                      ? IconButton(
+                                          icon: Icon(
+                                            Icons.close,
+                                            color: Colors.lightBlue.shade300,
+                                          ),
+                                          onPressed: () {
+                                            setState(() {
+                                              _searchController.clear();
+                                              _onSearchChanged();
+                                            });
+                                          },
+                                        )
+                                      : null),
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,

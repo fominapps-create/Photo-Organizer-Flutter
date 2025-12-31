@@ -440,7 +440,8 @@ class _PhotoViewerState extends State<PhotoViewer>
       if (_fileCache.containsKey(index)) {
         imageWidget = Image.file(
           _fileCache[index]!,
-          fit: BoxFit.fitWidth,
+          fit: BoxFit.contain,
+          width: double.infinity,
           filterQuality: FilterQuality.high,
         );
       } else {
@@ -462,7 +463,8 @@ class _PhotoViewerState extends State<PhotoViewer>
               });
               return Image.file(
                 snapshot.data!,
-                fit: BoxFit.fitWidth,
+                fit: BoxFit.contain,
+                width: double.infinity,
                 filterQuality: FilterQuality.high,
               );
             }
@@ -476,7 +478,8 @@ class _PhotoViewerState extends State<PhotoViewer>
       final path = url.substring('file:'.length);
       imageWidget = Image.file(
         File(path),
-        fit: BoxFit.fitWidth,
+        fit: BoxFit.contain,
+        width: double.infinity,
         filterQuality: FilterQuality.high,
       );
     } else if (url.isNotEmpty) {
@@ -484,7 +487,8 @@ class _PhotoViewerState extends State<PhotoViewer>
       final resolved = ApiService.resolveImageUrl(url);
       imageWidget = Image.network(
         resolved,
-        fit: BoxFit.fitWidth,
+        fit: BoxFit.contain,
+        width: double.infinity,
         filterQuality: FilterQuality.high,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
@@ -633,10 +637,7 @@ class _PhotoViewerState extends State<PhotoViewer>
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Background colors that adapt to theme
-    final bgColor = isDark
-        ? Colors.black.withValues(alpha: 0.75)
-        : Colors.black.withValues(alpha: 0.65);
+    // Background color for tag labels that adapts to theme
     final labelBgColor = isDark
         ? Colors.white.withValues(alpha: 0.15)
         : Colors.black.withValues(alpha: 0.3);
