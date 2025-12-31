@@ -310,10 +310,12 @@ class TagStore {
   //         low-confidence tags (<65%) so false positives like "flower" on food don't match
   // "0.9" - Pedestrian/walker/jogger → People, 2+ clothing items → People,
   //         Screenshots with text → Other (not Scenery), search threshold 0.72
+  // "1.0" - Objects need 86%+ confidence to be searchable, cached tag counts,
+  //         Food is category-only (derived from food items)
 
   /// Current scan logic version (minor version only)
   /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '0.9';
+  static const String scanMinorVersion = '1.0';
 
   static const String _scanVersionKey = 'scan_minor_version';
 
