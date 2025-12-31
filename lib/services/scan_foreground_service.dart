@@ -10,6 +10,9 @@ class ScanForegroundService {
   static bool _isRunning = false;
   static bool _isAppInForeground = true; // Track if app is visible
 
+  /// Check if app is currently in foreground
+  static bool get isAppInForeground => _isAppInForeground;
+
   // Track progress for graceful shutdown notification
   static int _lastScanned = 0;
   static int _lastTotal = 0;

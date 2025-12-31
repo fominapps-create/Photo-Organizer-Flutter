@@ -11,12 +11,22 @@ import 'dart:convert';
 /// Free tier = local on-device processing
 /// Premium tier / Server configured = cloud processing
 class TaggingServiceFactory {
-  /// Cached device concurrency level
+  /// Cached device concurrency level for foreground scanning
   static int? _cachedConcurrency;
 
+  /// Cached device concurrency level for background scanning (25% slower)
+  static int? _cachedBackgroundConcurrency;
+
   /// Get optimal concurrency for ML Kit based on device capabilities
-  static Future<int> _getOptimalConcurrency() async {
-    if (_cachedConcurrency != null) return _cachedConcurrency!;
+  static Future<int> _getOptimalConcurrency({bool isBackground = false}) async {
+    // For background scanning, use cached background value if available
+    if (isBackground && _cachedBackgroundConcurrency != null) {
+      return _cachedBackgroundConcurrency!;
+    }
+    // For foreground scanning, use cached foreground value if available
+    if (!isBackground && _cachedConcurrency != null) {
+      return _cachedConcurrency!;
+    }
 
     int cpuCores = 4;
     int ramGB = 4;
@@ -55,22 +65,29 @@ class TaggingServiceFactory {
     } catch (_) {}
 
     // Determine concurrency based on device tier
-    // Higher concurrency = more parallel ML Kit operations = faster scanning
+    // Foreground: Full speed for best user experience
+    // Background: 25% slower to reduce heat when user isn't actively waiting
     int concurrency;
     if (ramGB <= 3 || cpuCores <= 4) {
-      concurrency = 8; // Low-end: 8 parallel operations
+      concurrency = isBackground ? 6 : 8; // Low-end: 6 bg / 8 fg
     } else if (ramGB <= 6 || cpuCores <= 6) {
-      concurrency = 12; // Mid-range: 12 parallel operations
+      concurrency = isBackground ? 9 : 12; // Mid-range: 9 bg / 12 fg
     } else if (ramGB <= 8 || cpuCores <= 8) {
-      concurrency = 16; // Mid-high: 16 parallel operations
+      concurrency = isBackground ? 12 : 16; // Mid-high: 12 bg / 16 fg
     } else {
-      concurrency = 20; // High-end: 20 parallel operations
+      concurrency = isBackground ? 15 : 20; // High-end: 15 bg / 20 fg
     }
 
+    final mode = isBackground ? 'background' : 'foreground';
     developer.log(
-      '📱 Device: $cpuCores cores, ${ramGB}GB RAM → concurrency: $concurrency',
+      '📱 Device: $cpuCores cores, ${ramGB}GB RAM → $mode concurrency: $concurrency',
     );
-    _cachedConcurrency = concurrency;
+
+    if (isBackground) {
+      _cachedBackgroundConcurrency = concurrency;
+    } else {
+      _cachedConcurrency = concurrency;
+    }
     return concurrency;
   }
 
@@ -88,15 +105,17 @@ class TaggingServiceFactory {
 
   /// Tag a batch of images using the appropriate service
   /// Returns: Map of photoID -> tags
+  /// [isBackground] - If true, uses reduced concurrency to prevent heating
   static Future<Map<String, TagResult>> tagImageBatch({
     required List<TaggingInput> items,
     bool preferLocal = false,
+    bool isBackground = false,
   }) async {
     // If preferLocal is true or server is not available, use local ML Kit
     final useLocal = preferLocal || !(await isServerAvailable());
 
     if (useLocal) {
-      return await _tagWithLocalService(items);
+      return await _tagWithLocalService(items, isBackground: isBackground);
     } else {
       return await _tagWithCloudService(items);
     }
@@ -104,8 +123,9 @@ class TaggingServiceFactory {
 
   /// Tag images using on-device ML Kit - PARALLEL processing for speed
   static Future<Map<String, TagResult>> _tagWithLocalService(
-    List<TaggingInput> items,
-  ) async {
+    List<TaggingInput> items, {
+    bool isBackground = false,
+  }) async {
     final results = <String, TagResult>{};
 
     // Get temp directory for files
@@ -115,10 +135,12 @@ class TaggingServiceFactory {
 
     // Dynamic concurrency based on device capabilities
     // Higher concurrency = faster processing, but more memory/CPU
-    // ML Kit is well-optimized and can handle high concurrency on modern devices
-    final concurrencyLimit = await _getOptimalConcurrency();
+    // Background scanning uses 25% less concurrency to reduce heat
+    final concurrencyLimit = await _getOptimalConcurrency(
+      isBackground: isBackground,
+    );
     developer.log(
-      '🚀 Local ML Kit processing with concurrency: $concurrencyLimit',
+      '🚀 Local ML Kit processing (${isBackground ? "background" : "foreground"}) with concurrency: $concurrencyLimit',
     );
 
     try {

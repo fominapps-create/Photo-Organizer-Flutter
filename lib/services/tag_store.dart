@@ -4,11 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 class TagStore {
   static String _keyFor(String photoID) => 'tags_$photoID';
   static String _detectionsKeyFor(String photoID) => 'detections_$photoID';
+  static String _scanVersionKeyFor(String photoID) => 'scanver_$photoID';
 
   /// Save tags locally under canonical `photoID`.
   static Future<void> saveLocalTags(String photoID, List<String> tags) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyFor(photoID), json.encode(tags));
+    // Also save the current scan version when tags are saved
+    await prefs.setString(_scanVersionKeyFor(photoID), scanMinorVersion);
   }
 
   /// Save all detections (detailed object list for search)
@@ -18,6 +21,12 @@ class TagStore {
   ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_detectionsKeyFor(photoID), json.encode(detections));
+  }
+
+  /// Load the scan version that was used when this photo was scanned
+  static Future<String?> loadPhotoScanVersion(String photoID) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_scanVersionKeyFor(photoID));
   }
 
   /// Load detections saved locally for `photoID`. Returns null if none stored.
@@ -249,6 +258,24 @@ class TagStore {
     return result;
   }
 
+  /// Load all scan versions at once for multiple photos (batch loading)
+  /// Returns a Map of photoID -> scanVersion
+  static Future<Map<String, String>> loadAllScanVersionsMap(
+    List<String> photoIDs,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final result = <String, String>{};
+
+    for (final photoID in photoIDs) {
+      final ver = prefs.getString(_scanVersionKeyFor(photoID));
+      if (ver != null) {
+        result[photoID] = ver;
+      }
+    }
+
+    return result;
+  }
+
   // ============ Scan Version Tracking (Hybrid Approach) ============
   //
   // VERSIONING CONVENTION:
@@ -273,10 +300,15 @@ class TagStore {
   // "0.1" - Initial ML Kit implementation
   // "0.2" - Tier-based people detection, animal deduplication, 280 animal keywords
   // "0.3" - Fixed gallery loading on fresh install, improved mounted checks
+  // "0.4" - Stricter tier2 logic (needs body parts), eyelash moved to ambiguous,
+  //         reduced concurrency for less heating, per-photo scan version tracking
+  // "0.5" - Improved classification: event/party/pattern exclusions, body part detection,
+  //         animal exclusions (vehicle/room/screenshot/instruments), cat+dog deduplication
+  // "0.6" - Room/furniture not documents, baby in costume → people, UI fixes
 
   /// Current scan logic version (minor version only)
   /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '0.3';
+  static const String scanMinorVersion = '0.6';
 
   static const String _scanVersionKey = 'scan_minor_version';
 
@@ -357,10 +389,18 @@ class TagStore {
       changes.add('• Better food/flower classification');
       changes.add('• Expanded animal keyword coverage (280+ animals)');
     }
+    if (fromMajor == 0 && fromMinor < 4) {
+      changes.add('• Stricter people detection (requires body evidence)');
+      changes.add('• Fixed false positives for eyelash/clothing photos');
+      changes.add('• Reduced phone heating during scans');
+    }
+    if (fromMajor == 0 && fromMinor < 5) {
+      changes.add('• Events/parties no longer auto-tag as people');
+      changes.add('• Better animal detection (excludes objects/body parts)');
+      changes.add('• Fixed scan startup when updating app');
+      changes.add('• Improved people detection for body parts');
+    }
     // Future version changes go here:
-    // if (fromMajor == 0 && fromMinor < 3) {
-    //   changes.add('• [v0.3 improvements]');
-    // }
     // if (fromMajor < 1) {
     //   changes.add('• [v1.0 major improvements]');
     // }

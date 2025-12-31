@@ -20,6 +20,9 @@ class PhotoData {
   /// For local assets, store the asset reference for lazy file loading
   final AssetEntity? asset;
 
+  /// The scan logic version this photo was scanned with (for debugging)
+  final String? scanVersion;
+
   const PhotoData({
     required this.url,
     required this.heroTag,
@@ -27,6 +30,7 @@ class PhotoData {
     this.allDetections = const [],
     this.dateTime,
     this.asset,
+    this.scanVersion,
   });
 }
 
@@ -314,17 +318,19 @@ class _PhotoViewerState extends State<PhotoViewer>
       right: 0,
       bottom: 0,
       child: Container(
-        // Navbar background that extends to safe area
+        // FIX: Solid black safe zone behind action buttons for better visibility
         decoration: BoxDecoration(
+          color: Colors.black,
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
             colors: [
-              Colors.black.withValues(alpha: 0.85),
-              Colors.black.withValues(alpha: 0.7),
+              Colors.black,
+              Colors.black,
+              Colors.black.withValues(alpha: 0.9),
               Colors.transparent,
             ],
-            stops: const [0.0, 0.6, 1.0],
+            stops: const [0.0, 0.5, 0.8, 1.0],
           ),
         ),
         padding: EdgeInsets.only(
@@ -456,7 +462,7 @@ class _PhotoViewerState extends State<PhotoViewer>
       if (_fileCache.containsKey(index)) {
         imageWidget = Image.file(
           _fileCache[index]!,
-          fit: BoxFit.contain,
+          fit: BoxFit.fitWidth,
           filterQuality: FilterQuality.high,
         );
       } else {
@@ -478,7 +484,7 @@ class _PhotoViewerState extends State<PhotoViewer>
               });
               return Image.file(
                 snapshot.data!,
-                fit: BoxFit.contain,
+                fit: BoxFit.fitWidth,
                 filterQuality: FilterQuality.high,
               );
             }
@@ -492,7 +498,7 @@ class _PhotoViewerState extends State<PhotoViewer>
       final path = url.substring('file:'.length);
       imageWidget = Image.file(
         File(path),
-        fit: BoxFit.contain,
+        fit: BoxFit.fitWidth,
         filterQuality: FilterQuality.high,
       );
     } else if (url.isNotEmpty) {
@@ -500,7 +506,7 @@ class _PhotoViewerState extends State<PhotoViewer>
       final resolved = ApiService.resolveImageUrl(url);
       imageWidget = Image.network(
         resolved,
-        fit: BoxFit.contain,
+        fit: BoxFit.fitWidth,
         filterQuality: FilterQuality.high,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
@@ -664,19 +670,8 @@ class _PhotoViewerState extends State<PhotoViewer>
       bottom: bottomPadding + 60,
       // IgnorePointer prevents this overlay from blocking horizontal swipe gestures
       child: IgnorePointer(
+        // FIX #5: Remove semi-transparent background - make it completely clear
         child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                bgColor,
-                bgColor.withValues(alpha: bgColor.a * 0.8),
-                Colors.transparent,
-              ],
-              stops: const [0.0, 0.7, 1.0],
-            ),
-          ),
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -769,6 +764,18 @@ class _PhotoViewerState extends State<PhotoViewer>
                       ),
                     );
                   }).toList(),
+                ),
+              ],
+              // Show scan version if available (for debugging)
+              if (photo.scanVersion != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Scanned with v${photo.scanVersion}',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
               ],
             ],

@@ -418,21 +418,21 @@ class _HomeScreenState extends State<HomeScreen> {
                                       _buildActionButton(
                                         Icons.photo_album,
                                         'Album',
-                                        Colors.green,
+                                        Colors.orange,
                                         () => _galleryKey.currentState
                                             ?.showAlbumOptions(),
                                       ),
                                       _buildActionButton(
                                         Icons.share,
                                         'Share',
-                                        Colors.blue,
+                                        Colors.orange,
                                         () => _galleryKey.currentState
                                             ?.shareSelected(),
                                       ),
                                       _buildActionButton(
                                         Icons.delete,
                                         'Delete',
-                                        Colors.red,
+                                        Colors.orange,
                                         () => _galleryKey.currentState
                                             ?.deleteSelected(),
                                       ),

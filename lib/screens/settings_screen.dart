@@ -5,6 +5,7 @@ import 'trash_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_links.dart';
+import '../services/tag_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -382,8 +383,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.info_outline),
-            title: const Text('Version'),
-            subtitle: const Text('0.2.6'),
+            title: const Text('App Version'),
+            subtitle: Text(AppLinks.appVersion),
+          ),
+          ListTile(
+            leading: const Icon(Icons.analytics_outlined),
+            title: const Text('Scan Logic Version'),
+            subtitle: Text(TagStore.scanMinorVersion),
           ),
           const Divider(),
           ListTile(

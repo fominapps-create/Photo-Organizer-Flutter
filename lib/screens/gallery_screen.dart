@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+import 'package:collection/collection.dart';
 import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'dart:convert';
@@ -58,6 +59,7 @@ class GalleryScreenState extends State<GalleryScreen>
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
   Map<String, List<String>> photoAllDetections = {};
+  Map<String, String> photoScanVersions = {}; // Track scan version per photo
   bool loading = true;
   final Map<String, AssetEntity> _localAssets = {};
   final Map<String, Uint8List> _thumbCache = {};
@@ -1149,6 +1151,7 @@ class GalleryScreenState extends State<GalleryScreen>
       final key = p.basename(url);
       final tags = photoTags[key] ?? [];
       final detections = photoAllDetections[key] ?? [];
+      final scanVer = photoScanVersions[key];
 
       AssetEntity? asset;
       DateTime? dateTime;
@@ -1166,6 +1169,7 @@ class GalleryScreenState extends State<GalleryScreen>
           allDetections: detections,
           dateTime: dateTime,
           asset: asset,
+          scanVersion: scanVer,
         ),
       );
     }
@@ -1211,21 +1215,27 @@ class GalleryScreenState extends State<GalleryScreen>
       developer.log('Total photos in gallery: ${imageUrls.length}');
 
       // Load tags in background (non-blocking) and refresh UI when done
-      _loadTags().then((_) {
+      _loadTags().then((_) async {
         if (mounted) {
           setState(() {}); // Refresh to show loaded tags
           developer.log('📂 Tags loaded in background, UI refreshed');
 
-          // Check if rescan is needed due to updated classification logic
-          _checkForRescanNeeded();
+          // FIX #7: Check if rescan is needed BEFORE starting auto-scan
+          // This prevents race condition where scan starts then gets interrupted by rescan dialog
+          final needsRescan = await _checkForRescanNeeded();
+
+          // Only start auto-scan if no rescan is needed
+          // (rescan flow will handle its own scanning after clearing)
+          if (!needsRescan && mounted) {
+            Future.microtask(() => _startAutoScanIfNeeded());
+          }
         }
       });
 
       // Sync tags from server in background (non-blocking) if available
       _syncTagsFromServerInBackground();
 
-      // Start auto scan in background (don't block)
-      Future.microtask(() => _startAutoScanIfNeeded());
+      // FIX #7: Removed auto-scan from here - it's now triggered after rescan check above
       _startAutoScanRetryTimer();
       _startStuckPhotosRecheckTimer(); // Periodic re-check for unscanned photos
     } catch (e, stack) {
@@ -1475,6 +1485,17 @@ class GalleryScreenState extends State<GalleryScreen>
                       );
                     } else if (_scanPreparing) {
                       liveMessage = 'Preparing to scan...';
+                      icon = const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      );
+                    } else if (_clearingTags) {
+                      // FIX #3: Show status when removing tags for rescan
+                      liveMessage = 'Removing tags for rescan...';
                       icon = const SizedBox(
                         width: 14,
                         height: 14,
@@ -1916,22 +1937,23 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Check if photos need to be rescanned due to updated classification logic
   /// Shows a dialog to the user if rescan is recommended
+  /// Returns true if rescan is needed (caller should NOT start auto-scan)
   bool _hasShownRescanDialog = false;
 
-  Future<void> _checkForRescanNeeded() async {
+  Future<bool> _checkForRescanNeeded() async {
     // Only show once per session
-    if (_hasShownRescanDialog) return;
+    if (_hasShownRescanDialog) return false;
 
     // Check if we have any scanned photos
     if (photoTags.isEmpty) {
       // No photos scanned yet, save current version and return
       await TagStore.saveScanVersion();
-      return;
+      return false;
     }
 
     // Check if rescan is needed
     final needsRescan = await TagStore.needsRescanForNewLogic();
-    if (!needsRescan) return;
+    if (!needsRescan) return false;
 
     _hasShownRescanDialog = true;
 
@@ -1943,7 +1965,7 @@ class GalleryScreenState extends State<GalleryScreen>
     final savedVersion = await TagStore.getSavedScanVersion();
     final changes = TagStore.getScanVersionChanges(savedVersion);
 
-    if (!mounted) return;
+    if (!mounted) return false;
 
     // Show dialog after a short delay to let gallery settle
     Future.delayed(const Duration(milliseconds: 500), () {
@@ -2003,6 +2025,9 @@ class GalleryScreenState extends State<GalleryScreen>
         }
       });
     });
+
+    // Return true to indicate rescan is needed - caller should NOT start auto-scan
+    return true;
   }
 
   /// Clear all tags and start fresh rescan
@@ -2783,6 +2808,25 @@ class GalleryScreenState extends State<GalleryScreen>
 
       batchStart += batchSize;
       batchesProcessed++;
+
+      // Check for new photos added during scan (every 5 batches to minimize overhead)
+      if (batchesProcessed % 5 == 0 && _pendingScanQueue.isNotEmpty) {
+        developer.log(
+          '📋 Found ${_pendingScanQueue.length} queued photos mid-scan - adding to current batch',
+        );
+        final queuedUrls = _pendingScanQueue.map((id) => 'local:$id').toList();
+        urls.addAll(queuedUrls);
+        _pendingScanQueue.clear();
+        // Update scan total to reflect new photos
+        if (mounted) {
+          setState(() {
+            _scanTotal = urls.length;
+          });
+        }
+        _updateCachedLocalPhotoCount();
+        developer.log('📊 Updated scan total to ${urls.length}');
+      }
+
       // Note: Throttling is now handled dynamically via RAM and CPU monitoring
       // No fixed cooldown intervals - speed adjusts based on real-time resource usage
     }
@@ -3065,6 +3109,7 @@ class GalleryScreenState extends State<GalleryScreen>
                 // Update in-memory tags and detections
                 photoTags[basename] = tags;
                 photoAllDetections[basename] = allDetections;
+                photoScanVersions[basename] = TagStore.scanMinorVersion;
                 batchTagsToSave[photoID] = tags;
                 batchDetectionsToSave[photoID] = allDetections;
                 // Update scanned count notifier for live UI updates
@@ -3147,9 +3192,12 @@ class GalleryScreenState extends State<GalleryScreen>
         }
 
         // Process with local ML Kit
+        // Use reduced concurrency when app is in background to reduce heat
+        final isBackground = !ScanForegroundService.isAppInForeground;
         final localResults = await TaggingServiceFactory.tagImageBatch(
           items: taggingInputs,
           preferLocal: true,
+          isBackground: isBackground,
         );
 
         final uploadEndTime = DateTime.now();
@@ -3175,6 +3223,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
           photoTags[basename] = tags;
           photoAllDetections[basename] = allDetections;
+          photoScanVersions[basename] = TagStore.scanMinorVersion;
           batchTagsToSave[photoID] = tags;
           batchDetectionsToSave[photoID] = allDetections;
           _scannedCountNotifier.value = photoTags.length;
@@ -3465,6 +3514,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
         // Auto-apply the improvement
         photoTags[basename] = overrideTags;
+        photoScanVersions[basename] = TagStore.scanMinorVersion;
         await TagStore.saveLocalTags(photoID, overrideTags);
 
         // Track for animation
@@ -4767,7 +4817,44 @@ class GalleryScreenState extends State<GalleryScreen>
     final sorted = tagCounts.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
-    return sorted;
+    // ISSUE #5 FIX: Prioritize main categories + Unscanned at the top
+    // Order: People, Animals, Food, Scenery, Documents, Unscanned, then rest by popularity
+    const priorityCategories = [
+      'people',
+      'animals',
+      'food',
+      'scenery',
+      'documents',
+      'unscanned',
+    ];
+
+    final prioritized = <MapEntry<String, int>>[];
+    final rest = <MapEntry<String, int>>[];
+
+    // Add priority categories first (in order)
+    for (final cat in priorityCategories) {
+      final match = sorted.firstWhereOrNull((e) => e.key == cat);
+      if (match != null) {
+        // Use actual count or 1 if not present (for Unscanned which might not be counted)
+        prioritized.add(match);
+      } else if (cat == 'unscanned') {
+        // FIX #1: Only include Unscanned if there are actually unscanned photos
+        final hasUnscannedPhotos =
+            _scannedCountNotifier.value < _cachedLocalPhotoCount;
+        if (hasUnscannedPhotos) {
+          prioritized.add(const MapEntry('unscanned', 0));
+        }
+      }
+    }
+
+    // Add rest sorted by popularity
+    for (final entry in sorted) {
+      if (!priorityCategories.contains(entry.key)) {
+        rest.add(entry);
+      }
+    }
+
+    return [...prioritized, ...rest];
   }
 
   /// Get search suggestions based on existing tags, sorted by popularity
@@ -4932,6 +5019,12 @@ class GalleryScreenState extends State<GalleryScreen>
     final detectionsMap = await TagStore.loadAllDetectionsMap(photoIDs);
     developer.log('📂 Loaded ${detectionsMap.length} detections from storage');
 
+    // Load all scan versions in a single batch operation
+    final scanVersionsMap = await TagStore.loadAllScanVersionsMap(photoIDs);
+    developer.log(
+      '📂 Loaded ${scanVersionsMap.length} scan versions from storage',
+    );
+
     // Map back to basename keys
     int loaded = 0;
     for (final url in imageUrls) {
@@ -4948,6 +5041,9 @@ class GalleryScreenState extends State<GalleryScreen>
       }
       if (detectionsMap.containsKey(photoID)) {
         photoAllDetections[key] = detectionsMap[photoID]!;
+      }
+      if (scanVersionsMap.containsKey(photoID)) {
+        photoScanVersions[key] = scanVersionsMap[photoID]!;
       }
     }
     developer.log('📂 Mapped $loaded tags to photoTags map');
@@ -5016,6 +5112,7 @@ class GalleryScreenState extends State<GalleryScreen>
           final photoID = PhotoId.canonicalId(url);
           if (tagsToSave.containsKey(photoID)) {
             photoTags[key] = tagsToSave[photoID]!;
+            photoScanVersions[key] = TagStore.scanMinorVersion;
           }
           if (detectionsToSave.containsKey(photoID)) {
             photoAllDetections[key] = detectionsToSave[photoID]!;

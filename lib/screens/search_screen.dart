@@ -25,29 +25,24 @@ class _SearchScreenState extends State<SearchScreen> {
   List<String> _filteredSuggestions = [];
   List<String> _allAvailableTags = []; // Tags fetched from server
   bool _loadingTags = true;
+  bool _userTappedSearch = false; // ISSUE #7: Only show dropdown after user tap
 
   @override
   void initState() {
     super.initState();
-    _searchFocus.requestFocus();
+    // Don't auto-request focus - let user tap to show dropdown
     _searchController.addListener(_onSearchChanged);
-    // Show suggestions when focus changes
-    _searchFocus.addListener(() {
-      if (_searchFocus.hasFocus && _searchController.text.isEmpty) {
-        _onSearchChanged(); // Trigger to show top suggestions
-      }
-    });
+    // ISSUE #7 FIX: Removed focus listener that auto-showed suggestions
+    // Dropdown now only appears after user types or taps the search field
     _fetchAvailableTags();
   }
 
   Future<void> _fetchAvailableTags() async {
     setState(() {
       // Use the actual current tags passed from gallery (sorted by popularity)
+      // FIX #6: Only show tags that exist in the gallery
       _allAvailableTags = List.from(widget.recommendedTags);
-      // Add "Unscanned" for searching untagged photos if not already present
-      if (!_allAvailableTags.contains('Unscanned')) {
-        _allAvailableTags.insert(0, 'Unscanned');
-      }
+      // FIX #1: Don't add "Unscanned" - it's passed from gallery only if unscanned photos exist
       // Filter out already selected tags
       if (widget.excludeTags != null) {
         _allAvailableTags = _allAvailableTags
@@ -188,6 +183,8 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        // FIX: Prevent keyboard from resizing the layout and shrinking dropdown
+        resizeToAvoidBottomInset: false,
         body: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -224,6 +221,15 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: TextField(
                           controller: _searchController,
                           focusNode: _searchFocus,
+                          // ISSUE #7: Show dropdown when user taps the field
+                          onTap: () {
+                            if (!_userTappedSearch) {
+                              setState(() {
+                                _userTappedSearch = true;
+                                _onSearchChanged(); // Show suggestions after tap
+                              });
+                            }
+                          },
                           style: GoogleFonts.poppins(
                             color:
                                 Theme.of(context).brightness == Brightness.dark
@@ -248,23 +254,29 @@ class _SearchScreenState extends State<SearchScreen> {
                               Icons.search,
                               color: Colors.lightBlue.shade300,
                             ),
-                            suffixIcon:
-                                (_searchController.text.isNotEmpty ||
-                                    _selectedTags.isNotEmpty)
+                            suffixIcon: _selectedTags.isNotEmpty
+                                // FIX #2: Show search button instead of X when tags are selected
                                 ? IconButton(
                                     icon: Icon(
-                                      Icons.close,
+                                      Icons.search,
                                       color: Colors.lightBlue.shade300,
                                     ),
-                                    onPressed: () {
-                                      setState(() {
-                                        _searchController.clear();
-                                        _selectedTags.clear();
-                                        _onSearchChanged();
-                                      });
-                                    },
+                                    onPressed: _performSearch,
                                   )
-                                : null,
+                                : (_searchController.text.isNotEmpty
+                                    ? IconButton(
+                                        icon: Icon(
+                                          Icons.close,
+                                          color: Colors.lightBlue.shade300,
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            _searchController.clear();
+                                            _onSearchChanged();
+                                          });
+                                        },
+                                      )
+                                    : null),
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
@@ -299,8 +311,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                 )
               // Dropdown suggestions (shows popular when empty, filtered when typing)
-              // Fix #8: Made dropdown floating with scrollbar, can cover more of page
-              else if (_filteredSuggestions.isNotEmpty)
+              // ISSUE #7 FIX: Only show dropdown after user taps the search field
+              else if (_userTappedSearch && _filteredSuggestions.isNotEmpty)
                 Flexible(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -321,9 +333,9 @@ class _SearchScreenState extends State<SearchScreen> {
                         ),
                       ],
                     ),
-                    // Allow dropdown to expand up to 70% of screen height
+                    // ISSUE #6 FIX: Increased dropdown height to 70% of screen (was 50%)
                     constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.5,
+                      maxHeight: MediaQuery.of(context).size.height * 0.7,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

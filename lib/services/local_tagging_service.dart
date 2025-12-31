@@ -218,14 +218,19 @@ class LocalTaggingService {
         }
       }
       if (_isAnimalLabel(text)) {
-        categories.add('animals');
-        if (confidence > bestAnimalConfidence) {
-          bestAnimalConfidence = confidence;
-          bestAnimalLabel = text;
+        // FIX: Skip animal detection for pattern/texture labels
+        if (_isNonAnimalPattern(text)) {
+          developer.log('🎨 Skipping animal for pattern/texture: "$text"');
+        } else {
+          categories.add('animals');
+          if (confidence > bestAnimalConfidence) {
+            bestAnimalConfidence = confidence;
+            bestAnimalLabel = text;
+          }
+          // Track all detected animal types with their confidences for smart deduplication
+          detectedAnimalTypes.add(text);
+          animalConfidences[text] = confidence;
         }
-        // Track all detected animal types with their confidences for smart deduplication
-        detectedAnimalTypes.add(text);
-        animalConfidences[text] = confidence;
       }
       // Fix #9: Check for fur/animal indicators early (needed for tier decision)
       if (_isAnimalIndicator(text)) {
@@ -270,7 +275,8 @@ class LocalTaggingService {
         }
       }
       // Scenery detection - track if we have strong vs weak labels
-      if (_isSceneryLabel(text)) {
+      // FIX #14: Require higher confidence for scenery (sky often low confidence)
+      if (_isSceneryLabel(text) && confidence >= 0.55) {
         if (!_isWeakSceneryLabel(text)) {
           hasOnlyWeakScenery = false;
         }
@@ -303,13 +309,23 @@ class LocalTaggingService {
     } else if (hasAmbiguousBodyPart &&
         !hasFurOrAnimalIndicator &&
         tier2Count >= 1) {
-      // Ambiguous parts (ear, eye) + at least one clothing/action = people
+      // Ambiguous parts (ear, eye, eyelash) + at least one clothing/action = people
       shouldAddPeople = true;
       tierReason = 'ambiguous body part + Tier 2 context';
-    } else if (tier2Count >= 2) {
-      // Tier 2: Need 2+ clothing/accessories/actions (e.g., jeans + smile)
+    } else if (tier2Count >= 2 && hasAmbiguousBodyPart) {
+      // ISSUE #8, #10 FIX: Tier2 alone is NOT enough - need body evidence
+      // 2+ tier2 items (clothing) + ambiguous body part = likely people
       shouldAddPeople = true;
-      tierReason = 'Tier 2 combo ($tier2Count items)';
+      tierReason = 'Tier 2 combo + body part ($tier2Count items)';
+    } else if (tier2Count >= 3 && !hasFurOrAnimalIndicator) {
+      // 3+ tier2 items without animal indicators = very likely people
+      shouldAddPeople = true;
+      tierReason = 'Strong Tier 2 combo ($tier2Count items, no animal)';
+    } else if (hasAmbiguousBodyPart && !hasFurOrAnimalIndicator) {
+      // FIX: Ambiguous body parts (ear, leg, foot, body) without fur = likely human
+      // Animals would have fur/paw/tail indicators alongside these
+      shouldAddPeople = true;
+      tierReason = 'ambiguous body part without fur/animal indicators';
     } else if (tier2Count == 1 && hasStrongPersonLabel) {
       // 1 tier2 item + strong person label = people
       shouldAddPeople = true;
@@ -343,6 +359,7 @@ class LocalTaggingService {
         hasStrongPeopleContext = true;
       }
       // Check for body parts (could be human or animal)
+      // ISSUE #2 & #3 FIX: Extended body parts for better people detection
       if (text.contains('hand') ||
           text.contains('finger') ||
           text.contains('arm') ||
@@ -353,18 +370,36 @@ class LocalTaggingService {
           text.contains('torso') ||
           text.contains('body') ||
           text.contains('skin') ||
-          text.contains('muscle')) {
+          text.contains('muscle') ||
+          text.contains('chest') ||
+          text.contains('neck') ||
+          text.contains('waist') ||
+          text.contains('hip') ||
+          text.contains('thigh') ||
+          text.contains('sitting') ||
+          text.contains('standing') ||
+          text.contains('walking') ||
+          text.contains('running')) {
         hasBodyParts = true;
       }
     }
     // FOOD PRIORITY FIX: Don't add people from weak context (celebration/party) when strong food detected
     // This prevents cake photos being tagged as "people" just because of "celebration" label
+    // ISSUE #1 FIX: Only add people from context if we also have actual body/tier evidence
+    // Just having "party" or "christmas" alone shouldn't make it a people photo
+    // FIX: Event/party labels in tier2 shouldn't count as evidence - need ACTUAL body parts or tier1
+    final hasBodyOrTierEvidence = hasBodyParts || hasTier1Label;
     if (hasStrongPeopleContext &&
+        hasBodyOrTierEvidence &&
         !categories.contains('people') &&
         !hasStrongFoodLabel) {
       categories.add('people');
       developer.log(
-        '👤 Added people category from context (beard/fun/event/crew/team/etc)',
+        '👤 Added people category from context + body evidence (beard/fun/event/crew/team/etc)',
+      );
+    } else if (hasStrongPeopleContext && !hasBodyOrTierEvidence) {
+      developer.log(
+        '🚫 Skipped people from context alone - no body/tier evidence (party/event without people)',
       );
     } else if (hasStrongPeopleContext && hasStrongFoodLabel) {
       developer.log(
@@ -504,8 +539,57 @@ class LocalTaggingService {
       }
     }
 
+    // FIX #8: Room with furniture should be Other, not document
+    // If we detect room/furniture/indoor labels, it's not a document
+    final hasRoomOrFurniture = allDetections.any((d) {
+      final lower = d.toLowerCase();
+      return lower.contains('room') ||
+          lower.contains('furniture') ||
+          lower.contains('couch') ||
+          lower.contains('sofa') ||
+          lower.contains('chair') ||
+          lower.contains('table') ||
+          lower.contains('bed') ||
+          lower.contains('living') ||
+          lower.contains('bedroom') ||
+          lower.contains('kitchen') ||
+          lower.contains('interior');
+    });
+    if (categories.contains('document') && hasRoomOrFurniture) {
+      categories.remove('document');
+      developer.log('🔄 Removed document - room/furniture detected (should be Other)');
+    }
+
     // Priority order: people > animals > food > document > scenery
     // If person is detected, that MUST be the main category (even if document/screenshot also detected)
+
+    // FIX #9: Baby/child in plush/costume should be People, not Animals
+    // If we detect baby/child/infant AND costume/plush/stuffed, prioritize people
+    final hasBabyOrChild = allDetections.any((d) {
+      final lower = d.toLowerCase();
+      return lower.contains('baby') ||
+          lower.contains('infant') ||
+          lower.contains('toddler') ||
+          lower.contains('child') ||
+          lower.contains('kid');
+    });
+    final hasCostumeOrPlush = allDetections.any((d) {
+      final lower = d.toLowerCase();
+      return lower.contains('costume') ||
+          lower.contains('plush') ||
+          lower.contains('stuffed') ||
+          lower.contains('toy') ||
+          lower.contains('mascot') ||
+          lower.contains('onesie');
+    });
+    if (hasBabyOrChild && hasCostumeOrPlush && categories.contains('animals')) {
+      categories.remove('animals');
+      if (!categories.contains('people')) {
+        categories.add('people');
+      }
+      developer.log('👶 Baby/child in costume - prioritizing People over Animals');
+    }
+
     final prioritized = <String>[];
     if (categories.contains('people')) prioritized.add('people');
     if (categories.contains('animals')) prioritized.add('animals');
@@ -533,8 +617,9 @@ class LocalTaggingService {
 
     // ANIMAL DEDUPLICATION: Smart logic for single vs multiple animals
     // - If illustration/cartoon → likely 1 animal, keep best only
-    // - If confidence gap is large (>15%) → likely 1 animal, keep best only
-    // - If confidences are similar → likely multiple animals, keep all
+    // - If confidence gap is large (>10%) → likely 1 animal, keep best only
+    // - If only cat+dog detected (common misidentification) → keep best only
+    // - If confidences are similar AND different species → likely multiple animals, keep all
     if (detectedAnimalTypes.length > 1) {
       bool shouldDeduplicate = false;
       String dedupeReason = '';
@@ -544,7 +629,15 @@ class LocalTaggingService {
         shouldDeduplicate = true;
         dedupeReason = 'illustration detected';
       }
-      // Case 2: Large confidence gap - likely 1 animal misidentified
+      // Case 2: Only cat and dog detected - very common misidentification
+      // FIX #13: If ONLY these two, keep best (ML Kit often sees both in single pet)
+      else if (detectedAnimalTypes.length == 2 &&
+          detectedAnimalTypes.contains('cat') &&
+          detectedAnimalTypes.contains('dog')) {
+        shouldDeduplicate = true;
+        dedupeReason = 'cat+dog only (common misidentification)';
+      }
+      // Case 3: Large confidence gap - likely 1 animal misidentified
       else if (bestAnimalLabel != null) {
         // Find second-best confidence
         double secondBestConfidence = 0.0;
@@ -556,9 +649,9 @@ class LocalTaggingService {
             secondBestLabel = entry.key;
           }
         }
-        // If gap is >15%, likely 1 animal
+        // If gap is >10%, likely 1 animal
         final confidenceGap = bestAnimalConfidence - secondBestConfidence;
-        if (confidenceGap > 0.15) {
+        if (confidenceGap > 0.10) {
           shouldDeduplicate = true;
           dedupeReason =
               'confidence gap ${(confidenceGap * 100).toInt()}% ($bestAnimalLabel: ${(bestAnimalConfidence * 100).toInt()}% vs ${secondBestLabel ?? "?"}: ${(secondBestConfidence * 100).toInt()}%)';
@@ -896,8 +989,102 @@ class LocalTaggingService {
       'botanical',
     ];
 
-    // Check exclusions first - plants are NOT animals
+    // EXCLUSIONS: Objects/vehicles/rooms are NOT animals
+    // FIX #11, #12: These were incorrectly triggering animal detection
+    const objectExclusions = [
+      'vehicle',
+      'car',
+      'truck',
+      'bus',
+      'motorcycle',
+      'bicycle',
+      'tire',
+      'wheel',
+      'desk',
+      'room',
+      'office',
+      'building',
+      'house',
+      'screenshot',
+      'screen',
+      'paper',
+      'document',
+      'selfie',
+      'portrait',
+      'person',
+      'human',
+      'people',
+      'man',
+      'woman',
+      'boy',
+      'girl',
+      'face',
+      'furniture',
+      'chair',
+      'table',
+      'couch',
+      'bed',
+      'cabinet',
+      'shelf',
+      'food',
+      'meal',
+      'dish',
+      'plate',
+      'clothing',
+      'shirt',
+      'dress',
+      'poster',
+      'art',
+      'painting',
+      'drawing',
+      // FIX #15: Human body parts should NOT trigger animals
+      'hand',
+      'finger',
+      'nail',
+      'skin',
+      'flesh',
+      'arm',
+      'leg',
+      'foot',
+      'toe',
+      'body',
+      'torso',
+      'chest',
+      'shoulder',
+      'neck',
+      'muscle',
+      'hair',
+      'beard',
+      'eyelash',
+      'eyebrow',
+      'lip',
+      'nose',
+      'ear',
+      'eye',
+      // FIX #16: Objects/materials that are NOT animals
+      'musical instrument',
+      'instrument',
+      'guitar',
+      'piano',
+      'drum',
+      'violin',
+      'metal',
+      'steel',
+      'iron',
+      'aluminum',
+      'plastic',
+      'glass',
+      'wood',
+      'stone',
+      'concrete',
+      'brick',
+    ];
+
+    // Check exclusions first
     if (plantExclusions.any((k) => label.contains(k))) {
+      return false;
+    }
+    if (objectExclusions.any((k) => label.contains(k))) {
       return false;
     }
 
@@ -1430,7 +1617,7 @@ class LocalTaggingService {
       'page',
       'article',
       'card',
-      'poster',
+      // Note: 'poster' removed - often decorative/artistic, not a document
       'sign',
       'banner',
       'menu',
@@ -1626,7 +1813,7 @@ class LocalTaggingService {
       'mustache',
       'moustache',
       'eyebrow',
-      'eyelash',
+      // ISSUE #9 FIX: Removed 'eyelash' - moved to ambiguous (could be product photo)
       'forehead',
       'chin',
       'cheek',
@@ -1660,12 +1847,13 @@ class LocalTaggingService {
     return tier1Keywords.any((k) => label.contains(k));
   }
 
-  /// Ambiguous body parts - could be human OR animal
+  /// Ambiguous body parts - could be human OR animal, or product photos
   /// Need additional context (Tier 2 or animal indicator) to decide
   static bool _isAmbiguousBodyPart(String label) {
     const ambiguousKeywords = [
       'ear',
       'eye',
+      'eyelash', // ISSUE #9: Moved from tier1 - eyelash alone could be cosmetics/product photo
       'nose',
       'mouth',
       'lip',
@@ -1829,5 +2017,32 @@ class LocalTaggingService {
       'tentacle',
     ];
     return animalIndicators.any((k) => label.contains(k));
+  }
+
+  /// Labels that should NOT trigger animal detection (textures/patterns)
+  /// FIX: Pattern/texture photos were incorrectly tagged as animals
+  static bool _isNonAnimalPattern(String label) {
+    const patternExclusions = [
+      'pattern',
+      'texture',
+      'fabric',
+      'textile',
+      'material',
+      'paper',
+      'wallpaper',
+      'carpet',
+      'rug',
+      'design',
+      'print',
+      'stripe',
+      'polka',
+      'plaid',
+      'checkered',
+      'abstract',
+      'geometric',
+      'mosaic',
+      'tile',
+    ];
+    return patternExclusions.any((k) => label.contains(k));
   }
 }
