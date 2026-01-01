@@ -1,13 +1,13 @@
 {
   "appVersion": "0.4.0-dev",
-  "buildNumber": 0,
-  "scanLogicVersion": 10,
-  "lastUpdated": "2026-01-01T18:36:00",
+  "buildNumber": 1,
+  "scanLogicVersion": 11,
+  "lastUpdated": "2026-01-01T20:56:00",
   "changes": [
-    "Simplified versioning: app version + scan logic version",
-    "Scanning progress: 'Preparing to scan...' instead of 0%",
-    "'Almost done' instead of 'Final touches'",
-    "Orange badge always (no grey state)",
+    "Hierarchical search taxonomy (200+ terms)",
+    "Word-boundary matching prevents false positives",
+    "Face detection fallback for missed group photos",
+    "Lower 70% confidence threshold for food items",
     "Category quick-select buttons in search"
   ]
 }

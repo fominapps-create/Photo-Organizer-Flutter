@@ -4827,58 +4827,745 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Search synonyms for better tag matching
   /// Maps common search terms to related ML Kit labels
+  /// HIERARCHICAL SEARCH TAXONOMY
+  /// =============================
+  /// Principle: Superclass searches find subclasses, but NOT vice versa.
+  /// - "food" → finds pizza, sushi, cake (superclass expands DOWN)
+  /// - "pizza" → finds only pizza, NOT sushi (subclass stays specific)
+  ///
+  /// Each entry maps a search term to terms it should ALSO match.
+  /// Subclasses only expand to very close variants (pizza → pizzas, pie)
   static const Map<String, List<String>> _searchSynonyms = {
-    // Electronics/Screens
-    'tv': ['television', 'monitor', 'screen', 'display'],
-    'television': ['tv', 'monitor', 'screen', 'display'],
-    'monitor': ['tv', 'television', 'screen', 'display', 'computer'],
-    'screen': ['tv', 'television', 'monitor', 'display', 'laptop'],
-    'display': ['tv', 'television', 'monitor', 'screen'],
-    'computer': ['laptop', 'monitor', 'keyboard', 'screen', 'pc'],
-    'laptop': ['computer', 'notebook', 'screen', 'keyboard'],
-    'phone': ['mobile', 'smartphone', 'cellphone', 'iphone', 'android'],
-    'mobile': ['phone', 'smartphone', 'cellphone'],
+    // ============ ANIMALS HIERARCHY ============
+    // Top: animal → pet/wildlife → specific animals → breeds
+    'animal': [
+      'pet',
+      'wildlife',
+      'mammal',
+      'reptile',
+      'bird',
+      'fish',
+      'insect',
+      'dog',
+      'cat',
+      'horse',
+      'cow',
+      'sheep',
+      'goat',
+      'pig',
+      'lion',
+      'tiger',
+      'elephant',
+      'bear',
+      'wolf',
+      'fox',
+      'deer',
+    ],
+    'pet': [
+      'dog',
+      'puppy',
+      'cat',
+      'kitten',
+      'bird',
+      'parrot',
+      'hamster',
+      'rabbit',
+      'bunny',
+      'fish',
+      'goldfish',
+      'turtle',
+      'guinea pig',
+    ],
+    'wildlife': [
+      'lion',
+      'tiger',
+      'elephant',
+      'bear',
+      'wolf',
+      'fox',
+      'deer',
+      'zebra',
+      'giraffe',
+      'monkey',
+      'gorilla',
+      'leopard',
+      'cheetah',
+      'rhino',
+      'hippo',
+      'buffalo',
+      'moose',
+      'elk',
+      'antelope',
+    ],
+    // Specific animals - only expand to close variants, NOT to siblings
+    'dog': [
+      'puppy',
+      'canine',
+      'hound',
+      'poodle',
+      'terrier',
+      'retriever',
+      'bulldog',
+      'beagle',
+    ],
+    'puppy': ['dog'],
+    'cat': ['kitten', 'feline', 'tabby', 'siamese', 'persian'],
+    'kitten': ['cat'],
+    'bird': [
+      'parrot',
+      'sparrow',
+      'pigeon',
+      'crow',
+      'eagle',
+      'owl',
+      'duck',
+      'chicken',
+    ],
+    'horse': ['pony', 'stallion', 'mare', 'foal'],
+    'fish': ['goldfish', 'salmon', 'tuna', 'tropical fish'],
 
-    // Animals
-    'dog': ['puppy', 'canine', 'pet', 'hound'],
-    'puppy': ['dog', 'canine', 'pet'],
-    'cat': ['kitten', 'feline', 'pet'],
-    'kitten': ['cat', 'feline', 'pet'],
-    'bird': ['parrot', 'sparrow', 'pigeon', 'crow'],
-
-    // Food
+    // ============ FOOD HIERARCHY ============
+    // Top: food → cuisine types → specific dishes
     'food': [
+      'cuisine',
       'meal',
       'dish',
-      'cuisine',
       'snack',
+      'dessert',
       'breakfast',
       'lunch',
       'dinner',
+      'pizza',
+      'pasta',
+      'sushi',
+      'burger',
+      'sandwich',
+      'salad',
+      'soup',
+      'steak',
+      'cake',
+      'pie',
+      'cookie',
+      'ice cream',
+      'chocolate',
+      'fruit',
+      'vegetable',
+      'bread',
+      'rice',
+      'noodle',
+      'seafood',
+      'meat',
+      'chicken',
+      'beef',
+      'pork',
     ],
-    'meal': ['food', 'dish', 'cuisine'],
-    'drink': ['beverage', 'coffee', 'tea', 'juice', 'water'],
-    'coffee': ['drink', 'beverage', 'cafe', 'espresso'],
+    'cuisine': [
+      'pizza',
+      'pasta',
+      'sushi',
+      'burger',
+      'taco',
+      'curry',
+      'ramen',
+      'pho',
+      'steak',
+      'seafood',
+      'barbecue',
+      'grill',
+      'roast',
+    ],
+    'meal': ['breakfast', 'lunch', 'dinner', 'brunch', 'supper'],
+    'dessert': [
+      'cake',
+      'pie',
+      'cookie',
+      'ice cream',
+      'chocolate',
+      'pastry',
+      'donut',
+      'candy',
+    ],
+    'snack': ['chips', 'popcorn', 'nuts', 'crackers', 'pretzel'],
+    // Specific foods - only close variants
+    'pizza': ['pizzas', 'pie'],
+    'pasta': ['spaghetti', 'noodle', 'macaroni', 'lasagna'],
+    'sushi': ['sashimi', 'maki', 'nigiri'],
+    'burger': ['hamburger', 'cheeseburger'],
+    'cake': ['cupcake', 'birthday cake', 'wedding cake'],
+    'coffee': ['espresso', 'latte', 'cappuccino', 'mocha'],
+    'tea': ['green tea', 'black tea', 'herbal tea'],
+    // Drinks hierarchy
+    'drink': [
+      'beverage',
+      'coffee',
+      'tea',
+      'juice',
+      'water',
+      'soda',
+      'beer',
+      'wine',
+      'cocktail',
+    ],
+    'beverage': ['drink', 'coffee', 'tea', 'juice', 'water', 'soda'],
+    'alcohol': ['beer', 'wine', 'cocktail', 'whiskey', 'vodka', 'champagne'],
 
-    // People
-    'person': ['people', 'human', 'man', 'woman', 'face'],
-    'people': ['person', 'human', 'crowd', 'group'],
-    'face': ['person', 'people', 'portrait', 'selfie'],
-    'selfie': ['face', 'portrait', 'person'],
+    // ============ PEOPLE HIERARCHY ============
+    // Top: people → groups/individuals → specific roles
+    'people': [
+      'person',
+      'human',
+      'crowd',
+      'group',
+      'family',
+      'couple',
+      'team',
+      'man',
+      'woman',
+      'child',
+      'baby',
+      'adult',
+      'elder',
+    ],
+    'person': ['human', 'man', 'woman', 'child', 'adult'],
+    'family': ['parent', 'child', 'baby', 'grandparent', 'sibling'],
+    'crowd': ['group', 'audience', 'gathering', 'team'],
+    // Specific - no expansion to siblings
+    'man': ['male', 'gentleman', 'guy'],
+    'woman': ['female', 'lady', 'girl'],
+    'child': ['kid', 'boy', 'girl', 'toddler'],
+    'baby': ['infant', 'newborn', 'toddler'],
+    'selfie': ['portrait', 'headshot'],
+    'portrait': ['headshot', 'selfie', 'face'],
 
-    // Places/Scenes
-    'beach': ['ocean', 'sea', 'coast', 'sand', 'shore'],
-    'ocean': ['sea', 'beach', 'water', 'coast'],
-    'mountain': ['hill', 'peak', 'landscape', 'nature'],
-    'forest': ['woods', 'trees', 'nature', 'jungle'],
-    'city': ['urban', 'building', 'downtown', 'street'],
-    'building': ['architecture', 'house', 'structure', 'city'],
+    // ============ PLACES/SCENES HIERARCHY ============
+    // Top: scenery → nature/urban → specific places
+    'scenery': [
+      'landscape',
+      'nature',
+      'outdoor',
+      'view',
+      'panorama',
+      'beach',
+      'mountain',
+      'forest',
+      'lake',
+      'river',
+      'ocean',
+      'desert',
+      'city',
+      'street',
+      'park',
+      'garden',
+    ],
+    'nature': [
+      'beach',
+      'mountain',
+      'forest',
+      'lake',
+      'river',
+      'ocean',
+      'desert',
+      'waterfall',
+      'valley',
+      'hill',
+      'field',
+      'meadow',
+      'jungle',
+      'tree',
+      'flower',
+      'plant',
+      'sky',
+      'cloud',
+      'sunset',
+      'sunrise',
+    ],
+    'outdoor': [
+      'park',
+      'garden',
+      'beach',
+      'mountain',
+      'forest',
+      'camping',
+      'hiking',
+    ],
+    'urban': [
+      'city',
+      'street',
+      'building',
+      'downtown',
+      'skyline',
+      'architecture',
+    ],
+    // Specific places - close variants only
+    'beach': ['coast', 'shore', 'seaside', 'sand'],
+    'ocean': ['sea', 'marine', 'wave'],
+    'mountain': ['hill', 'peak', 'summit', 'alpine'],
+    'forest': ['woods', 'jungle', 'woodland'],
+    'lake': ['pond', 'reservoir'],
+    'city': ['downtown', 'metropolitan', 'skyline'],
+    'park': ['garden', 'playground'],
+    'sunset': ['sunrise', 'dusk', 'dawn', 'golden hour'],
 
-    // Vehicles
-    'car': ['automobile', 'vehicle', 'auto', 'sedan'],
-    'automobile': ['car', 'vehicle', 'auto'],
-    'bike': ['bicycle', 'cycle', 'motorcycle'],
-    'bicycle': ['bike', 'cycle'],
+    // ============ VEHICLES HIERARCHY ============
+    // Top: vehicle → type → specific
+    'vehicle': [
+      'car',
+      'truck',
+      'bus',
+      'motorcycle',
+      'bicycle',
+      'boat',
+      'airplane',
+      'train',
+      'automobile',
+      'van',
+      'suv',
+    ],
+    'car': ['automobile', 'sedan', 'coupe', 'convertible', 'suv', 'van'],
+    'truck': ['pickup', 'semi', 'lorry'],
+    'motorcycle': ['motorbike', 'scooter', 'moped'],
+    'bicycle': ['bike', 'cycle', 'cycling'],
+    'bike': ['bicycle', 'motorcycle'], // ambiguous - matches both
+    'boat': ['ship', 'yacht', 'sailboat', 'canoe', 'kayak'],
+    'airplane': ['plane', 'aircraft', 'jet', 'helicopter'],
+    'train': ['railway', 'locomotive', 'subway', 'metro'],
+
+    // ============ ELECTRONICS HIERARCHY ============
+    // Top: electronics → category → specific devices
+    'electronics': [
+      'computer',
+      'phone',
+      'tablet',
+      'tv',
+      'camera',
+      'gaming',
+      'laptop',
+      'desktop',
+      'monitor',
+      'keyboard',
+      'mouse',
+    ],
+    'computer': ['laptop', 'desktop', 'pc', 'mac', 'monitor', 'keyboard'],
+    'phone': ['smartphone', 'mobile', 'cellphone', 'iphone', 'android'],
+    'mobile': ['phone', 'smartphone', 'cellphone'],
+    'tv': ['television', 'monitor', 'screen', 'display'],
+    'television': ['tv', 'screen', 'display'],
+    'screen': ['display', 'monitor'],
+    'camera': ['dslr', 'lens', 'photography'],
+    'gaming': ['console', 'playstation', 'xbox', 'nintendo', 'controller'],
+
+    // ============ EVENTS/ACTIVITIES HIERARCHY ============
+    'event': [
+      'party',
+      'wedding',
+      'birthday',
+      'graduation',
+      'concert',
+      'festival',
+      'ceremony',
+      'celebration',
+      'holiday',
+      'vacation',
+    ],
+    'party': ['celebration', 'birthday party', 'gathering'],
+    'wedding': ['marriage', 'bride', 'groom', 'ceremony'],
+    'birthday': ['birthday party', 'birthday cake', 'celebration'],
+    'holiday': ['christmas', 'thanksgiving', 'easter', 'halloween', 'new year'],
+    'vacation': ['travel', 'trip', 'tourism', 'holiday'],
+    'festival': ['carnival', 'fair', 'celebration'],
+
+    // ============ DOCUMENTS HIERARCHY ============
+    'document': [
+      'paper',
+      'text',
+      'receipt',
+      'invoice',
+      'letter',
+      'note',
+      'book',
+      'screenshot',
+      'menu',
+      'ticket',
+      'certificate',
+      'form',
+      'newspaper',
+      'magazine',
+    ],
+    'screenshot': ['screen capture', 'screen shot'],
+    'receipt': ['invoice', 'bill', 'ticket'],
+    'book': ['magazine', 'newspaper', 'novel', 'textbook', 'reading'],
+    'newspaper': ['news', 'article', 'press'],
+    'magazine': ['journal', 'publication'],
+
+    // ============ OBJECTS HIERARCHY ============
+    'furniture': [
+      'chair',
+      'table',
+      'sofa',
+      'couch',
+      'bed',
+      'desk',
+      'cabinet',
+      'shelf',
+      'drawer',
+      'wardrobe',
+      'closet',
+      'bench',
+      'stool',
+      'ottoman',
+    ],
+    'chair': ['seat', 'stool', 'armchair'],
+    'table': ['desk', 'counter', 'countertop'],
+    'sofa': ['couch', 'loveseat', 'settee'],
+    'bed': ['mattress', 'bunk bed', 'crib'],
+
+    'clothing': [
+      'shirt',
+      'pants',
+      'dress',
+      'jacket',
+      'coat',
+      'shoes',
+      'hat',
+      'glasses',
+      'jeans',
+      'sweater',
+      'suit',
+      'tie',
+      'skirt',
+      'shorts',
+      'hoodie',
+    ],
+    'shirt': ['blouse', 't-shirt', 'polo', 'jersey'],
+    'pants': ['jeans', 'trousers', 'slacks', 'leggings'],
+    'dress': ['gown', 'skirt', 'frock'],
+    'jacket': ['coat', 'blazer', 'hoodie', 'sweater'],
+    'shoes': ['sneakers', 'boots', 'sandals', 'heels', 'loafers', 'footwear'],
+    'hat': ['cap', 'beanie', 'helmet', 'headwear'],
+    'glasses': ['sunglasses', 'eyeglasses', 'spectacles', 'shades'],
+
+    'jewelry': [
+      'ring',
+      'necklace',
+      'bracelet',
+      'earring',
+      'watch',
+      'pendant',
+      'chain',
+    ],
+    'watch': ['wristwatch', 'timepiece', 'clock'],
+
+    // ============ ART/CREATIVE HIERARCHY ============
+    'art': [
+      'painting',
+      'drawing',
+      'sculpture',
+      'artwork',
+      'illustration',
+      'sketch',
+      'mural',
+      'graffiti',
+      'portrait',
+      'abstract',
+      'canvas',
+    ],
+    'painting': ['canvas', 'oil painting', 'watercolor', 'acrylic', 'mural'],
+    'drawing': ['sketch', 'illustration', 'doodle', 'pencil'],
+    'sculpture': ['statue', 'carving', 'figurine', 'bust'],
+    'illustration': ['drawing', 'sketch', 'artwork', 'graphic'],
+
+    // ============ ARCHITECTURE HIERARCHY ============
+    'architecture': [
+      'building',
+      'house',
+      'church',
+      'castle',
+      'tower',
+      'bridge',
+      'monument',
+      'temple',
+      'mosque',
+      'cathedral',
+      'palace',
+      'skyscraper',
+    ],
+    'building': ['structure', 'edifice', 'construction'],
+    'house': ['home', 'residence', 'cottage', 'villa', 'mansion', 'apartment'],
+    'church': ['cathedral', 'chapel', 'temple', 'mosque', 'synagogue'],
+    'castle': ['palace', 'fortress', 'citadel', 'manor'],
+    'tower': ['skyscraper', 'spire', 'steeple', 'turret'],
+    'bridge': ['overpass', 'viaduct'],
+
+    // ============ WEATHER/SKY HIERARCHY ============
+    'weather': [
+      'rain',
+      'snow',
+      'storm',
+      'cloud',
+      'sunny',
+      'fog',
+      'wind',
+      'lightning',
+    ],
+    'sky': [
+      'cloud',
+      'sunset',
+      'sunrise',
+      'blue sky',
+      'night sky',
+      'stars',
+      'moon',
+      'sun',
+    ],
+    'cloud': ['clouds', 'cloudy', 'overcast'],
+    'rain': ['rainy', 'rainfall', 'drizzle', 'shower', 'wet'],
+    'snow': ['snowy', 'snowfall', 'blizzard', 'frost', 'ice', 'winter'],
+    'storm': ['thunder', 'lightning', 'tempest', 'hurricane', 'tornado'],
+    'fog': ['mist', 'haze', 'foggy', 'misty'],
+
+    // ============ WATER HIERARCHY ============
+    'water': [
+      'ocean',
+      'sea',
+      'lake',
+      'river',
+      'pool',
+      'waterfall',
+      'stream',
+      'pond',
+      'wave',
+      'splash',
+      'underwater',
+      'aquatic',
+    ],
+    'pool': ['swimming pool', 'swimming'],
+    'waterfall': ['cascade', 'falls'],
+
+    // ============ PLANTS/NATURE HIERARCHY ============
+    'plant': [
+      'flower',
+      'tree',
+      'grass',
+      'bush',
+      'shrub',
+      'garden',
+      'leaf',
+      'flora',
+    ],
+    'flower': [
+      'rose',
+      'tulip',
+      'daisy',
+      'sunflower',
+      'orchid',
+      'lily',
+      'blossom',
+      'petal',
+      'bloom',
+    ],
+    'tree': [
+      'oak',
+      'pine',
+      'palm',
+      'maple',
+      'forest',
+      'woods',
+      'branch',
+      'trunk',
+    ],
+    'garden': ['yard', 'lawn', 'backyard', 'greenhouse'],
+
+    // ============ SPORTS EXPANDED ============
+    'sport': [
+      'soccer',
+      'football',
+      'basketball',
+      'tennis',
+      'golf',
+      'swimming',
+      'running',
+      'cycling',
+      'skiing',
+      'surfing',
+      'baseball',
+      'volleyball',
+      'hockey',
+      'boxing',
+      'wrestling',
+      'martial arts',
+      'yoga',
+      'gym',
+    ],
+    'soccer': ['football', 'futbol', 'goal', 'pitch'],
+    'basketball': ['hoop', 'court', 'dunk'],
+    'tennis': ['racket', 'court', 'serve'],
+    'golf': ['club', 'course', 'putting', 'green', 'tee'],
+    'swimming': ['pool', 'swim', 'diving', 'swimmer'],
+    'running': ['jogging', 'marathon', 'sprint', 'track'],
+    'cycling': ['biking', 'bicycle', 'bike', 'cyclist'],
+    'skiing': ['snowboard', 'ski', 'slope', 'alpine'],
+    'surfing': ['surf', 'wave', 'board', 'surfer'],
+    'gym': ['workout', 'fitness', 'exercise', 'weights', 'training'],
+    'yoga': ['meditation', 'stretch', 'pose', 'mat'],
+
+    // ============ MUSIC HIERARCHY ============
+    'music': [
+      'instrument',
+      'concert',
+      'band',
+      'orchestra',
+      'singer',
+      'musician',
+      'guitar',
+      'piano',
+      'drums',
+      'violin',
+      'performance',
+    ],
+    'instrument': [
+      'guitar',
+      'piano',
+      'drums',
+      'violin',
+      'flute',
+      'saxophone',
+      'trumpet',
+      'keyboard',
+      'bass',
+      'cello',
+      'harp',
+      'ukulele',
+    ],
+    'guitar': ['acoustic guitar', 'electric guitar', 'bass guitar', 'ukulele'],
+    'piano': ['keyboard', 'keys', 'grand piano'],
+    'drums': ['drum', 'percussion', 'cymbal', 'drumstick'],
+    'concert': ['gig', 'show', 'performance', 'live music', 'festival'],
+
+    // ============ FARM/RURAL HIERARCHY ============
+    'farm': [
+      'barn',
+      'field',
+      'crop',
+      'harvest',
+      'tractor',
+      'livestock',
+      'cow',
+      'horse',
+      'pig',
+      'chicken',
+      'sheep',
+      'goat',
+    ],
+    'barn': ['stable', 'farmhouse', 'silo'],
+    'crop': ['wheat', 'corn', 'harvest', 'field'],
+    'livestock': [
+      'cattle',
+      'cow',
+      'pig',
+      'sheep',
+      'goat',
+      'chicken',
+      'poultry',
+    ],
+
+    // ============ MARINE ANIMALS (expanded) ============
+    'marine': [
+      'fish',
+      'whale',
+      'dolphin',
+      'shark',
+      'octopus',
+      'jellyfish',
+      'crab',
+      'lobster',
+      'seahorse',
+      'starfish',
+      'coral',
+      'seal',
+      'sea lion',
+    ],
+    'whale': ['orca', 'humpback', 'blue whale'],
+    'shark': ['great white', 'hammerhead', 'tiger shark'],
+    'dolphin': ['porpoise', 'orca'],
+
+    // ============ INSECTS/BUGS HIERARCHY ============
+    'insect': [
+      'butterfly',
+      'bee',
+      'ant',
+      'beetle',
+      'dragonfly',
+      'ladybug',
+      'moth',
+      'fly',
+      'mosquito',
+      'grasshopper',
+      'cricket',
+      'caterpillar',
+    ],
+    'bug': ['insect', 'beetle', 'ant', 'spider', 'cockroach'],
+    'butterfly': ['moth', 'caterpillar', 'monarch'],
+    'bee': ['bumblebee', 'honeybee', 'wasp', 'hornet'],
+    'spider': ['tarantula', 'web', 'arachnid'],
+
+    // ============ REPTILES/AMPHIBIANS ============
+    'reptile': [
+      'snake',
+      'lizard',
+      'turtle',
+      'crocodile',
+      'alligator',
+      'gecko',
+      'iguana',
+    ],
+    'snake': ['python', 'cobra', 'viper', 'boa', 'serpent'],
+    'lizard': ['gecko', 'iguana', 'chameleon', 'monitor'],
+    'turtle': ['tortoise', 'sea turtle'],
+    'frog': ['toad', 'tadpole', 'amphibian'],
+
+    // ============ WILD ANIMALS (expanded) ============
+    'lion': ['lioness', 'cub', 'pride'],
+    'tiger': ['cub', 'bengal', 'siberian'],
+    'elephant': ['tusks', 'trunk', 'herd'],
+    'bear': ['grizzly', 'polar bear', 'panda', 'cub'],
+    'wolf': ['pack', 'howl', 'coyote'],
+    'fox': ['vixen', 'kit'],
+    'deer': ['doe', 'fawn', 'buck', 'stag', 'elk', 'moose'],
+    'monkey': ['ape', 'chimpanzee', 'gorilla', 'orangutan', 'primate'],
+
+    // ============ ROOMS/INDOOR SPACES ============
+    'room': [
+      'bedroom',
+      'bathroom',
+      'kitchen',
+      'living room',
+      'dining room',
+      'office',
+    ],
+    'bedroom': ['bed', 'sleep', 'pillow', 'mattress'],
+    'bathroom': ['shower', 'bathtub', 'toilet', 'sink'],
+    'kitchen': ['stove', 'oven', 'refrigerator', 'cooking', 'chef'],
+    'office': ['desk', 'computer', 'work', 'workspace'],
+
+    // ============ TOYS/GAMES ============
+    'toy': [
+      'doll',
+      'teddy bear',
+      'lego',
+      'puzzle',
+      'ball',
+      'stuffed animal',
+      'action figure',
+    ],
+    'game': ['video game', 'board game', 'cards', 'gaming', 'console'],
+    'lego': ['blocks', 'bricks', 'building blocks'],
+
+    // ============ BODY PARTS (for portrait searches) ============
+    'face': ['eyes', 'nose', 'mouth', 'smile', 'expression'],
+    'eyes': ['eye', 'gaze', 'look'],
+    'smile': ['grin', 'laugh', 'happy', 'smiling'],
+    'hair': ['hairstyle', 'haircut', 'blonde', 'brunette', 'redhead'],
+    'hand': ['hands', 'fingers', 'grip', 'holding'],
   };
 
   /// Get synonyms for a search term
@@ -4887,9 +5574,114 @@ class GalleryScreenState extends State<GalleryScreen>
   }
 
   /// Minimum confidence threshold for a detection to be searchable
-  /// Set to 0.72 to filter out low-confidence false positives (e.g., dog on random objects)
-  // FIX #3: Objects below 86% confidence should not be searchable or suggested
+  /// Set to 0.86 to filter out low-confidence false positives (e.g., dog on random objects)
   static const double _searchConfidenceThreshold = 0.86;
+
+  /// Lower confidence threshold for food items (ML Kit is good at food detection)
+  static const double _foodConfidenceThreshold = 0.70;
+
+  /// Food-related labels that can use the lower confidence threshold
+  static const Set<String> _foodLabels = {
+    'food',
+    'meal',
+    'dish',
+    'cuisine',
+    'snack',
+    'dessert',
+    'breakfast',
+    'lunch',
+    'dinner',
+    'brunch',
+    'supper',
+    'pizza',
+    'pasta',
+    'sushi',
+    'burger',
+    'sandwich',
+    'salad',
+    'soup',
+    'steak',
+    'cake',
+    'pie',
+    'cookie',
+    'ice cream',
+    'chocolate',
+    'pastry',
+    'donut',
+    'candy',
+    'fruit',
+    'vegetable',
+    'bread',
+    'rice',
+    'noodle',
+    'seafood',
+    'meat',
+    'chicken',
+    'beef',
+    'pork',
+    'fish',
+    'egg',
+    'cheese',
+    'coffee',
+    'tea',
+    'juice',
+    'drink',
+    'beverage',
+    'wine',
+    'beer',
+    'apple',
+    'banana',
+    'orange',
+    'grape',
+    'strawberry',
+    'watermelon',
+    'tomato',
+    'potato',
+    'carrot',
+    'broccoli',
+    'taco',
+    'burrito',
+    'curry',
+    'ramen',
+    'pho',
+    'hot dog',
+    'hotdog',
+    'fries',
+    'chips',
+    'popcorn',
+    'nuts',
+    'crackers',
+    'pretzel',
+    'croissant',
+    'muffin',
+    'pancake',
+    'waffle',
+    'bento',
+  };
+
+  /// Check if a label matches a search term using word-boundary matching
+  /// This prevents "pet" from matching "petal", "carpet", "competition", etc.
+  /// Uses exact match for single words, word-boundary regex for multi-word labels
+  static bool _matchesSearchTerm(String label, String searchTerm) {
+    final labelLower = label.toLowerCase().trim();
+    final termLower = searchTerm.toLowerCase().trim();
+
+    // Exact match - most reliable
+    if (labelLower == termLower) return true;
+
+    // For multi-word labels, check if any word matches exactly
+    // e.g., "hot dog" should match search "dog" (the word "dog")
+    // but "petal" should NOT match "pet"
+    final labelWords = labelLower.split(RegExp(r'[\s_\-]+'));
+    if (labelWords.contains(termLower)) return true;
+
+    // Also check if search term is a multi-word phrase that matches
+    // e.g., searching "hot dog" should match label "hot dog"
+    final searchWords = termLower.split(RegExp(r'[\s_\-]+'));
+    if (searchWords.length > 1 && labelLower.contains(termLower)) return true;
+
+    return false;
+  }
 
   /// Parse a detection string that may contain confidence (format: "Label:0.72" or just "Label")
   /// Returns (label, confidence) tuple. If no confidence, returns 1.0 (assume high confidence)
@@ -4910,11 +5702,26 @@ class GalleryScreenState extends State<GalleryScreen>
   /// Check if a detection matches a search term with confidence filtering
   static bool _detectionMatchesSearch(String detection, String searchTerm) {
     final (label, confidence) = _parseDetectionWithConfidence(detection);
+    final labelLower = label.toLowerCase();
+
+    // Use lower threshold for food items (ML Kit is good at food detection)
+    final threshold = _foodLabels.contains(labelLower)
+        ? _foodConfidenceThreshold
+        : _searchConfidenceThreshold;
+
     // Only match if confidence is above threshold
-    if (confidence < _searchConfidenceThreshold) {
+    if (confidence < threshold) {
       return false;
     }
-    return label.toLowerCase().contains(searchTerm);
+    // Use word-boundary matching to prevent "pet" matching "petal"
+    return _matchesSearchTerm(label, searchTerm);
+  }
+
+  /// Get the appropriate confidence threshold for a label
+  static double _getConfidenceThreshold(String label) {
+    return _foodLabels.contains(label.toLowerCase())
+        ? _foodConfidenceThreshold
+        : _searchConfidenceThreshold;
   }
 
   // ============ TAG COUNT MANAGEMENT ============
@@ -4931,7 +5738,8 @@ class GalleryScreenState extends State<GalleryScreen>
     // Count object detections (with confidence filtering)
     for (final detection in detections) {
       final (label, confidence) = _parseDetectionWithConfidence(detection);
-      if (confidence >= _searchConfidenceThreshold) {
+      final threshold = _getConfidenceThreshold(label);
+      if (confidence >= threshold) {
         final tagLower = label.toLowerCase();
         _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
       }
@@ -4955,7 +5763,8 @@ class GalleryScreenState extends State<GalleryScreen>
     // Decrement object detections (with confidence filtering)
     for (final detection in detections) {
       final (label, confidence) = _parseDetectionWithConfidence(detection);
-      if (confidence >= _searchConfidenceThreshold) {
+      final threshold = _getConfidenceThreshold(label);
+      if (confidence >= threshold) {
         final tagLower = label.toLowerCase();
         final current = _tagCounts[tagLower] ?? 0;
         if (current > 1) {
@@ -4983,7 +5792,8 @@ class GalleryScreenState extends State<GalleryScreen>
     for (final entry in photoAllDetections.entries) {
       for (final detection in entry.value) {
         final (label, confidence) = _parseDetectionWithConfidence(detection);
-        if (confidence >= _searchConfidenceThreshold) {
+        final threshold = _getConfidenceThreshold(label);
+        if (confidence >= threshold) {
           final tagLower = label.toLowerCase();
           _tagCounts[tagLower] = (_tagCounts[tagLower] ?? 0) + 1;
         }
@@ -5117,7 +5927,8 @@ class GalleryScreenState extends State<GalleryScreen>
 
       return expandedTerms.any(
         (searchTerm) =>
-            tags.any((t) => t.toLowerCase().contains(searchTerm)) ||
+            // Use word-boundary matching to prevent "pet" matching "petal", etc.
+            tags.any((t) => _matchesSearchTerm(t, searchTerm)) ||
             allDetections.any((d) => _detectionMatchesSearch(d, searchTerm)),
       );
     }).toList();
@@ -6563,10 +7374,12 @@ class GalleryScreenState extends State<GalleryScreen>
                                               photoAllDetections[key] ?? [];
                                           return searchTerms.any(
                                             (term) =>
+                                                // Use word-boundary matching
                                                 tags.any(
-                                                  (t) => t
-                                                      .toLowerCase()
-                                                      .contains(term),
+                                                  (t) => _matchesSearchTerm(
+                                                    t,
+                                                    term,
+                                                  ),
                                                 ) ||
                                                 allDetections.any(
                                                   (d) =>

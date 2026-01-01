@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 /// Result containing both category tags and raw ML Kit labels
 class LocalTagResult {
@@ -14,6 +15,7 @@ class LocalTagResult {
 /// Maps ML Kit's 400+ labels to our 5 main categories.
 class LocalTaggingService {
   static ImageLabeler? _labeler;
+  static FaceDetector? _faceDetector;
 
   /// Initialize the ML Kit labeler (lazy singleton)
   static ImageLabeler get labeler {
@@ -25,10 +27,29 @@ class LocalTaggingService {
     return _labeler!;
   }
 
+  /// Initialize the ML Kit face detector (lazy singleton)
+  /// Only used when image labeling returns "other" to catch missed people
+  static FaceDetector get faceDetector {
+    _faceDetector ??= FaceDetector(
+      options: FaceDetectorOptions(
+        enableContours: false, // Don't need contours, just detection
+        enableLandmarks: false, // Don't need landmarks
+        enableClassification: false, // Don't need smile/eyes classification
+        enableTracking: false, // Don't need tracking across frames
+        minFaceSize:
+            0.1, // Detect faces as small as 10% of image (for group photos)
+        performanceMode: FaceDetectorMode.fast, // Speed over accuracy
+      ),
+    );
+    return _faceDetector!;
+  }
+
   /// Clean up resources
   static Future<void> dispose() async {
     await _labeler?.close();
     _labeler = null;
+    await _faceDetector?.close();
+    _faceDetector = null;
   }
 
   /// Classify a single image and return our category tags
@@ -85,22 +106,59 @@ class LocalTaggingService {
       );
 
       if (labels.isEmpty) {
-        return LocalTagResult(tags: ['other'], allDetections: []);
+        // No labels at all - try face detection as fallback
+        return await _tryFaceDetectionFallback(imagePath, []);
       }
 
       final result = _mapLabelsToCategories(labels);
 
-      if (result.tags.isEmpty) {
-        return LocalTagResult(
-          tags: ['other'],
-          allDetections: result.allDetections,
-        );
+      if (result.tags.isEmpty ||
+          (result.tags.length == 1 && result.tags.first == 'other')) {
+        // Result is "other" - run face detection to catch missed people
+        return await _tryFaceDetectionFallback(imagePath, result.allDetections);
       }
 
       return result;
     } catch (e) {
       developer.log('LocalTaggingService error: $e');
       return LocalTagResult(tags: ['other'], allDetections: []);
+    }
+  }
+
+  /// Fallback: Run face detection when image labeling returns "other"
+  /// This catches group photos and ambiguous people photos that ML Kit missed
+  static Future<LocalTagResult> _tryFaceDetectionFallback(
+    String imagePath,
+    List<String> existingDetections,
+  ) async {
+    try {
+      final startTime = DateTime.now();
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final faces = await faceDetector.processImage(inputImage);
+      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+
+      if (faces.isNotEmpty) {
+        developer.log(
+          '👥 Face detection found ${faces.length} face(s) in ${elapsed}ms - upgrading "other" → "people"',
+        );
+
+        // Add face count to detections for potential future use
+        final detections = List<String>.from(existingDetections);
+        detections.add('Faces detected:${faces.length}');
+
+        return LocalTagResult(tags: ['people'], allDetections: detections);
+      } else {
+        developer.log(
+          '👤 Face detection found no faces in ${elapsed}ms - keeping "other"',
+        );
+        return LocalTagResult(
+          tags: ['other'],
+          allDetections: existingDetections,
+        );
+      }
+    } catch (e) {
+      developer.log('Face detection fallback error: $e');
+      return LocalTagResult(tags: ['other'], allDetections: existingDetections);
     }
   }
 
