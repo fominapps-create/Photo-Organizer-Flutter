@@ -1,7 +1,7 @@
-# Backup script for Photo Organizer Flutter repo
+# Backup script for Filtored repo
 # Creates a zip of tracked files (git archive), a git bundle, and copies tags DB
 param(
-    [string]$RepoRoot = "G:\Flutter Projects\photo_organizer_flutter",
+    [string]$RepoRoot = "G:\Flutter Projects\Filtored",
     [string]$BackupDir = "G:\backups"
 )
 
@@ -12,8 +12,8 @@ Set-Location $RepoRoot
 Write-Output "Backup started at $ts"
 
 # Create a zip of tracked files (git archive) if this is a git repo
-$zipPath = Join-Path $BackupDir "photo_organizer_flutter_$ts.zip"
-$bundlePath = Join-Path $BackupDir "photo_organizer_flutter_$ts.bundle"
+$zipPath = Join-Path $BackupDir "Filtored_$ts.zip"
+$bundlePath = Join-Path $BackupDir "Filtored_$ts.bundle"
 
 try {
     git -C $RepoRoot rev-parse --git-dir > $null 2>&1
@@ -48,5 +48,5 @@ if (Test-Path $tagsDbSrc) {
 }
 
 Write-Output "Backup complete. Files in ${BackupDir}:"
-Get-ChildItem $BackupDir -Filter "photo_organizer_flutter_*$ts*" | Select-Object Name,Length
+Get-ChildItem $BackupDir -Filter "Filtored_*$ts*" | Select-Object Name,Length
 Write-Output "Done."

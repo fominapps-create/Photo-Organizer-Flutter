@@ -21,7 +21,7 @@ class PhotoData {
   final AssetEntity? asset;
 
   /// The scan logic version this photo was scanned with (for debugging)
-  final String? scanVersion;
+  final int? scanVersion;
 
   const PhotoData({
     required this.url,

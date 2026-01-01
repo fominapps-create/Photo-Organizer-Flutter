@@ -1,6 +1,6 @@
-# photo_organizer_flutter
+# Filtored
 
-A new Flutter project.
+AI-powered photo organization app.
 
 ## Getting Started
 

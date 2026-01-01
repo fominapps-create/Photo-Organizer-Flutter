@@ -166,6 +166,48 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Widget _buildCategoryChip(String category, IconData icon, Color color) {
+    final isSelected = _selectedTags.contains(category.toLowerCase());
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          final catLower = category.toLowerCase();
+          if (isSelected) {
+            _selectedTags.remove(catLower);
+          } else {
+            _selectedTags.add(catLower);
+          }
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? color : color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: color.withValues(alpha: isSelected ? 1.0 : 0.5),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: isSelected ? Colors.white : color),
+            const SizedBox(width: 6),
+            Text(
+              category,
+              style: TextStyle(
+                color: isSelected ? Colors.white : color,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -303,6 +345,63 @@ class _SearchScreenState extends State<SearchScreen> {
                   ],
                 ),
               ),
+              // Quick category buttons - always visible unless dropdown is shown
+              if (!_userTappedSearch && !_loadingTags)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Categories',
+                        style: TextStyle(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white70
+                              : Colors.black54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          _buildCategoryChip(
+                            'People',
+                            Icons.person,
+                            Colors.blue,
+                          ),
+                          _buildCategoryChip(
+                            'Animals',
+                            Icons.pets,
+                            Colors.orange,
+                          ),
+                          _buildCategoryChip(
+                            'Food',
+                            Icons.restaurant,
+                            Colors.green,
+                          ),
+                          _buildCategoryChip(
+                            'Document',
+                            Icons.description,
+                            Colors.purple,
+                          ),
+                          _buildCategoryChip(
+                            'Scenery',
+                            Icons.landscape,
+                            Colors.teal,
+                          ),
+                          _buildCategoryChip(
+                            'Other',
+                            Icons.category,
+                            Colors.grey,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               // Show loading indicator while tags are being fetched
               if (_loadingTags)
                 Padding(
@@ -324,7 +423,7 @@ class _SearchScreenState extends State<SearchScreen> {
               // Dropdown suggestions (shows popular when empty, filtered when typing)
               // ISSUE #7 FIX: Only show dropdown after user taps the search field
               else if (_userTappedSearch && _filteredSuggestions.isNotEmpty)
-                Flexible(
+                Expanded(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
@@ -343,10 +442,6 @@ class _SearchScreenState extends State<SearchScreen> {
                           offset: const Offset(0, 4),
                         ),
                       ],
-                    ),
-                    // ISSUE #6 FIX: Increased dropdown height to 70% of screen (was 50%)
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.7,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -380,13 +475,12 @@ class _SearchScreenState extends State<SearchScreen> {
                             ],
                           ),
                         ),
-                        Flexible(
+                        Expanded(
                           child: Scrollbar(
                             thumbVisibility: true,
                             thickness: 6,
                             radius: const Radius.circular(3),
                             child: ListView.builder(
-                              shrinkWrap: true,
                               padding: const EdgeInsets.only(right: 8),
                               itemCount: _filteredSuggestions.length,
                               itemBuilder: (context, index) {

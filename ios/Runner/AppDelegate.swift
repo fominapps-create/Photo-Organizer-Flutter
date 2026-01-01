@@ -5,7 +5,7 @@ import Photos
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private var eventSink: FlutterEventSink?
-  private let PHOTO_CHANGES_CHANNEL = "com.example.photo_organizer/photo_changes"
+  private let PHOTO_CHANGES_CHANNEL = "com.example.filtored/photo_changes"
   
   override func application(
     _ application: UIApplication,

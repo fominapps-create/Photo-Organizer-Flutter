@@ -1,11 +1,12 @@
-/// App-wide external links and version constants. Update these before store submission.
+import 'app_config.dart';
+
+/// App-wide external links. Update app_config.dart for version constants.
 class AppLinks {
   /// Public URL to your hosted privacy policy.
   /// Example: 'https://filtored.app/privacy-policy'
   static const String kPrivacyPolicyUrl = 'https://filtored.com/privacy';
 
-  /// App version - used in settings and website
-  /// Update this when releasing a new version
-  /// For dev builds: dev.X.Y where X=dev revision, Y=scan logic version
-  static const String appVersion = '0.4.10-dev';
+  /// App version - use AppConfig.appVersion instead
+  /// This is kept for backward compatibility
+  static String get appVersion => AppConfig.appVersion;
 }

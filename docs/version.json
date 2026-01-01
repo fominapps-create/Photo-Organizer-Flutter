@@ -1,0 +1,13 @@
+{
+  "appVersion": "0.4.0-dev",
+  "buildNumber": 0,
+  "scanLogicVersion": 10,
+  "lastUpdated": "2026-01-01T18:36:00",
+  "changes": [
+    "Simplified versioning: app version + scan logic version",
+    "Scanning progress: 'Preparing to scan...' instead of 0%",
+    "'Almost done' instead of 'Final touches'",
+    "Orange badge always (no grey state)",
+    "Category quick-select buttons in search"
+  ]
+}

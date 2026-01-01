@@ -156,25 +156,18 @@
         <p class="subtitle">Internal testing build - not for distribution</p>
         
         <div class="version-box">
-            <div class="version-number">v0.4.10-dev</div>
-            <div class="scan-version">Build 17, Scan Logic 1.0</div>
+            <div class="version-number" id="version-number">Loading...</div>
+            <div class="scan-version" id="scan-version">Loading...</div>
         </div>
         
         <div class="changes">
             <h3>Changes in this build:</h3>
-            <ul>
-                <li>New currency icon replaces credits icon</li>
-                <li>Currency text: red (light) / pink (dark)</li>
-                <li>Cached tag counts for faster dropdown loading</li>
-                <li>Objects need 86%+ confidence to be searchable</li>
-                <li>Select All: black when off, orange when on</li>
-                <li>Food is category-only (derived from items)</li>
-                <li>Cat/dog deduplication fix for search</li>
-                <li>Tag counts update on scan/delete/restore</li>
+            <ul id="changes-list">
+                <li>Loading...</li>
             </ul>
         </div>
         
-        <a href="filtored-v0.4.10-dev.apk" class="download-btn">
+        <a href="" class="download-btn" id="download-btn">
             ⬇️ Download APK
         </a>
         
@@ -182,7 +175,39 @@
             ⚠️ This build may have bugs. Do not share with alpha testers.
         </div>
         
-        <p class="timestamp">Built: December 31, 2025 at 18:30</p>
+        <p class="timestamp" id="timestamp">Loading...</p>
     </div>
+    
+    <script>
+        fetch('version.json')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('version-number').textContent = 'v' + data.appVersion;
+                document.getElementById('scan-version').textContent = 
+                    'Build ' + data.buildNumber + ', Scan Logic ' + data.scanLogicVersion;
+                
+                // Format date/time nicely
+                const date = new Date(data.lastUpdated);
+                const options = { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                };
+                document.getElementById('timestamp').textContent = 
+                    'Updated: ' + date.toLocaleDateString('en-US', options);
+                
+                document.getElementById('download-btn').href = 
+                    'download/filtored-v' + data.appVersion + '.apk';
+                
+                const changesList = document.getElementById('changes-list');
+                changesList.innerHTML = data.changes.map(c => '<li>' + c + '</li>').join('');
+            })
+            .catch(err => {
+                document.getElementById('version-number').textContent = 'Error loading version';
+                console.error('Failed to load version.json:', err);
+            });
+    </script>
 </body>
 </html>

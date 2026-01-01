@@ -149,6 +149,9 @@ class LocalTaggingService {
     String? bestAnimalLabel;
     String? bestFoodLabel;
 
+    // FIX #4: Track highest confidence across ALL labels for global threshold
+    double highestConfidence = 0.0;
+
     // Track detected animal types (cat, dog, bird, etc.) for deduplication
     // When multiple animals are detected but there's likely only 1, keep the best
     final Set<String> detectedAnimalTypes = {};
@@ -180,9 +183,26 @@ class LocalTaggingService {
     for (final label in labels) {
       final text = label.label.toLowerCase();
       final confidence = label.confidence;
-      // Store original label WITH confidence for search filtering
-      // Format: "Label:0.72" - allows filtering low-confidence tags from search
-      allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
+
+      // FIX #4: Track highest confidence for global threshold check
+      if (confidence > highestConfidence) {
+        highestConfidence = confidence;
+      }
+
+      // FIX #4: Only add labels with 86%+ confidence to searchable detections
+      // Low-confidence labels are usually false positives and shouldn't clutter search
+      // Also exclude category names - they appear as the main category, not as objects
+      const categoryNames = [
+        'food',
+        'people',
+        'animals',
+        'document',
+        'scenery',
+        'other',
+      ];
+      if (confidence >= 0.86 && !categoryNames.contains(text)) {
+        allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
+      }
 
       // Fix #3, #9, #10: Detect illustration indicators first
       if (_isIllustrationLabel(text)) {
@@ -199,24 +219,43 @@ class LocalTaggingService {
           bestPeopleLabel = text;
         }
         // Check if this is a STRONG person label (not just clothing/accessories)
-        if (_isStrongPersonLabel(text)) {
+        // FIX #4: Require 65%+ confidence for strong person labels
+        if (_isStrongPersonLabel(text) && confidence >= 0.65) {
           hasStrongPersonLabel = true;
         }
 
-        // Fix #3, #9, #10: Classify into tiers
-        if (_isTier0PeopleLabel(text)) {
+        // ISSUE #3 FIX: Skip weak false positives that trigger at very low confidence
+        // "flesh", "bird", "jacked" (muscular slang) etc. should never trigger people
+        if (_isLowConfidenceFalsePeople(text)) {
+          developer.log(
+            '  🚫 Skipped false people match "$text" - known low-confidence false positive',
+          );
+        } else if (confidence >= 0.70 && _isTier0PeopleLabel(text)) {
           hasTier0Label = true;
-          developer.log('  → Tier 0 (photo-specific): "$text"');
-        } else if (_isTier1PeopleLabel(text)) {
+          developer.log(
+            '  → Tier 0 (photo-specific): "$text" (${(confidence * 100).toInt()}%)',
+          );
+        } else if (confidence >= 0.65 && _isTier1PeopleLabel(text)) {
           hasTier1Label = true;
-          developer.log('  → Tier 1 (human body part): "$text"');
-        } else if (_isAmbiguousBodyPart(text)) {
+          developer.log(
+            '  → Tier 1 (human body part): "$text" (${(confidence * 100).toInt()}%)',
+          );
+        } else if (confidence >= 0.65 && _isAmbiguousBodyPart(text)) {
           hasAmbiguousBodyPart = true;
-          developer.log('  → Ambiguous body part: "$text"');
-        } else if (_isTier2PeopleLabel(text)) {
+          developer.log(
+            '  → Ambiguous body part: "$text" (${(confidence * 100).toInt()}%)',
+          );
+        } else if (confidence >= 0.60 && _isTier2PeopleLabel(text)) {
           tier2Count++;
           developer.log(
-            '  → Tier 2 (clothing/action): "$text" (count: $tier2Count)',
+            '  → Tier 2 (clothing/action): "$text" (count: $tier2Count, ${(confidence * 100).toInt()}%)',
+          );
+        } else if (confidence < 0.60 &&
+            (_isTier1PeopleLabel(text) ||
+                _isTier2PeopleLabel(text) ||
+                _isAmbiguousBodyPart(text))) {
+          developer.log(
+            '  🚫 Skipped tier classification for "$text" - low confidence ${(confidence * 100).toInt()}% (needs 60%+)',
           );
         }
       }
@@ -250,6 +289,8 @@ class LocalTaggingService {
         developer.log('🐾 Animal indicator: "$text"');
       }
       // Food detection with confidence tracking
+      // FIX #7: Only add food category if STRONG food label detected (actual food items)
+      // Weak food labels (restaurant, cooking, bottle) alone should not categorize as food
       if (_isFoodLabel(text)) {
         // FIX #6: Flowers/plants are NEVER food
         // Skip food detection entirely for flower/plant labels
@@ -260,14 +301,15 @@ class LocalTaggingService {
             text.contains('blossom')) {
           developer.log('🌸 Skipping food for flower/plant: "$text"');
         } else {
-          categories.add('food');
-          if (confidence > bestFoodConfidence) {
-            bestFoodConfidence = confidence;
-            bestFoodLabel = text;
-          }
           // Check if this is a STRONG food label (actual food item, not just context)
           if (_isStrongFoodLabel(text)) {
             hasStrongFoodLabel = true;
+            categories.add('food');
+          }
+          // Track best food confidence regardless
+          if (confidence > bestFoodConfidence) {
+            bestFoodConfidence = confidence;
+            bestFoodLabel = text;
           }
         }
       }
@@ -304,6 +346,17 @@ class LocalTaggingService {
           text.contains('handwriting')) {
         hasTextLabel = true;
       }
+    }
+
+    // FIX #4: GLOBAL CONFIDENCE THRESHOLD
+    // If no label reached 86% confidence AND no strong food detected, return "other"
+    // Food is exempt because ML Kit is good at detecting food items
+    // This filters out uncertain/blurry photos with only weak detections
+    if (highestConfidence < 0.86 && !hasStrongFoodLabel) {
+      developer.log(
+        '📦 Global threshold not met - highest confidence ${(highestConfidence * 100).toInt()}% < 86%, no strong food → Other',
+      );
+      return LocalTagResult(tags: ['other'], allDetections: allDetections);
     }
 
     // FIX: Screenshots with text should NOT be scenery - classify as Other
@@ -377,6 +430,13 @@ class LocalTaggingService {
     // Note: hasFurOrAnimalIndicator already set in first pass via _isAnimalIndicator()
     for (final label in labels) {
       final text = label.label.toLowerCase();
+      final confidence = label.confidence;
+
+      // FIX #3: Skip known false positives for body part detection
+      if (_isLowConfidenceFalsePeople(text)) {
+        continue; // Skip flesh, bird, jacked entirely
+      }
+
       if (text.contains('beard') ||
           text.contains('fun ') || // 'fun' with space to avoid 'function'
           text.contains('event') ||
@@ -389,27 +449,42 @@ class LocalTaggingService {
       }
       // Check for body parts (could be human or animal)
       // ISSUE #2 & #3 FIX: Extended body parts for better people detection
-      if (text.contains('hand') ||
-          text.contains('finger') ||
-          text.contains('arm') ||
-          text.contains('leg') ||
-          text.contains('foot') ||
-          text.contains('back') ||
-          text.contains('shoulder') ||
-          text.contains('torso') ||
-          text.contains('body') ||
-          text.contains('skin') ||
-          text.contains('muscle') ||
-          text.contains('chest') ||
-          text.contains('neck') ||
-          text.contains('waist') ||
-          text.contains('hip') ||
-          text.contains('thigh') ||
-          text.contains('sitting') ||
-          text.contains('standing') ||
-          text.contains('walking') ||
-          text.contains('running')) {
+      // FIX #3: Require minimum confidence (65%) for body parts to count
+      if (confidence >= 0.65 &&
+          (text.contains('hand') ||
+              text.contains('finger') ||
+              text.contains('arm') ||
+              text.contains('leg') ||
+              text.contains('foot') ||
+              text.contains('back') ||
+              text.contains('shoulder') ||
+              text.contains('torso') ||
+              text.contains('body') ||
+              text.contains('skin') ||
+              text.contains('muscle') ||
+              text.contains('chest') ||
+              text.contains('neck') ||
+              text.contains('waist') ||
+              text.contains('hip') ||
+              text.contains('thigh') ||
+              text.contains('sitting') ||
+              text.contains('standing') ||
+              text.contains('walking') ||
+              text.contains('running'))) {
         hasBodyParts = true;
+        developer.log(
+          '  → Body part detected: "$text" (${(confidence * 100).toInt()}%)',
+        );
+      } else if (confidence < 0.65 &&
+          (text.contains('hand') ||
+              text.contains('finger') ||
+              text.contains('arm') ||
+              text.contains('skin') ||
+              text.contains('muscle') ||
+              text.contains('body'))) {
+        developer.log(
+          '  🚫 Skipped low-confidence body part: "$text" (${(confidence * 100).toInt()}% < 65%)',
+        );
       }
     }
     // FOOD PRIORITY FIX: Don't add people from weak context (celebration/party) when strong food detected
@@ -648,6 +723,31 @@ class LocalTaggingService {
     // NOTE: Food is a CATEGORY derived from detected food items (cake, pie, etc.)
     // It should NOT be added as an object or have confidence-based fallback
 
+    // FIX #7: Check if ANY category has STRONG evidence
+    // Only include categories that passed strong filters (not weak defaults)
+    bool hasStrongCategory = false;
+
+    if (categories.contains('people') &&
+        (hasTier0Label ||
+            hasTier1Label ||
+            hasStrongPersonLabel ||
+            hasBodyParts)) {
+      hasStrongCategory = true;
+    }
+    if (categories.contains('animals') && detectedAnimalTypes.isNotEmpty) {
+      hasStrongCategory = true;
+    }
+    if (categories.contains('food') && hasStrongFoodLabel) {
+      // Already only added if hasStrongFoodLabel is true
+      hasStrongCategory = true;
+    }
+    if (categories.contains('document') && bestDocumentConfidence >= 0.65) {
+      hasStrongCategory = true;
+    }
+    if (categories.contains('scenery') && !hasOnlyWeakScenery) {
+      hasStrongCategory = true;
+    }
+
     final prioritized = <String>[];
     if (categories.contains('people')) prioritized.add('people');
     if (categories.contains('animals')) prioritized.add('animals');
@@ -658,13 +758,16 @@ class LocalTaggingService {
     // Build final tags: ONLY the main category (single tag for display)
     // Screenshot goes to allDetections, not as a category
     final resultTags = <String>[];
-    if (prioritized.isNotEmpty) {
+    if (prioritized.isNotEmpty && hasStrongCategory) {
       resultTags.add(prioritized.first);
       // Screenshot is added to allDetections, not as a tag
     } else {
-      // Log when no category matched - helps debug misses
+      // FIX #7: Default to 'other' if NO STRONG category found
+      // This prevents weak indicators from forcing incorrect categories
+      // 'Other' is the default when no category has sufficient strong evidence
+      resultTags.add('other');
       developer.log(
-        '⚠️ No category matched for labels: ${allDetections.join(", ")}',
+        '📦 Defaulting to Other - no strong category found (weak labels only): ${allDetections.join(", ")}',
       );
     }
 
@@ -758,6 +861,17 @@ class LocalTaggingService {
 
   /// Strong people labels - definitely indicate humans
   static bool _isPeopleLabel(String label) {
+    // FIX #8: EXCLUSIONS - these falsely trigger people but aren't
+    const peopleExclusions = [
+      'bird', // Bird has nothing to do with people
+      'flesh', // "flesh" detected on rocks, fruit, etc. - common false positive
+    ];
+
+    // Check exclusions first
+    if (peopleExclusions.any((k) => label.contains(k))) {
+      return false;
+    }
+
     const peopleKeywords = [
       // Strong human-specific labels
       'person',
@@ -1926,6 +2040,17 @@ class LocalTaggingService {
     return tier1Keywords.any((k) => label.contains(k));
   }
 
+  /// ISSUE #3 FIX: Known false positives for people detection at low confidence
+  /// These should NEVER trigger people classification regardless of confidence
+  static bool _isLowConfidenceFalsePeople(String label) {
+    const falsePeopleKeywords = [
+      'flesh', // Detected on rocks, fruit, backgrounds - very unreliable
+      'bird', // Definitely not people - animal indicator got confused
+      'jacked', // Slang for muscular, too vague and false positives on objects
+    ];
+    return falsePeopleKeywords.any((k) => label.contains(k));
+  }
+
   /// Ambiguous body parts - could be human OR animal, or product photos
   /// Need additional context (Tier 2 or animal indicator) to decide
   static bool _isAmbiguousBodyPart(String label) {
@@ -2094,6 +2219,17 @@ class LocalTaggingService {
       'gill',
       'shell',
       'tentacle',
+      // FIX #4: Animal names should also prevent false people detection
+      // If "dog" or "cat" is detected at ANY confidence, don't assume people
+      'dog',
+      'cat',
+      'bird',
+      'pet',
+      'animal',
+      'puppy',
+      'kitten',
+      'canine',
+      'feline',
     ];
     return animalIndicators.any((k) => label.contains(k));
   }

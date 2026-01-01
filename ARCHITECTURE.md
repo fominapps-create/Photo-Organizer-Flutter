@@ -558,52 +558,59 @@ If you build the architecture exactly like I described (stable IDs + groups as l
 When classification logic changes significantly between app versions, users with existing scanned photos need to be prompted to rescan. We use a **hybrid approach** based on the minor version number.
 
 ### How It Works
-- Uses **minor version** from app version (e.g., `"0.2"` from `0.2.8`)
-- Triggers rescan prompt on **minor version** change (`0.2.x` → `0.3.x`)
-- Triggers rescan prompt on **major version** change (`0.x` → `1.x`, `1.x` → `2.x`)
-- Patch versions (`0.2.8` → `0.2.9`) do **NOT** trigger rescan
+- Uses a **simple integer** for scan logic version, independent from app version
+- Triggers rescan prompt when `scanLogicVersion > savedVersion`
+- Increment only when classification logic changes
 
 ### Location
 - **File:** `lib/services/tag_store.dart`
-- **Constant:** `TagStore.scanMinorVersion`
+- **Constant:** `TagStore.scanLogicVersion` (integer)
 
-### When to Update `scanMinorVersion`
-✅ **DO update** when:
+### When to Increment `scanLogicVersion`
+✅ **DO increment** when:
 - Changed ML Kit confidence thresholds
 - Added/removed keywords from detection lists (people, animals, food, etc.)
 - Modified tier-based logic (people/animals/food classification)
 - Changed category mapping rules
 - Fixed significant classification bugs
 
-❌ **DO NOT update** when:
+❌ **DO NOT increment** when:
 - UI changes or bug fixes unrelated to scanning
 - Performance optimizations that don't change tag results
 - New features that don't affect existing photo tags
 - Documentation changes
 
 ### Version History
-| Version | App Version | Changes |
-|---------|-------------|---------|
-| `"0.1"` | 0.1.x | Initial ML Kit implementation |
-| `"0.2"` | 0.2.x | Tier-based people detection, animal deduplication, 280 animal keywords, food exclusions |
+| Version | Changes |
+|---------|---------|
+| 1 | Initial ML Kit implementation |
+| 2 | Tier-based people detection, animal deduplication, 280 animal keywords |
+| 3 | Fixed gallery loading on fresh install |
+| 4 | Stricter tier2 logic, eyelash moved to ambiguous |
+| 5 | Event/party/pattern exclusions, improved body part detection |
+| 6 | Room/furniture not documents, baby in costume → people |
+| 7 | Dog requires 85%+ confidence |
+| 8 | Detections store confidence, search filters low-confidence tags |
+| 9 | Pedestrian/walker/jogger → People, 2+ clothing items → People |
+| 10 | Objects need 86%+ confidence to be searchable |
 
 ### Updating for New Versions
-1. Update `scanMinorVersion` in `tag_store.dart`:
+1. Increment `scanLogicVersion` in `tag_store.dart`:
    ```dart
-   static const String scanMinorVersion = '0.3'; // Was '0.2'
+   static const int scanLogicVersion = 11; // Was 10
    ```
 
 2. Add change description in `getScanVersionChanges()`:
    ```dart
-   if (fromMajor == 0 && fromMinor < 3) {
-     changes.add('• [v0.3 improvements]');
+   if (fromVersion < 11) {
+     changes.add('• [v11 improvements]');
    }
    ```
 
 3. Update this documentation with the new version entry.
 
 ### User Experience
-1. On app update, after tags load, checks if `savedVersion != currentVersion`
+1. On app update, after tags load, checks if `savedVersion < currentVersion`
 2. Shows friendly dialog explaining improvements
 3. User can **"Skip"** (won't ask again) or **"Rescan All"**
 4. If rescan chosen: clears tags, shows progress, rescans all photos

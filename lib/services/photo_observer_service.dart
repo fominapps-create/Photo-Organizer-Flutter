@@ -21,7 +21,7 @@ import 'package:flutter/services.dart';
 /// ```
 class PhotoObserverService {
   static const EventChannel _channel = EventChannel(
-    'com.example.photo_organizer/photo_changes',
+    'com.example.filtored/photo_changes',
   );
 
   /// Stream of photo library change events

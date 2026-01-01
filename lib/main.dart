@@ -59,7 +59,7 @@ void main() async {
   // Ensure the base URL defaults to the platform's emulator-friendly value
   ApiService.setBaseUrl(ApiService.defaultBaseUrlForPlatform());
 
-  runApp(const PhotoOrganizerApp());
+  runApp(const FiltoredApp());
 }
 
 /// Pre-warm ML Kit labeler in background to avoid 30-60s delay on first scan
@@ -81,14 +81,14 @@ void _preWarmMLKit() {
   });
 }
 
-class PhotoOrganizerApp extends StatefulWidget {
-  const PhotoOrganizerApp({super.key});
+class FiltoredApp extends StatefulWidget {
+  const FiltoredApp({super.key});
 
   @override
-  State<PhotoOrganizerApp> createState() => _PhotoOrganizerAppState();
+  State<FiltoredApp> createState() => _FiltoredAppState();
 }
 
-class _PhotoOrganizerAppState extends State<PhotoOrganizerApp> {
+class _FiltoredAppState extends State<FiltoredApp> {
   bool _isDarkMode = false;
   bool _isFirstLaunch = true;
   bool _isCheckingFirstLaunch = true;

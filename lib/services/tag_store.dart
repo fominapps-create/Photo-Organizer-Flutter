@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/app_config.dart';
 
 class TagStore {
   static String _keyFor(String photoID) => 'tags_$photoID';
@@ -11,7 +12,7 @@ class TagStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyFor(photoID), json.encode(tags));
     // Also save the current scan version when tags are saved
-    await prefs.setString(_scanVersionKeyFor(photoID), scanMinorVersion);
+    await prefs.setInt(_scanVersionKeyFor(photoID), scanLogicVersion);
   }
 
   /// Save all detections (detailed object list for search)
@@ -24,9 +25,23 @@ class TagStore {
   }
 
   /// Load the scan version that was used when this photo was scanned
-  static Future<String?> loadPhotoScanVersion(String photoID) async {
+  static Future<int> loadPhotoScanVersion(String photoID) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_scanVersionKeyFor(photoID));
+    // Try new int format first
+    final intVersion = prefs.getInt(_scanVersionKeyFor(photoID));
+    if (intVersion != null) return intVersion;
+    // Migrate from old string format
+    final oldVersion = prefs.getString(_scanVersionKeyFor(photoID));
+    if (oldVersion != null && oldVersion.isNotEmpty) {
+      final parts = oldVersion
+          .split('.')
+          .map((s) => int.tryParse(s) ?? 0)
+          .toList();
+      final major = parts.isNotEmpty ? parts[0] : 0;
+      final minor = parts.length > 1 ? parts[1] : 0;
+      return major * 10 + minor;
+    }
+    return 0;
   }
 
   /// Load detections saved locally for `photoID`. Returns null if none stored.
@@ -259,17 +274,27 @@ class TagStore {
   }
 
   /// Load all scan versions at once for multiple photos (batch loading)
-  /// Returns a Map of photoID -> scanVersion
-  static Future<Map<String, String>> loadAllScanVersionsMap(
+  /// Returns a Map of photoID -> scanVersion (int)
+  static Future<Map<String, int>> loadAllScanVersionsMap(
     List<String> photoIDs,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    final result = <String, String>{};
+    final result = <String, int>{};
 
     for (final photoID in photoIDs) {
+      // Try new int format first
+      final intVer = prefs.getInt(_scanVersionKeyFor(photoID));
+      if (intVer != null) {
+        result[photoID] = intVer;
+        continue;
+      }
+      // Migrate from old string format
       final ver = prefs.getString(_scanVersionKeyFor(photoID));
-      if (ver != null) {
-        result[photoID] = ver;
+      if (ver != null && ver.isNotEmpty) {
+        final parts = ver.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+        final major = parts.isNotEmpty ? parts[0] : 0;
+        final minor = parts.length > 1 ? parts[1] : 0;
+        result[photoID] = major * 10 + minor;
       }
     }
 
@@ -279,138 +304,103 @@ class TagStore {
   // ============ Scan Version Tracking (Hybrid Approach) ============
   //
   // VERSIONING CONVENTION:
-  // - Uses MINOR version from app version (e.g., "0.2" from "0.2.8")
-  // - Triggers rescan on MINOR version change (0.2.x → 0.3.x)
-  // - Triggers rescan on MAJOR version change (0.x → 1.x, 1.x → 2.x)
-  // - Patch versions (0.2.8 → 0.2.9) do NOT trigger rescan
+  // - Scan logic version is a simple INTEGER, independent from app version
+  // - Increment when classification logic changes (triggers rescan dialog)
   //
-  // WHEN TO UPDATE scanMinorVersion:
+  // WHEN TO INCREMENT scanLogicVersion:
   // - Changed ML Kit confidence thresholds
   // - Added/removed keywords from detection lists
   // - Modified tier-based logic (people/animals/food)
   // - Changed category mapping rules
-  // - Major version releases (1.0, 2.0, etc.)
   //
-  // WHEN NOT TO UPDATE:
+  // WHEN NOT TO INCREMENT:
   // - UI changes, bug fixes unrelated to scanning
   // - Performance optimizations that don't change results
   // - New features that don't affect existing photo tags
   //
   // VERSION HISTORY:
-  // "0.1" - Initial ML Kit implementation
-  // "0.2" - Tier-based people detection, animal deduplication, 280 animal keywords
-  // "0.3" - Fixed gallery loading on fresh install, improved mounted checks
-  // "0.4" - Stricter tier2 logic (needs body parts), eyelash moved to ambiguous,
-  //         reduced concurrency for less heating, per-photo scan version tracking
-  // "0.5" - Improved classification: event/party/pattern exclusions, body part detection,
-  //         animal exclusions (vehicle/room/screenshot/instruments), cat+dog deduplication
-  // "0.6" - Room/furniture not documents, baby in costume → people, UI fixes
-  // "0.7" - Dog requires 0.85+ confidence (massive over-detection fix)
-  // "0.8" - Detections now store confidence (Label:0.72 format), search filters
-  //         low-confidence tags (<65%) so false positives like "flower" on food don't match
-  // "0.9" - Pedestrian/walker/jogger → People, 2+ clothing items → People,
-  //         Screenshots with text → Other (not Scenery), search threshold 0.72
-  // "1.0" - Objects need 86%+ confidence to be searchable, cached tag counts,
-  //         Food is category-only (derived from food items)
+  // 1 - Initial ML Kit implementation
+  // 2 - Tier-based people detection, animal deduplication, 280 animal keywords
+  // 3 - Fixed gallery loading on fresh install, improved mounted checks
+  // 4 - Stricter tier2 logic (needs body parts), eyelash moved to ambiguous,
+  //     reduced concurrency for less heating, per-photo scan version tracking
+  // 5 - Improved classification: event/party/pattern exclusions, body part detection,
+  //     animal exclusions (vehicle/room/screenshot/instruments), cat+dog deduplication
+  // 6 - Room/furniture not documents, baby in costume → people, UI fixes
+  // 7 - Dog requires 0.85+ confidence (massive over-detection fix)
+  // 8 - Detections now store confidence (Label:0.72 format), search filters
+  //     low-confidence tags (<65%) so false positives like "flower" on food don't match
+  // 9 - Pedestrian/walker/jogger → People, 2+ clothing items → People,
+  //     Screenshots with text → Other (not Scenery), search threshold 0.72
+  // 10 - Objects need 86%+ confidence to be searchable, cached tag counts,
+  //      Food is category-only (derived from food items)
 
-  /// Current scan logic version (minor version only)
-  /// Update this when classification logic changes significantly
-  static const String scanMinorVersion = '1.0';
+  /// Current scan logic version - defined in AppConfig
+  /// Increment AppConfig.scanLogicVersion when classification logic changes
+  static int get scanLogicVersion => AppConfig.scanLogicVersion;
 
-  static const String _scanVersionKey = 'scan_minor_version';
+  static const String _scanVersionKey = 'scan_logic_version';
 
-  /// Get the scan version that was used for the last scan
-  static Future<String> getSavedScanVersion() async {
+  /// Get the saved scan logic version (returns 0 if never scanned)
+  static Future<int> getSavedScanVersion() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_scanVersionKey) ??
-        ''; // empty = never scanned or pre-versioning
+    // Try new int key first, then migrate from old string format
+    final intVersion = prefs.getInt(_scanVersionKey);
+    if (intVersion != null) return intVersion;
+
+    // Migration: convert old "0.9" or "1.0" format to int
+    final oldVersion = prefs.getString('scan_minor_version');
+    if (oldVersion != null && oldVersion.isNotEmpty) {
+      // "0.9" → 9, "1.0" → 10, etc.
+      final parts = oldVersion
+          .split('.')
+          .map((s) => int.tryParse(s) ?? 0)
+          .toList();
+      final major = parts.isNotEmpty ? parts[0] : 0;
+      final minor = parts.length > 1 ? parts[1] : 0;
+      return major * 10 + minor; // "1.0" = 10, "0.9" = 9
+    }
+    return 0; // Never scanned
   }
 
-  /// Save the current scan version after a scan completes
+  /// Save the current scan logic version after a scan completes
   static Future<void> saveScanVersion() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_scanVersionKey, scanMinorVersion);
+    await prefs.setInt(_scanVersionKey, scanLogicVersion);
   }
 
   /// Check if a rescan is needed due to logic changes
-  /// Triggers rescan when:
-  /// - Minor version changes (0.2 → 0.3)
-  /// - Major version changes (0.x → 1.x, 1.x → 2.x)
   static Future<bool> needsRescanForNewLogic() async {
     final savedVersion = await getSavedScanVersion();
-    if (savedVersion.isEmpty) return false; // First time user, no rescan needed
-
-    // Parse versions
-    final savedParts = savedVersion
-        .split('.')
-        .map((s) => int.tryParse(s) ?? 0)
-        .toList();
-    final currentParts = scanMinorVersion
-        .split('.')
-        .map((s) => int.tryParse(s) ?? 0)
-        .toList();
-
-    final savedMajor = savedParts.isNotEmpty ? savedParts[0] : 0;
-    final savedMinor = savedParts.length > 1 ? savedParts[1] : 0;
-    final currentMajor = currentParts.isNotEmpty ? currentParts[0] : 0;
-    final currentMinor = currentParts.length > 1 ? currentParts[1] : 0;
-
-    // Rescan if major version changed (0.x → 1.x, 1.x → 2.x, etc.)
-    if (currentMajor > savedMajor) return true;
-
-    // Rescan if minor version changed within same major (0.2 → 0.3, 1.0 → 1.1)
-    if (currentMajor == savedMajor && currentMinor > savedMinor) return true;
-
-    return false;
+    if (savedVersion == 0) return false; // First time user, no rescan needed
+    return scanLogicVersion > savedVersion;
   }
 
   /// Get description of what changed between versions
-  static String getScanVersionChanges(String fromVersion) {
+  static String getScanVersionChanges(int fromVersion) {
     final changes = <String>[];
 
-    // Parse versions for comparison
-    final fromParts = fromVersion
-        .split('.')
-        .map((s) => int.tryParse(s) ?? 0)
-        .toList();
-    final fromMajor = fromParts.isNotEmpty ? fromParts[0] : 0;
-    final fromMinor = fromParts.length > 1 ? fromParts[1] : 0;
-
-    final toParts = scanMinorVersion
-        .split('.')
-        .map((s) => int.tryParse(s) ?? 0)
-        .toList();
-    final toMajor = toParts.isNotEmpty ? toParts[0] : 0;
-
-    // Major version upgrade gets special messaging
-    if (toMajor > fromMajor) {
-      changes.add('🎉 Major update with redesigned classification!');
-      changes.add('• All-new scanning engine');
-      changes.add('• Significantly improved accuracy');
-    }
-
     // Add changes for each version upgrade
-    if (fromMajor == 0 && fromMinor < 2) {
+    if (fromVersion < 2) {
       changes.add('• Improved people detection (tier-based system)');
       changes.add('• Smarter animal identification');
       changes.add('• Better food/flower classification');
-      changes.add('• Expanded animal keyword coverage (280+ animals)');
     }
-    if (fromMajor == 0 && fromMinor < 4) {
+    if (fromVersion < 4) {
       changes.add('• Stricter people detection (requires body evidence)');
       changes.add('• Fixed false positives for eyelash/clothing photos');
-      changes.add('• Reduced phone heating during scans');
     }
-    if (fromMajor == 0 && fromMinor < 5) {
+    if (fromVersion < 5) {
       changes.add('• Events/parties no longer auto-tag as people');
-      changes.add('• Better animal detection (excludes objects/body parts)');
-      changes.add('• Fixed scan startup when updating app');
-      changes.add('• Improved people detection for body parts');
+      changes.add('• Better animal detection');
     }
-    // Future version changes go here:
-    // if (fromMajor < 1) {
-    //   changes.add('• [v1.0 major improvements]');
-    // }
+    if (fromVersion < 7) {
+      changes.add('• Fixed dog over-detection (requires 85%+ confidence)');
+    }
+    if (fromVersion < 10) {
+      changes.add('• Objects need 86%+ confidence to be searchable');
+      changes.add('• Improved category accuracy');
+    }
 
     return changes.isEmpty ? 'Bug fixes and improvements' : changes.join('\n');
   }

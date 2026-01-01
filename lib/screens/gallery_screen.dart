@@ -59,7 +59,7 @@ class GalleryScreenState extends State<GalleryScreen>
   List<String> imageUrls = [];
   Map<String, List<String>> photoTags = {};
   Map<String, List<String>> photoAllDetections = {};
-  Map<String, String> photoScanVersions = {}; // Track scan version per photo
+  Map<String, int> photoScanVersions = {}; // Track scan version per photo
 
   /// Cached tag counts - updated incrementally during scan/delete operations
   /// Key: lowercase tag name, Value: count of photos with that tag
@@ -139,7 +139,7 @@ class GalleryScreenState extends State<GalleryScreen>
   late AnimationController _starAnimationController;
   StreamSubscription<dynamic>? _photoChangesSubscription;
   static const _photoChangesChannel = EventChannel(
-    'com.example.photo_organizer/photo_changes',
+    'com.example.filtored/photo_changes',
   );
 
   // Additional state variables
@@ -2361,12 +2361,22 @@ class GalleryScreenState extends State<GalleryScreen>
       return; // Don't show "ready" yet, more scanning to do
     }
 
-    // Cancel dot animation if validation is also complete
+    // For offline mode: mark validation complete immediately after scanning
+    // (validation is only needed for online CLIP verification)
+    if (mounted && !_validationComplete && _hasScannedAtLeastOneBatch) {
+      developer.log(
+        '✅ Auto scan complete with ${photoTags.length} tags, marking validation complete (offline mode)',
+      );
+      setState(() {
+        _validationComplete = true;
+      });
+    }
+
+    // Cancel dot animation and show ready message
     if (!_validating) {
       _dotAnimationTimer?.cancel();
       _dotAnimationTimer = null;
-      // Show combined completion message if validation is already done AND we scanned something
-      if (_validationComplete && _hasScannedAtLeastOneBatch) {
+      if (_hasScannedAtLeastOneBatch) {
         _showGalleryReadyMessage();
       }
     }
@@ -3177,7 +3187,7 @@ class GalleryScreenState extends State<GalleryScreen>
                 // Update in-memory tags and detections
                 photoTags[basename] = tags;
                 photoAllDetections[basename] = allDetections;
-                photoScanVersions[basename] = TagStore.scanMinorVersion;
+                photoScanVersions[basename] = TagStore.scanLogicVersion;
                 batchTagsToSave[photoID] = tags;
                 batchDetectionsToSave[photoID] = allDetections;
 
@@ -3295,7 +3305,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
           photoTags[basename] = tags;
           photoAllDetections[basename] = allDetections;
-          photoScanVersions[basename] = TagStore.scanMinorVersion;
+          photoScanVersions[basename] = TagStore.scanLogicVersion;
           batchTagsToSave[photoID] = tags;
           batchDetectionsToSave[photoID] = allDetections;
 
@@ -3590,7 +3600,7 @@ class GalleryScreenState extends State<GalleryScreen>
 
         // Auto-apply the improvement
         photoTags[basename] = overrideTags;
-        photoScanVersions[basename] = TagStore.scanMinorVersion;
+        photoScanVersions[basename] = TagStore.scanLogicVersion;
         await TagStore.saveLocalTags(photoID, overrideTags);
 
         // Track for animation
@@ -5301,7 +5311,7 @@ class GalleryScreenState extends State<GalleryScreen>
           final photoID = PhotoId.canonicalId(url);
           if (tagsToSave.containsKey(photoID)) {
             photoTags[key] = tagsToSave[photoID]!;
-            photoScanVersions[key] = TagStore.scanMinorVersion;
+            photoScanVersions[key] = TagStore.scanLogicVersion;
           }
           if (detectionsToSave.containsKey(photoID)) {
             photoAllDetections[key] = detectionsToSave[photoID]!;
@@ -6144,12 +6154,12 @@ class GalleryScreenState extends State<GalleryScreen>
                                               : '0';
                                           final status = _scanning
                                               ? 'Scanning ${photoTags.length}/$_cachedLocalPhotoCount ($pct%)'
-                                              : _validating
-                                              ? 'Validating...'
+                                              : _scanPreparing
+                                              ? 'Preparing to scan...'
                                               : photoTags.isNotEmpty
                                               ? '${photoTags.length} photos scanned ($pct%)'
-                                              : 'Preparing for scan';
-                                          // Green only when ALL photos scanned, orange for partial progress
+                                              : 'Preparing to scan...';
+                                          // Green only when ALL photos scanned, always orange otherwise
                                           final allScanned =
                                               _cachedLocalPhotoCount > 0 &&
                                               photoTags.length >=
@@ -6157,15 +6167,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                           _showBadgeTooltip(
                                             context,
                                             status,
-                                            (_scanning || _validating)
-                                                ? Colors.orange.shade700
-                                                : allScanned
+                                            allScanned
                                                 ? Colors.green.shade700
-                                                : photoTags.isNotEmpty
-                                                ? Colors
-                                                      .orange
-                                                      .shade700 // Partial progress = orange
-                                                : Colors.grey.shade700,
+                                                : Colors.orange.shade700,
                                           );
                                         },
                                         child: Builder(
@@ -6180,38 +6184,22 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 4,
                                               ), // 4px rule - smaller
                                               decoration: BoxDecoration(
-                                                color:
-                                                    (_scanning || _validating)
-                                                    ? Colors.orange.shade100
-                                                          .withValues(
-                                                            alpha: 0.3,
-                                                          )
-                                                    : allScanned
+                                                // Always orange when not complete (no grey state)
+                                                color: allScanned
                                                     ? Colors.green.shade100
                                                           .withValues(
                                                             alpha: 0.3,
                                                           )
-                                                    : photoTags.isNotEmpty
-                                                    ? Colors.orange.shade100
-                                                          .withValues(
-                                                            alpha: 0.3,
-                                                          ) // Partial = orange
-                                                    : Colors.grey.shade400
+                                                    : Colors.orange.shade100
                                                           .withValues(
                                                             alpha: 0.3,
                                                           ),
                                                 shape: BoxShape.circle,
                                                 border: Border.all(
-                                                  color:
-                                                      (_scanning || _validating)
-                                                      ? Colors.orange.shade600
-                                                      : allScanned
+                                                  // Always orange when not complete (no grey state)
+                                                  color: allScanned
                                                       ? Colors.green.shade600
-                                                      : photoTags.isNotEmpty
-                                                      ? Colors
-                                                            .orange
-                                                            .shade600 // Partial = orange
-                                                      : Colors.grey.shade600,
+                                                      : Colors.orange.shade600,
                                                   width: 2,
                                                 ),
                                                 boxShadow: [
@@ -6225,26 +6213,18 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ),
                                               child: Icon(
                                                 Icons.verified_outlined,
-                                                color:
-                                                    (_scanning || _validating)
-                                                    ? Colors.orange.shade600
-                                                    : allScanned
+                                                // Always orange when not complete (no grey state)
+                                                color: allScanned
                                                     ? Colors.green.shade600
-                                                    : photoTags.isNotEmpty
-                                                    ? Colors
-                                                          .orange
-                                                          .shade600 // Partial = orange
-                                                    : Colors.grey.shade600,
+                                                    : Colors.orange.shade600,
                                                 size: 16, // 4px rule - smaller
                                               ),
                                             );
                                           },
                                         ),
                                       ),
-                                      // Show loading dots during scanning/validating or rescan pending
-                                      if ((_scanning ||
-                                              _validating ||
-                                              _rescanPending) &&
+                                      // Show loading dots when not complete (always show dots until green checkmark)
+                                      if (!_validationComplete &&
                                           !_showFinalTouches)
                                         Padding(
                                           padding: const EdgeInsets.only(
@@ -6277,8 +6257,8 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 )
                                               : _buildLoadingDots(),
                                         ),
-                                      // Show scan progress percentage during scanning
-                                      if (_scanning)
+                                      // Show scan progress text when not complete
+                                      if (!_validationComplete)
                                         Padding(
                                           padding: const EdgeInsets.only(
                                             top: 4,
@@ -6327,15 +6307,15 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 _showFinalTouches = false;
                                               }
 
-                                              // Show "Final touches" if flag is set
+                                              // Show "Almost done" if flag is set
                                               if (_showFinalTouches) {
-                                                // Show Final touches with rotating star
+                                                // Show Almost done with rotating star
                                                 return Row(
                                                   mainAxisSize:
                                                       MainAxisSize.min,
                                                   children: [
                                                     Text(
-                                                      'Final touches',
+                                                      'Almost done',
                                                       style: TextStyle(
                                                         fontSize: 9,
                                                         color: Colors
@@ -6408,20 +6388,33 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 return const SizedBox.shrink();
                                               }
 
-                                              // Show "Paused" when paused, otherwise percentage
-                                              if (_scanPaused) {
+                                              // Show "Deleting tags..." when clearing tags for rescan
+                                              if (_clearingTags) {
                                                 return Text(
-                                                  'Paused',
+                                                  'Deleting tags...',
                                                   style: TextStyle(
                                                     fontSize: 9,
                                                     color:
-                                                        Colors.amber.shade700,
+                                                        Colors.orange.shade700,
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 );
                                               }
 
-                                              // Always show percentage during scanning (except at 100%)
+                                              // Show "Preparing to scan..." at 0% or when not actively scanning yet
+                                              if (pctNum == 0 || !_scanning) {
+                                                return Text(
+                                                  'Preparing to scan...',
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    color:
+                                                        Colors.orange.shade700,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                );
+                                              }
+
+                                              // Always show percentage during scanning (except at 0% and 100%)
                                               return Text(
                                                 '$pct%',
                                                 style: TextStyle(
@@ -8138,13 +8131,13 @@ class GalleryScreenState extends State<GalleryScreen>
                         ],
                       ),
                       // Scan version info
-                      FutureBuilder<String>(
+                      FutureBuilder<int>(
                         future: TagStore.getSavedScanVersion(),
                         builder: (context, snapshot) {
-                          final savedVersion = snapshot.data ?? '?';
-                          final currentVersion = TagStore.scanMinorVersion;
+                          final savedVersion = snapshot.data ?? 0;
+                          final currentVersion = TagStore.scanLogicVersion;
                           final isOutdated =
-                              savedVersion.isNotEmpty &&
+                              savedVersion > 0 &&
                               savedVersion != currentVersion;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 4),

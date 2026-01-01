@@ -4,8 +4,8 @@ import 'pricing_screen.dart';
 import 'trash_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/app_config.dart';
 import '../config/app_links.dart';
-import '../services/tag_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -384,12 +384,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('App Version'),
-            subtitle: Text(AppLinks.appVersion),
+            subtitle: Text(AppConfig.appVersion),
           ),
           ListTile(
             leading: const Icon(Icons.analytics_outlined),
             title: const Text('Scan Logic Version'),
-            subtitle: Text(TagStore.scanMinorVersion),
+            subtitle: Text('${AppConfig.scanLogicVersion}'),
           ),
           const Divider(),
           ListTile(
