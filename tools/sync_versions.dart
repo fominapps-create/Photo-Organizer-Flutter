@@ -7,6 +7,7 @@
 ///   - docs/version.json (lastUpdated timestamp)
 ///   - lib/config/app_config.dart (appVersion, scanLogicVersion)
 ///   - pubspec.yaml (version line)
+library;
 
 import 'dart:convert';
 import 'dart:io';
@@ -17,7 +18,7 @@ void main() async {
   // Read version.json
   final versionFile = File('$projectRoot/docs/version.json');
   if (!versionFile.existsSync()) {
-    print('❌ docs/version.json not found!');
+    stdout.writeln('❌ docs/version.json not found!');
     exit(1);
   }
 
@@ -37,14 +38,14 @@ void main() async {
   const encoder = JsonEncoder.withIndent('  ');
   versionFile.writeAsStringSync(encoder.convert(versionData));
 
-  print('📋 Version info:');
-  print('   App Version: $appVersion');
-  print('   Build Number: $buildNumber');
-  print('   Scan Logic: $scanLogicVersion');
-  print('   Timestamp: $timestamp');
-  print('');
+  stdout.writeln('📋 Version info:');
+  stdout.writeln('   App Version: $appVersion');
+  stdout.writeln('   Build Number: $buildNumber');
+  stdout.writeln('   Scan Logic: $scanLogicVersion');
+  stdout.writeln('   Timestamp: $timestamp');
+  stdout.writeln('');
 
-  print('✅ Updated docs/version.json (timestamp)');
+  stdout.writeln('✅ Updated docs/version.json (timestamp)');
 
   // Update app_config.dart
   final configFile = File('$projectRoot/lib/config/app_config.dart');
@@ -64,9 +65,9 @@ void main() async {
     );
 
     configFile.writeAsStringSync(content);
-    print('✅ Updated lib/config/app_config.dart');
+    stdout.writeln('✅ Updated lib/config/app_config.dart');
   } else {
-    print('⚠️ lib/config/app_config.dart not found, skipping');
+    stdout.writeln('⚠️ lib/config/app_config.dart not found, skipping');
   }
 
   // Update pubspec.yaml
@@ -81,16 +82,16 @@ void main() async {
     );
 
     pubspecFile.writeAsStringSync(content);
-    print('✅ Updated pubspec.yaml');
+    stdout.writeln('✅ Updated pubspec.yaml');
   } else {
-    print('⚠️ pubspec.yaml not found, skipping');
+    stdout.writeln('⚠️ pubspec.yaml not found, skipping');
   }
 
-  print('');
-  print('🎉 Done! All versions synced from docs/version.json');
-  print('');
-  print('Next steps:');
-  print('  1. Build your app: flutter build apk');
-  print('  2. Copy APK to docs/filtored-v$appVersion.apk');
-  print('  3. Commit and push to update website');
+  stdout.writeln('');
+  stdout.writeln('🎉 Done! All versions synced from docs/version.json');
+  stdout.writeln('');
+  stdout.writeln('Next steps:');
+  stdout.writeln('  1. Build your app: flutter build apk');
+  stdout.writeln('  2. Copy APK to docs/filtored-v$appVersion.apk');
+  stdout.writeln('  3. Commit and push to update website');
 }
