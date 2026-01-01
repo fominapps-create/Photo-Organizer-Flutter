@@ -4868,10 +4868,7 @@ class GalleryScreenState extends State<GalleryScreen>
       'deer',
     ],
     'pet': [
-      'dog',
-      'puppy',
-      'cat',
-      'kitten',
+      'animals', // Maps to animals category since cat/dog detections are hidden
       'bird',
       'parrot',
       'hamster',
@@ -4903,20 +4900,11 @@ class GalleryScreenState extends State<GalleryScreen>
       'elk',
       'antelope',
     ],
-    // Specific animals - only expand to close variants, NOT to siblings
-    'dog': [
-      'puppy',
-      'canine',
-      'hound',
-      'poodle',
-      'terrier',
-      'retriever',
-      'bulldog',
-      'beagle',
-    ],
-    'puppy': ['dog'],
-    'cat': ['kitten', 'feline', 'tabby', 'siamese', 'persian'],
-    'kitten': ['cat'],
+    // NOTE: 'dog' and 'cat' removed as searchable terms
+    // ML Kit often confuses cats/dogs, so we hide these labels
+    // Users can search 'pet' or 'animals' to find them instead
+    'puppy': [], // No longer expands to dog
+    'kitten': [], // No longer expands to cat
     'bird': [
       'parrot',
       'sparrow',
@@ -5926,11 +5914,22 @@ class GalleryScreenState extends State<GalleryScreen>
 
       // Category names should ONLY match the category tag, not object detections
       // This prevents "document" from finding photos with "text" or "screenshot" objects
-      const categoryNames = ['document', 'people', 'animals', 'food', 'scenery', 'other'];
-      
+      const categoryNames = [
+        'document',
+        'people',
+        'animals',
+        'food',
+        'scenery',
+        'other',
+      ];
+
       // Separate category searches from object searches
-      final categorySearches = searchTerms.where((t) => categoryNames.contains(t)).toSet();
-      final objectSearches = searchTerms.where((t) => !categoryNames.contains(t)).toSet();
+      final categorySearches = searchTerms
+          .where((t) => categoryNames.contains(t))
+          .toSet();
+      final objectSearches = searchTerms
+          .where((t) => !categoryNames.contains(t))
+          .toSet();
 
       // Expand only object search terms with synonyms (not categories)
       final expandedObjectTerms = <String>{};
@@ -5940,15 +5939,21 @@ class GalleryScreenState extends State<GalleryScreen>
       }
 
       // Category searches: only match category tags
-      final matchesCategory = categorySearches.isEmpty || 
-          categorySearches.any((cat) => tags.any((t) => t.toLowerCase() == cat));
-      
+      final matchesCategory =
+          categorySearches.isEmpty ||
+          categorySearches.any(
+            (cat) => tags.any((t) => t.toLowerCase() == cat),
+          );
+
       // Object searches: match tags OR detections with synonyms
-      final matchesObject = expandedObjectTerms.isEmpty ||
+      final matchesObject =
+          expandedObjectTerms.isEmpty ||
           expandedObjectTerms.any(
             (searchTerm) =>
                 tags.any((t) => _matchesSearchTerm(t, searchTerm)) ||
-                allDetections.any((d) => _detectionMatchesSearch(d, searchTerm)),
+                allDetections.any(
+                  (d) => _detectionMatchesSearch(d, searchTerm),
+                ),
           );
 
       // If searching both categories and objects, require both to match

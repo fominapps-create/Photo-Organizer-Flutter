@@ -262,7 +262,13 @@ class LocalTaggingService {
         'scenery',
         'other',
       ];
-      if (confidence >= 0.86 && !categoryNames.contains(text)) {
+      // Hide cat/dog from visible labels - ML Kit often confuses them
+      // They still trigger "animals" category but aren't searchable individually
+      const hiddenLabels = ['cat', 'dog'];
+      final isCatOrDog = hiddenLabels.any((h) => text.contains(h)) && 
+                         !text.contains('hot dog'); // hot dog is food, not animal
+      
+      if (confidence >= 0.86 && !categoryNames.contains(text) && !isCatOrDog) {
         allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
       }
 
@@ -1643,25 +1649,8 @@ class LocalTaggingService {
       'centipede',
       'millipede',
     ];
-    // Use word boundary matching to prevent 'ant' matching 'mountain'
-    return animalKeywords.any((k) => _matchesWord(label, k));
-  }
-
-  /// Check if a label contains a keyword as a whole word (not substring)
-  /// Prevents 'ant' from matching 'mountain', 'plant', etc.
-  static bool _matchesWord(String label, String keyword) {
-    final lowerLabel = label.toLowerCase();
-    final lowerKeyword = keyword.toLowerCase();
-    
-    // If keyword has space (like 'mountain lion'), use contains
-    if (lowerKeyword.contains(' ')) {
-      return lowerLabel.contains(lowerKeyword);
-    }
-    
-    // For single words, check word boundaries
-    // Split label into words and check for exact match
-    final words = lowerLabel.split(RegExp(r'[\s,\-_]+'));
-    return words.contains(lowerKeyword);
+    // Simple contains check - fast and sufficient with 86% threshold
+    return animalKeywords.any((k) => label.contains(k));
   }
 
   static bool _isFoodLabel(String label) {
