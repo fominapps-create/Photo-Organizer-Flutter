@@ -2,7 +2,7 @@
   "appVersion": "0.4.0-dev",
   "buildNumber": 1,
   "scanLogicVersion": 11,
-  "lastUpdated": "2026-01-01T20:56:00",
+  "lastUpdated": "2026-01-01T21:14:00",
   "changes": [
     "Hierarchical search taxonomy (200+ terms)",
     "Word-boundary matching prevents false positives",
