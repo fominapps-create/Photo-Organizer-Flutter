@@ -2002,9 +2002,11 @@ class GalleryScreenState extends State<GalleryScreen>
     // Only show once per session
     if (_hasShownRescanDialog) return false;
 
-    // Check if we have any scanned photos
-    if (photoTags.isEmpty) {
-      // No photos scanned yet, save current version and return
+    // Check if we have any scanned photos (in storage, not just in-memory)
+    // FIX: photoTags might be empty even if storage has tags from previous version
+    final hasStoredTags = await TagStore.getStoredTagCount() > 0;
+    if (!hasStoredTags && photoTags.isEmpty) {
+      // Truly first-time user with no prior scans, save current version
       await TagStore.saveScanVersion();
       return false;
     }
@@ -2153,6 +2155,10 @@ class GalleryScreenState extends State<GalleryScreen>
     }
     if (_clearingTags) {
       developer.log('⏸️ Tag clearing in progress, blocking scan');
+      return;
+    }
+    if (_rescanPending) {
+      developer.log('⏸️ Rescan pending, blocking auto-scan');
       return;
     }
     final localUrls = imageUrls
@@ -5918,19 +5924,39 @@ class GalleryScreenState extends State<GalleryScreen>
       // If all tags are disabled, show all photos
       if (searchTerms.isEmpty) return true;
 
-      // Expand search terms with synonyms
-      final expandedTerms = <String>{};
-      for (final term in searchTerms) {
-        expandedTerms.add(term);
-        expandedTerms.addAll(_getSearchSynonyms(term));
+      // Category names should ONLY match the category tag, not object detections
+      // This prevents "document" from finding photos with "text" or "screenshot" objects
+      const categoryNames = ['document', 'people', 'animals', 'food', 'scenery', 'other'];
+      
+      // Separate category searches from object searches
+      final categorySearches = searchTerms.where((t) => categoryNames.contains(t)).toSet();
+      final objectSearches = searchTerms.where((t) => !categoryNames.contains(t)).toSet();
+
+      // Expand only object search terms with synonyms (not categories)
+      final expandedObjectTerms = <String>{};
+      for (final term in objectSearches) {
+        expandedObjectTerms.add(term);
+        expandedObjectTerms.addAll(_getSearchSynonyms(term));
       }
 
-      return expandedTerms.any(
-        (searchTerm) =>
-            // Use word-boundary matching to prevent "pet" matching "petal", etc.
-            tags.any((t) => _matchesSearchTerm(t, searchTerm)) ||
-            allDetections.any((d) => _detectionMatchesSearch(d, searchTerm)),
-      );
+      // Category searches: only match category tags
+      final matchesCategory = categorySearches.isEmpty || 
+          categorySearches.any((cat) => tags.any((t) => t.toLowerCase() == cat));
+      
+      // Object searches: match tags OR detections with synonyms
+      final matchesObject = expandedObjectTerms.isEmpty ||
+          expandedObjectTerms.any(
+            (searchTerm) =>
+                tags.any((t) => _matchesSearchTerm(t, searchTerm)) ||
+                allDetections.any((d) => _detectionMatchesSearch(d, searchTerm)),
+          );
+
+      // If searching both categories and objects, require both to match
+      // If only searching one type, that match is sufficient
+      if (categorySearches.isNotEmpty && objectSearches.isNotEmpty) {
+        return matchesCategory && matchesObject;
+      }
+      return matchesCategory && matchesObject;
     }).toList();
 
     // Sort the filtered list

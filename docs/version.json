@@ -1,13 +1,14 @@
 {
   "appVersion": "0.4.0-dev",
-  "buildNumber": 1,
-  "scanLogicVersion": 11,
-  "lastUpdated": "2026-01-01T21:14:00",
+  "buildNumber": 2,
+  "scanLogicVersion": 12,
+  "lastUpdated": "2026-01-01T22:13:00",
   "changes": [
-    "Hierarchical search taxonomy (200+ terms)",
-    "Word-boundary matching prevents false positives",
-    "Face detection fallback for missed group photos",
-    "Lower 70% confidence threshold for food items",
-    "Category quick-select buttons in search"
+    "All categories require 86% confidence (visible = categorized)",
+    "Category search only matches categories, not objects",
+    "Word-boundary matching for animals (mountain≠ant)",
+    "Flowers categorized as Other, not Scenery",
+    "Clothing removed from strong person labels",
+    "Face detection fallback for missed group photos"
   ]
 }

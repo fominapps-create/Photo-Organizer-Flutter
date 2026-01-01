@@ -237,6 +237,10 @@ class LocalTaggingService {
         false; // ear, eye, nose - could be human or animal
     bool hasFurOrAnimalIndicator = false; // fur, paw, tail - indicates animal
 
+    // Minimum confidence threshold for simple category decisions (scenery, animals, food, document)
+    // People uses a tiered system that can combine multiple lower-confidence labels
+    const double minCategoryConfidence = 0.86;
+
     // First pass: collect ALL category matches (not else-if, so people always detected)
     for (final label in labels) {
       final text = label.label.toLowerCase();
@@ -318,27 +322,24 @@ class LocalTaggingService {
         }
       }
       if (_isAnimalLabel(text)) {
-        // FIX: Skip animal detection for pattern/texture labels
-        if (_isNonAnimalPattern(text)) {
+        // FIX: Require 86% confidence for animals (same as visibility threshold)
+        // Hidden labels shouldn't affect categorization
+        if (confidence < minCategoryConfidence) {
+          developer.log(
+            '🐾 Skipping animal "$text" - below 86% threshold (${(confidence * 100).toInt()}%)',
+          );
+        } else if (_isNonAnimalPattern(text)) {
+          // FIX: Skip animal detection for pattern/texture labels
           developer.log('🎨 Skipping animal for pattern/texture: "$text"');
         } else {
-          // FIX #5: Dogs are massively over-detected - require very high confidence
-          // Dogs are detected on random objects, furniture, patterns - need 0.85+
-          final isDog = text.contains('dog') && !text.contains('hot dog');
-          if (isDog && confidence < 0.85) {
-            developer.log(
-              '🐕 Skipping low-confidence dog ($confidence < 0.85): "$text"',
-            );
-          } else {
-            categories.add('animals');
-            if (confidence > bestAnimalConfidence) {
-              bestAnimalConfidence = confidence;
-              bestAnimalLabel = text;
-            }
-            // Track all detected animal types with their confidences for smart deduplication
-            detectedAnimalTypes.add(text);
-            animalConfidences[text] = confidence;
+          categories.add('animals');
+          if (confidence > bestAnimalConfidence) {
+            bestAnimalConfidence = confidence;
+            bestAnimalLabel = text;
           }
+          // Track all detected animal types with their confidences for smart deduplication
+          detectedAnimalTypes.add(text);
+          animalConfidences[text] = confidence;
         }
       }
       // Fix #9: Check for fur/animal indicators early (needed for tier decision)
@@ -358,6 +359,11 @@ class LocalTaggingService {
             text.contains('bloom') ||
             text.contains('blossom')) {
           developer.log('🌸 Skipping food for flower/plant: "$text"');
+        } else if (confidence < minCategoryConfidence) {
+          // FIX: Require 86% confidence for food (same as visibility threshold)
+          developer.log(
+            '🍕 Skipping food "$text" - below 86% threshold (${(confidence * 100).toInt()}%)',
+          );
         } else {
           // Check if this is a STRONG food label (actual food item, not just context)
           if (_isStrongFoodLabel(text)) {
@@ -371,20 +377,17 @@ class LocalTaggingService {
           }
         }
       }
-      // Document detection with stricter requirements
-      if (_isDocumentLabel(text)) {
-        // Only count as document if confidence is high enough
-        if (confidence >= 0.65) {
-          categories.add('document');
-          if (confidence > bestDocumentConfidence) {
-            bestDocumentConfidence = confidence;
-          }
+      // Document detection - require 86% confidence (same as visibility threshold)
+      if (_isDocumentLabel(text) && confidence >= minCategoryConfidence) {
+        categories.add('document');
+        if (confidence > bestDocumentConfidence) {
+          bestDocumentConfidence = confidence;
         }
       }
       // Scenery detection - track if we have strong vs weak labels
-      // FIX #14: Require higher confidence for scenery (sky often low confidence)
-      // FIX: Skip scenery for screenshots with text (monochromatic backgrounds look like sky)
-      if (_isSceneryLabel(text) && confidence >= 0.55) {
+      // FIX: Require 86% confidence for scenery (same as search threshold)
+      // This prevents low-confidence labels like tree:0.60 from triggering scenery
+      if (_isSceneryLabel(text) && confidence >= minCategoryConfidence) {
         if (!_isWeakSceneryLabel(text)) {
           hasOnlyWeakScenery = false;
         }
@@ -778,6 +781,29 @@ class LocalTaggingService {
       );
     }
 
+    // FIX: Flowers should be Other, not Scenery
+    // A photo focused on flowers/plants is not landscape/scenery
+    if (flowerPlantIndicators >= 1 && categories.contains('scenery')) {
+      // Check if there are STRONG scenery indicators beyond just garden/tree
+      final hasStrongScenery = allDetections.any((d) {
+        final lower = d.toLowerCase();
+        return lower.contains('landscape') ||
+            lower.contains('mountain') ||
+            lower.contains('beach') ||
+            lower.contains('ocean') ||
+            lower.contains('sunset') ||
+            lower.contains('sunrise') ||
+            lower.contains('panorama') ||
+            lower.contains('horizon');
+      });
+      if (!hasStrongScenery) {
+        categories.remove('scenery');
+        developer.log(
+          '🌸 Removed scenery - flower/plant photo without strong landscape indicators',
+        );
+      }
+    }
+
     // NOTE: Food is a CATEGORY derived from detected food items (cake, pie, etc.)
     // It should NOT be added as an object or have confidence-based fallback
 
@@ -1113,31 +1139,9 @@ class LocalTaggingService {
       'grin',
       'frown',
       'expression',
-      // Clothing worn by people (CRITICAL - clothes on body = people)
-      'dress',
-      'jacket',
-      'coat',
-      'sweater',
-      'shirt',
-      'blouse',
-      'suit',
-      'tuxedo',
-      'gown',
-      'outwear',
-      'outerwear',
-      'hoodie',
-      'cardigan',
-      'vest',
-      'uniform',
-      'costume',
-      'attire',
-      'apparel',
-      'jeans',
-      'pants',
-      'trousers',
-      'shorts',
-      'skirt',
-      'legging',
+      // NOTE: Clothing removed from strong labels - a single clothing item
+      // could be on a rack, mannequin, or in a store. Use tier2 system instead
+      // which requires 2+ clothing items for people classification.
     ];
     return strongLabels.any((k) => label.contains(k));
   }
@@ -1639,7 +1643,25 @@ class LocalTaggingService {
       'centipede',
       'millipede',
     ];
-    return animalKeywords.any((k) => label.contains(k));
+    // Use word boundary matching to prevent 'ant' matching 'mountain'
+    return animalKeywords.any((k) => _matchesWord(label, k));
+  }
+
+  /// Check if a label contains a keyword as a whole word (not substring)
+  /// Prevents 'ant' from matching 'mountain', 'plant', etc.
+  static bool _matchesWord(String label, String keyword) {
+    final lowerLabel = label.toLowerCase();
+    final lowerKeyword = keyword.toLowerCase();
+    
+    // If keyword has space (like 'mountain lion'), use contains
+    if (lowerKeyword.contains(' ')) {
+      return lowerLabel.contains(lowerKeyword);
+    }
+    
+    // For single words, check word boundaries
+    // Split label into words and check for exact match
+    final words = lowerLabel.split(RegExp(r'[\s,\-_]+'));
+    return words.contains(lowerKeyword);
   }
 
   static bool _isFoodLabel(String label) {
@@ -1783,6 +1805,20 @@ class LocalTaggingService {
   static bool _isStrongFoodLabel(String label) {
     // Actual food items that definitely indicate food is the subject
     const strongFoodKeywords = [
+      // Generic food terms (high confidence = definitely food)
+      'food',
+      'meal',
+      'cuisine',
+      'dish',
+      'recipe',
+      'cooking',
+      'baking',
+      // Meal times
+      'breakfast',
+      'lunch',
+      'dinner',
+      'snack',
+      'dessert',
       // Baked goods / desserts
       'cake',
       'cookie',
@@ -1816,6 +1852,9 @@ class LocalTaggingService {
       'fries',
       'soup',
       'salad',
+      'meat',
+      'fish',
+      'seafood',
       // Fruits & vegetables
       'fruit',
       'vegetable',
@@ -1832,6 +1871,15 @@ class LocalTaggingService {
       // Dairy & protein
       'egg',
       'cheese',
+      'milk',
+      // Drinks (actual beverages, not just containers)
+      'coffee',
+      'tea',
+      'juice',
+      'wine',
+      'beer',
+      'beverage',
+      'drink',
     ];
     return strongFoodKeywords.any((k) => label.contains(k));
   }

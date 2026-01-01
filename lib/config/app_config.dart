@@ -28,7 +28,7 @@ class AppConfig {
   // 8  - Detections store confidence, search filters low-confidence
   // 9  - Pedestrian/walker/jogger → People, 2+ clothing items → People
   // 10 - Objects need 86%+ confidence to be searchable
-  static const int scanLogicVersion = 11;
+  static const int scanLogicVersion = 12;
 
   // ============ DERIVED VALUES ============
   /// Version without stage suffix (for display)
