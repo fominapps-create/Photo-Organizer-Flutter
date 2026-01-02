@@ -246,8 +246,13 @@ class LocalTaggingService {
           hiddenLabels.any((h) => text.contains(h)) &&
           !text.contains('hot dog'); // hot dog is food, not animal
 
-      if (confidence >= 0.86 && !categoryNames.contains(text) && !isCatOrDog) {
-        allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
+      // DEBUG MODE: Show ALL labels regardless of confidence for debugging
+      // Change to 0.86 to hide low-confidence labels in production
+      const debugShowAllLabels = true;
+      final minVisibleConfidence = debugShowAllLabels ? 0.0 : 0.86;
+      
+      if (confidence >= minVisibleConfidence && !categoryNames.contains(text) && !isCatOrDog) {
+        allDetections.add('${label.label}:${(confidence * 100).toInt()}%');
       }
 
       // Fix #3, #9, #10: Detect illustration indicators (require 30% confidence)

@@ -621,15 +621,10 @@ class _PhotoViewerState extends State<PhotoViewer>
   }
 
   Widget _buildTagsOverlay(PhotoData photo) {
-    // Get unique detections that aren't already in tags
-    final extraDetections = photo.allDetections
-        .where(
-          (d) =>
-              !photo.tags.map((t) => t.toLowerCase()).contains(d.toLowerCase()),
-        )
-        .toList();
+    // DEBUG: Show ALL detections including those in tags
+    final allDetectionsDebug = photo.allDetections.toList();
 
-    if (photo.tags.isEmpty && extraDetections.isEmpty) {
+    if (photo.tags.isEmpty && allDetectionsDebug.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -704,45 +699,49 @@ class _PhotoViewerState extends State<PhotoViewer>
                   }).toList(),
                 ),
               ],
-              // All detected objects
-              if (extraDetections.isNotEmpty) ...[
+              // All detected objects (DEBUG: show all ML Kit labels)
+              if (allDetectionsDebug.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text(
-                  'Detected Objects',
-                  style: TextStyle(
+                Text(
+                  'ML Kit Labels (${allDetectionsDebug.length})',
+                  style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: extraDetections.map((obj) {
-                    final displayObj = _capitalizeTag(obj);
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: labelBgColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.4),
-                        ),
-                      ),
-                      child: Text(
-                        displayObj,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 120),
+                  child: SingleChildScrollView(
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: allDetectionsDebug.map((obj) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: labelBgColor,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Text(
+                            obj,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
               ],
               // Show scan version if available (for debugging)
