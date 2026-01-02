@@ -250,10 +250,11 @@ class LocalTaggingService {
         allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
       }
 
-      // Fix #3, #9, #10: Detect illustration indicators first
-      if (_isIllustrationLabel(text)) {
+      // Fix #3, #9, #10: Detect illustration indicators (require 30% confidence)
+      // Low confidence "art" or "character" shouldn't block real people photos
+      if (_isIllustrationLabel(text) && confidence >= 0.30) {
         hasIllustrationIndicator = true;
-        developer.log('🎨 Illustration indicator: "$text"');
+        developer.log('🎨 Illustration indicator: "$text" (${(confidence * 100).toInt()}%)');
       }
 
       // Check ALL categories independently (not else-if)
@@ -398,7 +399,7 @@ class LocalTaggingService {
     }
 
     // SIMPLIFIED PEOPLE DETECTION (v16)
-    // Rule: 2+ direct at moderate conf (≥50%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
+    // Rule: 2+ direct at any conf, OR 1+ direct + 2+ clothing
     bool shouldAddPeople = false;
     String peopleReason = '';
 
@@ -412,15 +413,11 @@ class LocalTaggingService {
       shouldAddPeople = false;
       peopleReason = 'animal indicator with weak people evidence';
       developer.log('🐾 Not adding people - $peopleReason');
-    } else if (directPeopleModerateCount >= 2) {
-      // 2+ direct labels at moderate confidence (≥50%) = definitely people
+    } else if (directPeopleCount >= 2) {
+      // 2+ direct labels at any confidence = definitely people
       shouldAddPeople = true;
       peopleReason =
-          '2+ direct labels at moderate confidence ($directPeopleModerateCount)';
-    } else if (directPeopleCount >= 3) {
-      // 3+ direct labels at any confidence = corroborating evidence = people
-      shouldAddPeople = true;
-      peopleReason = '3+ direct labels corroborating ($directPeopleCount)';
+          '2+ direct labels ($directPeopleCount)';
     } else if (directPeopleCount >= 1 && clothingCount >= 2) {
       // 1+ direct + 2+ clothing = body confirms clothes are worn = people
       shouldAddPeople = true;
@@ -437,15 +434,10 @@ class LocalTaggingService {
       );
     }
 
-    // SIMPLIFIED ANIMAL DETECTION (v16)
-    // Same logic as people: multiple low-confidence detections = real animal
-    // Rule: 2+ animal labels at ≥50% OR 3+ at any OR indicator + 1 label
+    // SIMPLIFIED ANIMAL DETECTION (v17)
+    // Same logic as people: 2+ labels at any confidence = animals
     if (!categories.contains('animals')) {
       final animalCount = detectedAnimalTypes.length;
-      // Count how many have moderate confidence (≥50%)
-      final moderateAnimalCount = animalConfidences.values
-          .where((c) => c >= 0.50)
-          .length;
 
       // Pick best confidence label (used in logging)
       String? bestAnimal;
@@ -457,21 +449,13 @@ class LocalTaggingService {
         }
       }
 
-      if (moderateAnimalCount >= 2) {
-        // 2+ animal labels at ≥50% = definitely animals
+      if (animalCount >= 2) {
+        // 2+ animal labels at any confidence = definitely animals
         categories.add('animals');
         bestAnimalLabel = bestAnimal;
         bestAnimalConfidence = bestAnimalConf;
         developer.log(
-          '🐾 Added animals: 2+ labels at ≥50% ($moderateAnimalCount moderate: ${detectedAnimalTypes.join(", ")})',
-        );
-      } else if (animalCount >= 3) {
-        // 3+ animal labels at any confidence = corroborating evidence
-        categories.add('animals');
-        bestAnimalLabel = bestAnimal;
-        bestAnimalConfidence = bestAnimalConf;
-        developer.log(
-          '🐾 Added animals: 3+ labels corroborating ($animalCount: ${detectedAnimalTypes.join(", ")})',
+          '🐾 Added animals: 2+ labels ($animalCount: ${detectedAnimalTypes.join(", ")})',
         );
       } else if (hasFurOrAnimalIndicator && animalCount >= 1) {
         // Fur/paw/tail + at least one animal label = animals
