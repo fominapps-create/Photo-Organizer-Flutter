@@ -146,6 +146,38 @@
             font-size: 11px;
             color: #666;
         }
+        
+        .color-palette {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 25px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+        }
+        
+        .color-swatch {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            padding-bottom: 5px;
+            font-size: 8px;
+            font-weight: bold;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+        
+        .color-swatch span {
+            background: rgba(0,0,0,0.5);
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -176,6 +208,16 @@
         </div>
         
         <p class="timestamp" id="timestamp">Loading...</p>
+        
+        <div class="color-palette">
+            <div class="color-swatch" style="background: #E67A2E; color: white;"><span>Fox Orange</span></div>
+            <div class="color-swatch" style="background: #F5E4C3; color: #333;"><span>Cream</span></div>
+            <div class="color-swatch" style="background: #6B3F1D; color: white;"><span>Dark Brown</span></div>
+            <div class="color-swatch" style="background: #8EC6E6; color: #333;"><span>Sky Blue</span></div>
+            <div class="color-swatch" style="background: #2F3E4F; color: white;"><span>Dark Gray</span></div>
+            <div class="color-swatch" style="background: #4FA8D5; color: white;"><span>Eye Blue</span></div>
+            <div class="color-swatch" style="background: #FFFFFF; color: #333; border-color: #ccc;"><span>White</span></div>
+        </div>
     </div>
     
     <script>

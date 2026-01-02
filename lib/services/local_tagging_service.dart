@@ -91,74 +91,55 @@ class LocalTaggingService {
   }
 
   /// Classify a single image and return both categories AND raw labels
+  /// OPTIMIZATION: Face detection first (fast ~25ms), then labeling if no faces (~100ms)
+  /// This speeds up scanning by ~16-30% since many photos contain visible faces
   static Future<LocalTagResult> classifyImageWithDetections(
     String imagePath,
   ) async {
     try {
-      final startTime = DateTime.now();
-
       final inputImage = InputImage.fromFilePath(imagePath);
-      final labels = await labeler.processImage(inputImage);
 
-      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+      // STEP 1: Fast face detection first (~25ms)
+      final faceStartTime = DateTime.now();
+      final faces = await faceDetector.processImage(inputImage);
+      final faceElapsed = DateTime.now()
+          .difference(faceStartTime)
+          .inMilliseconds;
+
+      if (faces.isNotEmpty) {
+        // Found faces - immediate "people" result, skip expensive labeling
+        developer.log(
+          '👥 Face detection found ${faces.length} face(s) in ${faceElapsed}ms → people (skipped labeling)',
+        );
+        return LocalTagResult(
+          tags: ['people'],
+          allDetections: ['Faces detected:${faces.length}'],
+        );
+      }
+
       developer.log(
-        'ML Kit processed image in ${elapsed}ms, found ${labels.length} labels',
+        '👤 No faces found in ${faceElapsed}ms, running image labeling...',
+      );
+
+      // STEP 2: No faces found - run full image labeling (~100ms)
+      final labelStartTime = DateTime.now();
+      final labels = await labeler.processImage(inputImage);
+      final labelElapsed = DateTime.now()
+          .difference(labelStartTime)
+          .inMilliseconds;
+
+      developer.log(
+        'ML Kit labeling completed in ${labelElapsed}ms, found ${labels.length} labels',
       );
 
       if (labels.isEmpty) {
-        // No labels at all - try face detection as fallback
-        return await _tryFaceDetectionFallback(imagePath, []);
+        return LocalTagResult(tags: ['other'], allDetections: []);
       }
 
-      final result = _mapLabelsToCategories(labels);
-
-      if (result.tags.isEmpty ||
-          (result.tags.length == 1 && result.tags.first == 'other')) {
-        // Result is "other" - run face detection to catch missed people
-        return await _tryFaceDetectionFallback(imagePath, result.allDetections);
-      }
-
-      return result;
+      return _mapLabelsToCategories(labels);
     } catch (e) {
       developer.log('LocalTaggingService error: $e');
       return LocalTagResult(tags: ['other'], allDetections: []);
-    }
-  }
-
-  /// Fallback: Run face detection when image labeling returns "other"
-  /// This catches group photos and ambiguous people photos that ML Kit missed
-  static Future<LocalTagResult> _tryFaceDetectionFallback(
-    String imagePath,
-    List<String> existingDetections,
-  ) async {
-    try {
-      final startTime = DateTime.now();
-      final inputImage = InputImage.fromFilePath(imagePath);
-      final faces = await faceDetector.processImage(inputImage);
-      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-
-      if (faces.isNotEmpty) {
-        developer.log(
-          '👥 Face detection found ${faces.length} face(s) in ${elapsed}ms - upgrading "other" → "people"',
-        );
-
-        // Add face count to detections for potential future use
-        final detections = List<String>.from(existingDetections);
-        detections.add('Faces detected:${faces.length}');
-
-        return LocalTagResult(tags: ['people'], allDetections: detections);
-      } else {
-        developer.log(
-          '👤 Face detection found no faces in ${elapsed}ms - keeping "other"',
-        );
-        return LocalTagResult(
-          tags: ['other'],
-          allDetections: existingDetections,
-        );
-      }
-    } catch (e) {
-      developer.log('Face detection fallback error: $e');
-      return LocalTagResult(tags: ['other'], allDetections: existingDetections);
     }
   }
 
@@ -213,8 +194,9 @@ class LocalTaggingService {
     // Track all animal confidences for smart deduplication
     final Map<String, double> animalConfidences = {};
 
-    // Track weak scenery labels (indoor/product labels that shouldn't trigger scenery)
-    bool hasOnlyWeakScenery = true;
+    // Track strong scenery labels - need 2+ for real scenery (sky+water, buildings+sky, etc.)
+    // Single label like just "statue" or just "outdoor" = not enough for scenery
+    int strongSceneryCount = 0;
 
     // Track if we have STRONG person indicators (face, person, human - not just clothing)
     bool hasStrongPersonLabel = false;
@@ -225,9 +207,9 @@ class LocalTaggingService {
     // SIMPLIFIED PEOPLE DETECTION (v16)
     // Direct labels: body parts + human terms (child, person, face, hand, hair, etc.)
     // Clothing labels: shirt, pants, dress, etc. (need body evidence to count)
-    // Rule: 2+ direct at moderate conf (≥55%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
+    // Rule: 2+ direct at moderate conf (≥50%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
     int directPeopleCount = 0; // Body parts + human terms
-    int directPeopleModerateCount = 0; // Direct labels at ≥55% confidence
+    int directPeopleModerateCount = 0; // Direct labels at ≥50% confidence
     int clothingCount = 0; // Clothing items (supporting evidence)
     bool hasIllustrationIndicator = false; // Cartoon, toy, logo, etc.
     bool hasFurOrAnimalIndicator = false; // fur, paw, tail - indicates animal
@@ -294,7 +276,7 @@ class LocalTaggingService {
         } else if (_isDirectPeopleLabel(text)) {
           // Direct labels: body parts + human terms
           directPeopleCount++;
-          if (confidence >= 0.55) {
+          if (confidence >= 0.50) {
             directPeopleModerateCount++;
           }
           developer.log(
@@ -309,16 +291,17 @@ class LocalTaggingService {
         }
       }
       if (_isAnimalLabel(text)) {
-        // Track animal indicators at any confidence for count-based detection
-        if (confidence >= 0.50) {
+        // Track animal labels at any confidence for count-based detection
+        if (!_isNonAnimalPattern(text)) {
           detectedAnimalTypes.add(text);
           animalConfidences[text] = confidence;
-        }
-        // Animal threshold 75% for single detection
-        if (confidence < 0.75) {
           developer.log(
-            '🐾 Animal "$text" below 75% (${(confidence * 100).toInt()}%) - tracking for count-based',
+            '🐾 Animal "$text" (${(confidence * 100).toInt()}%) - tracking for count-based',
           );
+        }
+        // Animal threshold 75% for single high-confidence detection
+        if (confidence < 0.75) {
+          // Will be handled by count-based logic below
         } else if (_isNonAnimalPattern(text)) {
           // FIX: Skip animal detection for pattern/texture labels
           developer.log('🎨 Skipping animal for pattern/texture: "$text"');
@@ -369,11 +352,11 @@ class LocalTaggingService {
           bestDocumentConfidence = confidence;
         }
       }
-      // Scenery detection - track if we have strong vs weak labels
+      // Scenery detection - count strong labels, need 2+ for real scenery
       // Scenery threshold slightly lower (75%) to catch more landscape photos
       if (_isSceneryLabel(text) && confidence >= 0.75) {
         if (!_isWeakSceneryLabel(text)) {
-          hasOnlyWeakScenery = false;
+          strongSceneryCount++;
         }
         // Don't add scenery yet - we'll check for screenshot+text combo after the loop
         categories.add('scenery');
@@ -415,7 +398,7 @@ class LocalTaggingService {
     }
 
     // SIMPLIFIED PEOPLE DETECTION (v16)
-    // Rule: 2+ direct at moderate conf (≥55%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
+    // Rule: 2+ direct at moderate conf (≥50%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
     bool shouldAddPeople = false;
     String peopleReason = '';
 
@@ -430,7 +413,7 @@ class LocalTaggingService {
       peopleReason = 'animal indicator with weak people evidence';
       developer.log('🐾 Not adding people - $peopleReason');
     } else if (directPeopleModerateCount >= 2) {
-      // 2+ direct labels at moderate confidence (≥55%) = definitely people
+      // 2+ direct labels at moderate confidence (≥50%) = definitely people
       shouldAddPeople = true;
       peopleReason =
           '2+ direct labels at moderate confidence ($directPeopleModerateCount)';
@@ -456,29 +439,45 @@ class LocalTaggingService {
 
     // SIMPLIFIED ANIMAL DETECTION (v16)
     // Same logic as people: multiple low-confidence detections = real animal
-    // Rule: 2+ animal labels at ≥50% OR animal indicator (fur/paw/tail) + 1 animal label
+    // Rule: 2+ animal labels at ≥50% OR 3+ at any OR indicator + 1 label
     if (!categories.contains('animals')) {
       final animalCount = detectedAnimalTypes.length;
-      if (animalCount >= 2) {
-        // 2+ different animal-related labels = definitely animals
-        categories.add('animals');
-        // Pick best confidence label
-        String? best;
-        double bestConf = 0;
-        for (final entry in animalConfidences.entries) {
-          if (entry.value > bestConf) {
-            bestConf = entry.value;
-            best = entry.key;
-          }
+      // Count how many have moderate confidence (≥50%)
+      final moderateAnimalCount = animalConfidences.values
+          .where((c) => c >= 0.50)
+          .length;
+
+      // Pick best confidence label (used in logging)
+      String? bestAnimal;
+      double bestAnimalConf = 0;
+      for (final entry in animalConfidences.entries) {
+        if (entry.value > bestAnimalConf) {
+          bestAnimalConf = entry.value;
+          bestAnimal = entry.key;
         }
-        bestAnimalLabel = best;
-        bestAnimalConfidence = bestConf;
+      }
+
+      if (moderateAnimalCount >= 2) {
+        // 2+ animal labels at ≥50% = definitely animals
+        categories.add('animals');
+        bestAnimalLabel = bestAnimal;
+        bestAnimalConfidence = bestAnimalConf;
         developer.log(
-          '🐾 Added animals: $animalCount labels corroborating (${detectedAnimalTypes.join(", ")})',
+          '🐾 Added animals: 2+ labels at ≥50% ($moderateAnimalCount moderate: ${detectedAnimalTypes.join(", ")})',
+        );
+      } else if (animalCount >= 3) {
+        // 3+ animal labels at any confidence = corroborating evidence
+        categories.add('animals');
+        bestAnimalLabel = bestAnimal;
+        bestAnimalConfidence = bestAnimalConf;
+        developer.log(
+          '🐾 Added animals: 3+ labels corroborating ($animalCount: ${detectedAnimalTypes.join(", ")})',
         );
       } else if (hasFurOrAnimalIndicator && animalCount >= 1) {
         // Fur/paw/tail + at least one animal label = animals
         categories.add('animals');
+        bestAnimalLabel = bestAnimal;
+        bestAnimalConfidence = bestAnimalConf;
         developer.log(
           '🐾 Added animals: indicator + label combo ($animalCount labels)',
         );
@@ -502,20 +501,14 @@ class LocalTaggingService {
       }
     }
 
-    // SCENERY FILTER: Remove scenery if only indoor/product labels were matched
-    // This prevents "shelf, room, building, products" from being tagged as scenery
-    if (categories.contains('scenery') && hasOnlyWeakScenery) {
-      // If we have other categories, remove scenery
-      if (categories.length > 1) {
-        categories.remove('scenery');
-        developer.log('🔄 Removed weak scenery (indoor/product labels only)');
-      } else {
-        // If scenery is the only category and it's weak, return 'other'
-        categories.remove('scenery');
-        developer.log(
-          '🔄 Removed scenery - only weak indoor labels (building/shelf/room/products)',
-        );
-      }
+    // SCENERY FILTER: Require 2+ strong scenery labels for real scenery
+    // Single labels like "statue", "outdoor", "sky" alone = not enough
+    // Combos like sky+water, buildings+sky, forest+nature = real scenery
+    if (categories.contains('scenery') && strongSceneryCount < 2) {
+      categories.remove('scenery');
+      developer.log(
+        '🔄 Removed scenery - only $strongSceneryCount strong label(s), need 2+ (sky+water, etc.)',
+      );
     }
 
     // SCENERY vs PEOPLE CONFLICT: People detection takes priority over scenery
@@ -661,7 +654,7 @@ class LocalTaggingService {
     if (categories.contains('document') && bestDocumentConfidence >= 0.65) {
       hasStrongCategory = true;
     }
-    if (categories.contains('scenery') && !hasOnlyWeakScenery) {
+    if (categories.contains('scenery') && strongSceneryCount >= 2) {
       hasStrongCategory = true;
     }
 

@@ -34,8 +34,8 @@ class AppConfig {
   // 14 - Hair/skin as strong person labels, food/animals/scenery 75% threshold
   // 15 - Hair/skin in peopleKeywords + Tier 1 (fixes People detection)
   // 16 - SIMPLIFIED: Count-based detection for people AND animals
-  //      People: 2+ direct@55%+ OR 3+ direct@any OR 1 direct + 2 clothing
-  //      Animals: 2+ animal labels@50%+ OR indicator + 1 label
+  //      People: 2+ direct@50%+ OR 3+ direct@any OR 1 direct + 2 clothing
+  //      Animals: 2+ labels@50%+ OR 3+ labels@any OR indicator + 1 label
   //      Face detection fallback when result is "other"
   static const int scanLogicVersion = 16;
 

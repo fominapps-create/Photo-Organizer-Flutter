@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
-import 'package:collection/collection.dart';
 import 'dart:async';
 import 'package:lottie/lottie.dart';
 import 'dart:convert';
@@ -6037,13 +6036,13 @@ class GalleryScreenState extends State<GalleryScreen>
       ..sort((a, b) => b.value.compareTo(a.value));
 
     // ISSUE #5 FIX: Prioritize main categories + Unscanned at the top
-    // Order: People, Animals, Food, Scenery, Documents, Other, Unscanned, then rest by popularity
+    // Order: People, Animals, Food, Scenery, Document, Other, Unscanned, then rest by popularity
     const priorityCategories = [
       'people',
       'animals',
       'food',
       'scenery',
-      'documents',
+      'document',
       'other',
       'unscanned',
     ];
@@ -6052,14 +6051,12 @@ class GalleryScreenState extends State<GalleryScreen>
     final rest = <MapEntry<String, int>>[];
 
     // Add priority categories first (in order)
+    // FIX: For categories, count from photoTags only (not detections)
+    // This ensures "document(50)" shows 50 actual document-tagged photos,
+    // not 491 photos that have "document" or "text" in their detections
     for (final cat in priorityCategories) {
-      final match = sorted.firstWhereOrNull((e) => e.key == cat);
-      if (match != null) {
-        // Use actual count or 1 if not present (for Unscanned which might not be counted)
-        prioritized.add(match);
-      } else if (cat == 'unscanned') {
-        // FIX #6: Only include Unscanned if there are actually unscanned photos
-        // Calculate actual unscanned count, not just check if scanned < total
+      if (cat == 'unscanned') {
+        // Calculate actual unscanned count
         final unscannedCount = imageUrls.where((u) {
           if (_trashedIds.contains(u)) return false;
           final key = p.basename(u);
@@ -6070,10 +6067,18 @@ class GalleryScreenState extends State<GalleryScreen>
         if (unscannedCount > 0) {
           prioritized.add(MapEntry('unscanned', unscannedCount));
         }
+      } else {
+        // Count photos that have this category as their tag (not in detections)
+        final categoryCount = photoTags.values
+            .where((tags) => tags.any((t) => t.toLowerCase() == cat))
+            .length;
+        if (categoryCount > 0) {
+          prioritized.add(MapEntry(cat, categoryCount));
+        }
       }
     }
 
-    // Add rest sorted by popularity
+    // Add rest sorted by popularity (object detections like "cat", "cake", etc.)
     for (final entry in sorted) {
       if (!priorityCategories.contains(entry.key)) {
         rest.add(entry);
