@@ -762,6 +762,231 @@ class GalleryScreenState extends State<GalleryScreen>
     widget.onAlbumCreated?.call();
   }
 
+  /// Format a number with space separators for thousands/millions
+  /// e.g., 1000 → "1 000", 1000000 → "1 000 000"
+  String _formatGemsWithSpaces(int number) {
+    final str = number.toString();
+    final buffer = StringBuffer();
+    int count = 0;
+    for (int i = str.length - 1; i >= 0; i--) {
+      if (count > 0 && count % 3 == 0) {
+        buffer.write(' ');
+      }
+      buffer.write(str[i]);
+      count++;
+    }
+    return buffer.toString().split('').reversed.join();
+  }
+
+  /// Show gem purchase dialog with different gem packages
+  void _showGemPurchaseDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header with gem icon
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset('assets/currency_v1.png', width: 40, height: 40),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Get More Gems',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use gems to unlock premium features',
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 24),
+              // Gem packages
+              _buildGemPackage(
+                gems: 100,
+                price: '\$0.99',
+                onTap: () => _purchaseGems(100, '\$0.99'),
+              ),
+              const SizedBox(height: 12),
+              _buildGemPackage(
+                gems: 500,
+                price: '\$3.99',
+                bonus: '+50 bonus',
+                onTap: () => _purchaseGems(500, '\$3.99'),
+              ),
+              const SizedBox(height: 12),
+              _buildGemPackage(
+                gems: 1200,
+                price: '\$7.99',
+                bonus: '+200 bonus',
+                popular: true,
+                onTap: () => _purchaseGems(1200, '\$7.99'),
+              ),
+              const SizedBox(height: 12),
+              _buildGemPackage(
+                gems: 3000,
+                price: '\$14.99',
+                bonus: '+600 bonus',
+                onTap: () => _purchaseGems(3000, '\$14.99'),
+              ),
+              const SizedBox(height: 12),
+              _buildGemPackage(
+                gems: 10000,
+                price: '\$39.99',
+                bonus: '+2500 bonus',
+                bestValue: true,
+                onTap: () => _purchaseGems(10000, '\$39.99'),
+              ),
+              const SizedBox(height: 20),
+              // Cancel button
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(
+                  'Maybe Later',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Build a gem package option
+  Widget _buildGemPackage({
+    required int gems,
+    required String price,
+    String? bonus,
+    bool popular = false,
+    bool bestValue = false,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: popular
+              ? Colors.orange.shade50
+              : bestValue
+              ? Colors.purple.shade50
+              : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: popular
+                ? Colors.orange.shade400
+                : bestValue
+                ? Colors.purple.shade400
+                : Colors.grey.shade300,
+            width: popular || bestValue ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Gem icon and amount
+            Image.asset('assets/currency_v1.png', width: 28, height: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        _formatGemsWithSpaces(gems),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (bonus != null) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            bonus,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (popular)
+                    Text(
+                      'Most Popular',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  if (bestValue)
+                    Text(
+                      'Best Value',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.purple.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            // Price button
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: popular
+                    ? Colors.orange
+                    : bestValue
+                    ? Colors.purple
+                    : Colors.blue,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                price,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Handle gem purchase (placeholder for actual IAP implementation)
+  void _purchaseGems(int gems, String price) {
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Purchase $gems gems for $price - Coming soon!'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   void _showSnackBar(
     String message, {
     Duration? duration,
@@ -1025,10 +1250,11 @@ class GalleryScreenState extends State<GalleryScreen>
     _updateSystemUI();
 
     // Initialize star animation for "final touches" display
+    // Note: Don't start it here - only when _showFinalTouches becomes true
     _starAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4), // Twice as slow
-    )..repeat();
+    );
 
     _scrollController.addListener(_scrollListener);
     _searchController = TextEditingController(text: searchQuery);
@@ -5859,7 +6085,12 @@ class GalleryScreenState extends State<GalleryScreen>
 
   /// Get search suggestions based on existing tags, sorted by popularity
   List<String> getSearchSuggestions({String? prefix, int limit = 50}) {
-    final sorted = _getTagsSortedByPopularity();
+    // Tags to exclude from search suggestions (but still shown on photo details)
+    const excludedSuggestions = {'faces detected'};
+
+    final sorted = _getTagsSortedByPopularity()
+        .where((e) => !excludedSuggestions.contains(e.key))
+        .toList();
 
     if (prefix == null || prefix.isEmpty) {
       return sorted.take(limit).map((e) => e.key).toList();
@@ -7001,47 +7232,26 @@ class GalleryScreenState extends State<GalleryScreen>
                                               : photoTags.isNotEmpty
                                               ? '${photoTags.length} photos scanned ($pct%)'
                                               : 'Preparing to scan...';
-                                          // Green only when ALL photos scanned, always orange otherwise
-                                          final allScanned =
-                                              _cachedLocalPhotoCount > 0 &&
-                                              photoTags.length >=
-                                                  _cachedLocalPhotoCount;
+                                          // Always orange during scanning - blue only when complete
                                           _showBadgeTooltip(
                                             context,
                                             status,
-                                            allScanned
-                                                ? Colors.green.shade700
-                                                : Colors.orange.shade700,
+                                            Colors.orange.shade700,
                                           );
                                         },
                                         child: Builder(
                                           builder: (context) {
-                                            // Green only when ALL photos scanned
-                                            final allScanned =
-                                                _cachedLocalPhotoCount > 0 &&
-                                                photoTags.length >=
-                                                    _cachedLocalPhotoCount;
+                                            // Always orange during scanning - blue only when complete
                                             return Container(
                                               padding: const EdgeInsets.all(
                                                 4,
                                               ), // 4px rule - smaller
                                               decoration: BoxDecoration(
-                                                // Always orange when not complete (no grey state)
-                                                color: allScanned
-                                                    ? Colors.green.shade100
-                                                          .withValues(
-                                                            alpha: 0.3,
-                                                          )
-                                                    : Colors.orange.shade100
-                                                          .withValues(
-                                                            alpha: 0.3,
-                                                          ),
+                                                color: Colors.orange.shade100
+                                                    .withValues(alpha: 0.3),
                                                 shape: BoxShape.circle,
                                                 border: Border.all(
-                                                  // Always orange when not complete (no grey state)
-                                                  color: allScanned
-                                                      ? Colors.green.shade600
-                                                      : Colors.orange.shade600,
+                                                  color: Colors.orange.shade600,
                                                   width: 2,
                                                 ),
                                                 boxShadow: [
@@ -7055,17 +7265,14 @@ class GalleryScreenState extends State<GalleryScreen>
                                               ),
                                               child: Icon(
                                                 Icons.verified_outlined,
-                                                // Always orange when not complete (no grey state)
-                                                color: allScanned
-                                                    ? Colors.green.shade600
-                                                    : Colors.orange.shade600,
+                                                color: Colors.orange.shade600,
                                                 size: 16, // 4px rule - smaller
                                               ),
                                             );
                                           },
                                         ),
                                       ),
-                                      // Show loading dots when not complete (always show dots until green checkmark)
+                                      // Show loading dots when not complete (always show dots until blue checkmark)
                                       if (!_validationComplete &&
                                           !_showFinalTouches)
                                         Padding(
@@ -7139,6 +7346,9 @@ class GalleryScreenState extends State<GalleryScreen>
                                                       setState(() {
                                                         _showFinalTouches =
                                                             true;
+                                                        // Start star animation only when needed
+                                                        _starAnimationController
+                                                            .repeat();
                                                       });
                                                     }
                                                   },
@@ -7146,6 +7356,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                               } else if (!isAt100) {
                                                 _reached100At = null;
                                                 _finalTouchesTimer?.cancel();
+                                                if (_showFinalTouches) {
+                                                  // Stop star animation when leaving final touches
+                                                  _starAnimationController
+                                                      .stop();
+                                                }
                                                 _showFinalTouches = false;
                                               }
 
@@ -7243,8 +7458,17 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 );
                                               }
 
-                                              // Show "Preparing to scan..." at 0% or when not actively scanning yet
-                                              if (pctNum == 0 || !_scanning) {
+                                              // Check if there are actually unscanned photos
+                                              final hasUnscannedPhotos =
+                                                  totalPhotos > 0 &&
+                                                  scannedCount < totalPhotos;
+
+                                              // Show "Preparing to scan..." only when:
+                                              // 1. At 0% progress, OR
+                                              // 2. Not actively scanning BUT there are still unscanned photos
+                                              // Don't show if all photos are already scanned
+                                              if ((pctNum == 0 || !_scanning) &&
+                                                  hasUnscannedPhotos) {
                                                 return Text(
                                                   'Preparing to scan...',
                                                   style: TextStyle(
@@ -7254,6 +7478,12 @@ class GalleryScreenState extends State<GalleryScreen>
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 );
+                                              }
+
+                                              // If not scanning and no unscanned photos, hide the text
+                                              if (!_scanning &&
+                                                  !hasUnscannedPhotos) {
+                                                return const SizedBox.shrink();
                                               }
 
                                               // Always show percentage during scanning (except at 0% and 100%)
@@ -7272,84 +7502,54 @@ class GalleryScreenState extends State<GalleryScreen>
                                   ),
                                 ),
                               ),
-                            Positioned(
-                              right: 120, // 4px rule
-                              top: 0, // 4px rule
-                              child: IconButton(
-                                icon: Icon(
-                                  _showTags ? Icons.label_off : Icons.label,
-                                  color:
-                                      Theme.of(context).brightness ==
-                                          Brightness.dark
-                                      ? Colors.white
-                                      : Colors.black,
-                                  size: 22,
-                                ),
-                                tooltip: _showTags ? 'Hide tags' : 'Show tags',
-                                onPressed: () =>
-                                    setState(() => _showTags = !_showTags),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
-                            ),
+
                             // Credits on the right
                             Positioned(
                               right: 4, // 4px rule
                               top: 0,
-                              child: Container(
-                                padding: const EdgeInsets.only(
-                                  left: 12, // 4px rule
-                                  right: 4, // 4px rule
-                                  top: 8, // 4px rule
-                                  bottom: 8, // 4px rule
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(
-                                    24,
-                                  ), // 4px rule
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.1,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Red + button for purchasing gems
+                                  GestureDetector(
+                                    onTap: _showGemPurchaseDialog,
+                                    child: Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        shape: BoxShape.circle,
                                       ),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 80,
-                                      ),
-                                      child: Text(
-                                        '1k',
-                                        style: TextStyle(
-                                          color:
-                                              Theme.of(context).brightness ==
-                                                  Brightness.dark
-                                              ? const Color(
-                                                  0xFFFF69B4,
-                                                ) // Bright pink in dark mode
-                                              : Colors.red, // Red in light mode
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 0.5,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
+                                      child: const Icon(
+                                        Icons.add,
+                                        color: Colors.white,
+                                        size: 20,
                                       ),
                                     ),
-                                    const SizedBox(width: 4),
-                                    Image.asset(
-                                      'assets/currency_v1.png',
-                                      width: 24,
-                                      height: 24,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _formatGemsWithSpaces(1000),
+                                    style: TextStyle(
+                                      color:
+                                          Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? const Color(
+                                              0xFFFF69B4,
+                                            ) // Bright pink in dark mode
+                                          : Colors.red, // Red in light mode
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Image.asset(
+                                    'assets/currency_v1.png',
+                                    width: 32,
+                                    height: 32,
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -7426,27 +7626,29 @@ class GalleryScreenState extends State<GalleryScreen>
                                       final isDisabled = _disabledFilterTags
                                           .contains(tagLower);
 
+                                      // Helper function to remove this tag
+                                      void removeTag() {
+                                        setState(() {
+                                          final tags = searchQuery
+                                              .split(' ')
+                                              .where(
+                                                (t) => t != tag && t.isNotEmpty,
+                                              )
+                                              .toList();
+                                          searchQuery = tags.join(' ');
+                                          _searchController.text = searchQuery;
+                                          _disabledFilterTags.remove(tagLower);
+                                        });
+                                        widget.onSearchChanged?.call();
+                                      }
+
                                       return Padding(
                                         padding: const EdgeInsets.only(
                                           right: 8,
                                         ),
+                                        // Tap anywhere on chip to remove the filter
                                         child: GestureDetector(
-                                          // Tap chip to toggle on/off
-                                          onTap: () {
-                                            setState(() {
-                                              if (isDisabled) {
-                                                _disabledFilterTags.remove(
-                                                  tagLower,
-                                                );
-                                              } else {
-                                                _disabledFilterTags.add(
-                                                  tagLower,
-                                                );
-                                              }
-                                              // Clear cache to force re-filter
-                                              _cachedFilteredUrls.clear();
-                                            });
-                                          },
+                                          onTap: removeTag,
                                           child: AnimatedContainer(
                                             duration: const Duration(
                                               milliseconds: 200,
@@ -7532,42 +7734,17 @@ class GalleryScreenState extends State<GalleryScreen>
                                                 const SizedBox(
                                                   width: 8,
                                                 ), // 4px rule
-                                                GestureDetector(
-                                                  onTap: () {
-                                                    setState(() {
-                                                      final tags = searchQuery
-                                                          .split(' ')
-                                                          .where(
-                                                            (t) =>
-                                                                t != tag &&
-                                                                t.isNotEmpty,
-                                                          )
-                                                          .toList();
-                                                      searchQuery = tags.join(
-                                                        ' ',
-                                                      );
-                                                      _searchController.text =
-                                                          searchQuery;
-                                                      // Also remove from disabled set
-                                                      _disabledFilterTags
-                                                          .remove(tagLower);
-                                                    });
-                                                    widget.onSearchChanged
-                                                        ?.call();
-                                                  },
-                                                  child: Icon(
-                                                    Icons.close,
-                                                    size: 16,
-                                                    color: isDisabled
-                                                        ? Colors.grey.shade400
-                                                        : (Theme.of(
-                                                                    context,
-                                                                  ).brightness ==
-                                                                  Brightness
-                                                                      .dark
-                                                              ? Colors.white
-                                                              : Colors.black87),
-                                                  ),
+                                                // X button also removes (same as tapping chip)
+                                                Icon(
+                                                  Icons.close,
+                                                  size: 16,
+                                                  color:
+                                                      Theme.of(
+                                                            context,
+                                                          ).brightness ==
+                                                          Brightness.dark
+                                                      ? Colors.white
+                                                      : Colors.black87,
                                                 ),
                                               ],
                                             ),
@@ -7803,74 +7980,108 @@ class GalleryScreenState extends State<GalleryScreen>
                                           // Select All button - visible when in select mode
                                           if (_isSelectMode) ...[
                                             const SizedBox(width: 8),
-                                            GestureDetector(
-                                              onTap: () {
-                                                setState(() {
-                                                  // Select all visible photos
-                                                  _updateCachedFilteredList();
-                                                  for (final url
-                                                      in _cachedFilteredUrls) {
-                                                    final key = p.basename(url);
-                                                    _selectedKeys.add(key);
-                                                  }
-                                                });
-                                                _updateSelectionCount();
-                                              },
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 8,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.orange.shade50,
-                                                  borderRadius:
-                                                      BorderRadius.circular(20),
-                                                  border: Border.all(
-                                                    color:
-                                                        Colors.orange.shade400,
-                                                    width: 2,
-                                                  ),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black
-                                                          .withValues(
-                                                            alpha: 0.1,
+                                            Builder(
+                                              builder: (context) {
+                                                // Check if all visible photos are selected
+                                                _updateCachedFilteredList();
+                                                final allSelected =
+                                                    _cachedFilteredUrls
+                                                        .isNotEmpty &&
+                                                    _cachedFilteredUrls.every(
+                                                      (url) => _selectedKeys
+                                                          .contains(
+                                                            p.basename(url),
                                                           ),
-                                                      blurRadius: 4,
-                                                      offset: const Offset(
-                                                        0,
-                                                        2,
+                                                    );
+                                                final buttonColor = allSelected
+                                                    ? Colors.orange.shade700
+                                                    : Colors.black87;
+                                                final bgColor = allSelected
+                                                    ? Colors.orange.shade50
+                                                    : Colors.grey.shade100;
+                                                final borderColor = allSelected
+                                                    ? Colors.orange.shade400
+                                                    : Colors.grey.shade400;
+
+                                                return GestureDetector(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      if (allSelected) {
+                                                        // Deselect all
+                                                        _selectedKeys.clear();
+                                                      } else {
+                                                        // Select all visible photos
+                                                        for (final url
+                                                            in _cachedFilteredUrls) {
+                                                          final key = p
+                                                              .basename(url);
+                                                          _selectedKeys.add(
+                                                            key,
+                                                          );
+                                                        }
+                                                      }
+                                                    });
+                                                    _updateSelectionCount();
+                                                  },
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 12,
+                                                          vertical: 8,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: bgColor,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            20,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: borderColor,
+                                                        width: 2,
                                                       ),
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: Colors.black
+                                                              .withValues(
+                                                                alpha: 0.1,
+                                                              ),
+                                                          blurRadius: 4,
+                                                          offset: const Offset(
+                                                            0,
+                                                            2,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ],
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.select_all,
-                                                      color: Colors
-                                                          .orange
-                                                          .shade700,
-                                                      size: 20,
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          allSelected
+                                                              ? Icons.check_box
+                                                              : Icons
+                                                                    .check_box_outline_blank,
+                                                          color: buttonColor,
+                                                          size: 20,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 8,
+                                                        ),
+                                                        Text(
+                                                          'Select All',
+                                                          style: TextStyle(
+                                                            color: buttonColor,
+                                                            fontSize: 16,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                    const SizedBox(width: 8),
-                                                    Text(
-                                                      'Select All',
-                                                      style: TextStyle(
-                                                        color: Colors
-                                                            .orange
-                                                            .shade700,
-                                                        fontSize: 16,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ],
                                           if (_isSelectMode &&
@@ -8666,6 +8877,11 @@ class GalleryScreenState extends State<GalleryScreen>
                                                         // Trigger final touches animation by simulating 100%
                                                         setState(() {
                                                           _scanning = true;
+                                                          _showFinalTouches =
+                                                              true;
+                                                          // Start the star animation
+                                                          _starAnimationController
+                                                              .repeat();
                                                           // Ensure we have a valid photo count for the test
                                                           if (_cachedLocalPhotoCount ==
                                                               0) {
@@ -8696,8 +8912,13 @@ class GalleryScreenState extends State<GalleryScreen>
                                                               setState(() {
                                                                 _scanning =
                                                                     false;
+                                                                _showFinalTouches =
+                                                                    false;
                                                                 _reached100At =
                                                                     null;
+                                                                // Stop the star animation
+                                                                _starAnimationController
+                                                                    .stop();
                                                               });
                                                             }
                                                           },
@@ -8751,6 +8972,26 @@ class GalleryScreenState extends State<GalleryScreen>
                                                                   },
                                                                 ),
                                                           ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    ListTile(
+                                                      leading: Icon(
+                                                        _showTags
+                                                            ? Icons.label_off
+                                                            : Icons.label,
+                                                        color: Colors.purple,
+                                                      ),
+                                                      title: Text(
+                                                        _showTags
+                                                            ? 'Hide tags on photos'
+                                                            : 'Show tags on photos',
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(ctx);
+                                                        setState(
+                                                          () => _showTags =
+                                                              !_showTags,
                                                         );
                                                       },
                                                     ),

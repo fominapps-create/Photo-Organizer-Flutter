@@ -1,15 +1,14 @@
 {
-  "appVersion": "0.4.1-dev",
-  "buildNumber": 4,
-  "scanLogicVersion": 14,
-  "lastUpdated": "2026-01-02T13:15:00",
+  "appVersion": "0.4.0-alpha",
+  "buildNumber": 6,
+  "scanLogicVersion": 15,
+  "lastUpdated": "2026-01-02T15:00:00",
   "changes": [
-    "Gem purchase dialog with 5 package tiers",
-    "Gems display: full numbers with space separators, larger icon",
-    "Select All button: checkbox icon, black/orange toggle state",
-    "Fixed 'Preparing to scan' showing when 0 unscanned photos",
-    "Single blue badge for scan complete (removed green intermediate)",
-    "Hair/skin now strong person labels (fixes Other categorization)",
-    "Reduced thresholds: food/animals/scenery 75% (was 86%)"
+    "Improved photo categorization accuracy",
+    "Better People detection (hair, skin, clothing)",
+    "Gem purchase system with tiered packages",
+    "UI improvements: Select All, scanning badges",
+    "Performance optimizations",
+    "Fixed various classification edge cases"
   ]
 }

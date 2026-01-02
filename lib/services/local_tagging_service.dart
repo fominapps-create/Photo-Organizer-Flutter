@@ -265,9 +265,10 @@ class LocalTaggingService {
       // Hide cat/dog from visible labels - ML Kit often confuses them
       // They still trigger "animals" category but aren't searchable individually
       const hiddenLabels = ['cat', 'dog'];
-      final isCatOrDog = hiddenLabels.any((h) => text.contains(h)) && 
-                         !text.contains('hot dog'); // hot dog is food, not animal
-      
+      final isCatOrDog =
+          hiddenLabels.any((h) => text.contains(h)) &&
+          !text.contains('hot dog'); // hot dog is food, not animal
+
       if (confidence >= 0.86 && !categoryNames.contains(text) && !isCatOrDog) {
         allDetections.add('${label.label}:${confidence.toStringAsFixed(2)}');
       }
@@ -328,11 +329,10 @@ class LocalTaggingService {
         }
       }
       if (_isAnimalLabel(text)) {
-        // FIX: Require 86% confidence for animals (same as visibility threshold)
-        // Hidden labels shouldn't affect categorization
-        if (confidence < minCategoryConfidence) {
+        // Animal threshold slightly lower (75%) to catch more animal photos
+        if (confidence < 0.75) {
           developer.log(
-            '🐾 Skipping animal "$text" - below 86% threshold (${(confidence * 100).toInt()}%)',
+            '🐾 Skipping animal "$text" - below 75% threshold (${(confidence * 100).toInt()}%)',
           );
         } else if (_isNonAnimalPattern(text)) {
           // FIX: Skip animal detection for pattern/texture labels
@@ -365,10 +365,10 @@ class LocalTaggingService {
             text.contains('bloom') ||
             text.contains('blossom')) {
           developer.log('🌸 Skipping food for flower/plant: "$text"');
-        } else if (confidence < minCategoryConfidence) {
-          // FIX: Require 86% confidence for food (same as visibility threshold)
+        } else if (confidence < 0.75) {
+          // Food threshold slightly lower (75%) to catch more food photos
           developer.log(
-            '🍕 Skipping food "$text" - below 86% threshold (${(confidence * 100).toInt()}%)',
+            '🍕 Skipping food "$text" - below 75% threshold (${(confidence * 100).toInt()}%)',
           );
         } else {
           // Check if this is a STRONG food label (actual food item, not just context)
@@ -391,9 +391,8 @@ class LocalTaggingService {
         }
       }
       // Scenery detection - track if we have strong vs weak labels
-      // FIX: Require 86% confidence for scenery (same as search threshold)
-      // This prevents low-confidence labels like tree:0.60 from triggering scenery
-      if (_isSceneryLabel(text) && confidence >= minCategoryConfidence) {
+      // Scenery threshold slightly lower (75%) to catch more landscape photos
+      if (_isSceneryLabel(text) && confidence >= 0.75) {
         if (!_isWeakSceneryLabel(text)) {
           hasOnlyWeakScenery = false;
         }
@@ -1049,6 +1048,8 @@ class LocalTaggingService {
       'skirt',
       'legging',
       // Body features unique to humans
+      'hair',
+      'skin',
       'beard',
       'mustache',
       'tattoo',
@@ -1125,6 +1126,9 @@ class LocalTaggingService {
       'forehead',
       'chin',
       'cheek',
+      // Human-specific body features (animals have fur, not hair/skin)
+      'hair',
+      'skin',
       // Back-facing people (CRITICAL - don't delete photos of people from behind)
       'back',
       'shoulder',
@@ -2099,6 +2103,8 @@ class LocalTaggingService {
       'hair',
       'hairstyle',
       'haircut',
+      // Human skin (specific to people photos)
+      'skin',
       // Specific human terms
       'person',
       'human',

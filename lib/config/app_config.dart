@@ -11,11 +11,13 @@ class AppConfig {
   // This should match pubspec.yaml version (without build number)
   // Format: MAJOR.MINOR.PATCH[-STAGE]
   // Examples: "0.5.0-dev", "0.5.0-alpha", "0.5.0-beta", "0.5.0"
-  static const String appVersion = '0.4.0-dev';
+  // NOTE: Keep in sync with docs/version.json - run `dart tools/sync_versions.dart`
+  static const String appVersion = '0.4.0-alpha';
 
   // ============ SCAN LOGIC VERSION ============
   // Simple integer - increment when classification logic changes
   // This triggers the "Rescan All?" dialog for users
+  // NOTE: Keep in sync with docs/version.json - run `dart tools/sync_versions.dart`
   //
   // VERSION HISTORY:
   // 1  - Initial ML Kit implementation
@@ -28,7 +30,10 @@ class AppConfig {
   // 8  - Detections store confidence, search filters low-confidence
   // 9  - Pedestrian/walker/jogger → People, 2+ clothing items → People
   // 10 - Objects need 86%+ confidence to be searchable
-  static const int scanLogicVersion = 13;
+  // 11-13 - Threshold adjustments
+  // 14 - Hair/skin as strong person labels, food/animals/scenery 75% threshold
+  // 15 - Hair/skin in peopleKeywords + Tier 1 (fixes People detection)
+  static const int scanLogicVersion = 15;
 
   // ============ DERIVED VALUES ============
   /// Version without stage suffix (for display)
