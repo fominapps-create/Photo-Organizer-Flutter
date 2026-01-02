@@ -12,7 +12,7 @@ class AppConfig {
   // Format: MAJOR.MINOR.PATCH[-STAGE]
   // Examples: "0.5.0-dev", "0.5.0-alpha", "0.5.0-beta", "0.5.0"
   // NOTE: Keep in sync with docs/version.json - run `dart tools/sync_versions.dart`
-  static const String appVersion = '0.4.0-alpha';
+  static const String appVersion = '0.4.1-dev';
 
   // ============ SCAN LOGIC VERSION ============
   // Simple integer - increment when classification logic changes
@@ -33,7 +33,11 @@ class AppConfig {
   // 11-13 - Threshold adjustments
   // 14 - Hair/skin as strong person labels, food/animals/scenery 75% threshold
   // 15 - Hair/skin in peopleKeywords + Tier 1 (fixes People detection)
-  static const int scanLogicVersion = 15;
+  // 16 - SIMPLIFIED: Count-based detection for people AND animals
+  //      People: 2+ direct@55%+ OR 3+ direct@any OR 1 direct + 2 clothing
+  //      Animals: 2+ animal labels@50%+ OR indicator + 1 label
+  //      Face detection fallback when result is "other"
+  static const int scanLogicVersion = 16;
 
   // ============ DERIVED VALUES ============
   /// Version without stage suffix (for display)

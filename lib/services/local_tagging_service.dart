@@ -201,11 +201,8 @@ class LocalTaggingService {
     // Track confidence scores for conflict resolution
     double bestPeopleConfidence = 0.0;
     double bestAnimalConfidence = 0.0;
-    double bestFoodConfidence = 0.0;
     double bestDocumentConfidence = 0.0;
-    String? bestPeopleLabel;
     String? bestAnimalLabel;
-    String? bestFoodLabel;
 
     // FIX #4: Track highest confidence across ALL labels for global threshold
     double highestConfidence = 0.0;
@@ -225,16 +222,14 @@ class LocalTaggingService {
     // Track if we have STRONG food indicators (actual food items, not just context)
     bool hasStrongFoodLabel = false;
 
-    // Fix #3, #9, #10: Tier-based people detection
-    // Tier 0: Photo-specific terms (selfie, portrait) - one is enough
-    // Tier 1: Human-specific body parts (hand, finger, arm) - one is enough IF no illustration
-    // Tier 2: Clothing/accessories/actions - need 2+ OR 1+context
-    bool hasTier0Label = false; // Explicit photo terms
-    bool hasTier1Label = false; // Human-specific body parts
-    int tier2Count = 0; // Clothing, accessories, actions
+    // SIMPLIFIED PEOPLE DETECTION (v16)
+    // Direct labels: body parts + human terms (child, person, face, hand, hair, etc.)
+    // Clothing labels: shirt, pants, dress, etc. (need body evidence to count)
+    // Rule: 2+ direct at moderate conf (≥55%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
+    int directPeopleCount = 0; // Body parts + human terms
+    int directPeopleModerateCount = 0; // Direct labels at ≥55% confidence
+    int clothingCount = 0; // Clothing items (supporting evidence)
     bool hasIllustrationIndicator = false; // Cartoon, toy, logo, etc.
-    bool hasAmbiguousBodyPart =
-        false; // ear, eye, nose - could be human or animal
     bool hasFurOrAnimalIndicator = false; // fur, paw, tail - indicates animal
 
     // Minimum confidence threshold for simple category decisions (scenery, animals, food, document)
@@ -281,58 +276,48 @@ class LocalTaggingService {
 
       // Check ALL categories independently (not else-if)
       if (_isPeopleLabel(text)) {
-        // Don't add to categories yet - we'll use tier system
-        developer.log('👤 People label matched: "$text"');
+        // Track best people confidence for conflict resolution
         if (confidence > bestPeopleConfidence) {
           bestPeopleConfidence = confidence;
-          bestPeopleLabel = text;
         }
         // Check if this is a STRONG person label (not just clothing/accessories)
-        // FIX #4: Require 65%+ confidence for strong person labels
-        if (_isStrongPersonLabel(text) && confidence >= 0.65) {
+        if (_isStrongPersonLabel(text) && confidence >= 0.55) {
           hasStrongPersonLabel = true;
         }
 
-        // ISSUE #3 FIX: Skip weak false positives that trigger at very low confidence
-        // "flesh", "bird", "jacked" (muscular slang) etc. should never trigger people
+        // SIMPLIFIED PEOPLE DETECTION (v16)
+        // Skip known false positives
         if (_isLowConfidenceFalsePeople(text)) {
           developer.log(
-            '  🚫 Skipped false people match "$text" - known low-confidence false positive',
+            '  🚫 Skipped false people match "$text" - known false positive',
           );
-        } else if (confidence >= 0.70 && _isTier0PeopleLabel(text)) {
-          hasTier0Label = true;
+        } else if (_isDirectPeopleLabel(text)) {
+          // Direct labels: body parts + human terms
+          directPeopleCount++;
+          if (confidence >= 0.55) {
+            directPeopleModerateCount++;
+          }
           developer.log(
-            '  → Tier 0 (photo-specific): "$text" (${(confidence * 100).toInt()}%)',
+            '  → Direct people label: "$text" (${(confidence * 100).toInt()}%) [count: $directPeopleCount, moderate: $directPeopleModerateCount]',
           );
-        } else if (confidence >= 0.65 && _isTier1PeopleLabel(text)) {
-          hasTier1Label = true;
+        } else if (_isClothingLabel(text) && confidence >= 0.50) {
+          // Clothing labels: supporting evidence only
+          clothingCount++;
           developer.log(
-            '  → Tier 1 (human body part): "$text" (${(confidence * 100).toInt()}%)',
-          );
-        } else if (confidence >= 0.65 && _isAmbiguousBodyPart(text)) {
-          hasAmbiguousBodyPart = true;
-          developer.log(
-            '  → Ambiguous body part: "$text" (${(confidence * 100).toInt()}%)',
-          );
-        } else if (confidence >= 0.60 && _isTier2PeopleLabel(text)) {
-          tier2Count++;
-          developer.log(
-            '  → Tier 2 (clothing/action): "$text" (count: $tier2Count, ${(confidence * 100).toInt()}%)',
-          );
-        } else if (confidence < 0.60 &&
-            (_isTier1PeopleLabel(text) ||
-                _isTier2PeopleLabel(text) ||
-                _isAmbiguousBodyPart(text))) {
-          developer.log(
-            '  🚫 Skipped tier classification for "$text" - low confidence ${(confidence * 100).toInt()}% (needs 60%+)',
+            '  → Clothing label: "$text" (${(confidence * 100).toInt()}%) [count: $clothingCount]',
           );
         }
       }
       if (_isAnimalLabel(text)) {
-        // Animal threshold slightly lower (75%) to catch more animal photos
+        // Track animal indicators at any confidence for count-based detection
+        if (confidence >= 0.50) {
+          detectedAnimalTypes.add(text);
+          animalConfidences[text] = confidence;
+        }
+        // Animal threshold 75% for single detection
         if (confidence < 0.75) {
           developer.log(
-            '🐾 Skipping animal "$text" - below 75% threshold (${(confidence * 100).toInt()}%)',
+            '🐾 Animal "$text" below 75% (${(confidence * 100).toInt()}%) - tracking for count-based',
           );
         } else if (_isNonAnimalPattern(text)) {
           // FIX: Skip animal detection for pattern/texture labels
@@ -343,15 +328,14 @@ class LocalTaggingService {
             bestAnimalConfidence = confidence;
             bestAnimalLabel = text;
           }
-          // Track all detected animal types with their confidences for smart deduplication
-          detectedAnimalTypes.add(text);
-          animalConfidences[text] = confidence;
         }
       }
-      // Fix #9: Check for fur/animal indicators early (needed for tier decision)
-      if (_isAnimalIndicator(text)) {
+      // Track animal indicators (fur, paw, tail, whisker) separately
+      if (_isAnimalIndicator(text) && confidence >= 0.50) {
         hasFurOrAnimalIndicator = true;
-        developer.log('🐾 Animal indicator: "$text"');
+        developer.log(
+          '🐾 Animal indicator: "$text" (${(confidence * 100).toInt()}%)',
+        );
       }
       // Food detection with confidence tracking
       // FIX #7: Only add food category if STRONG food label detected (actual food items)
@@ -375,11 +359,6 @@ class LocalTaggingService {
           if (_isStrongFoodLabel(text)) {
             hasStrongFoodLabel = true;
             categories.add('food');
-          }
-          // Track best food confidence regardless
-          if (confidence > bestFoodConfidence) {
-            bestFoodConfidence = confidence;
-            bestFoodLabel = text;
           }
         }
       }
@@ -435,223 +414,92 @@ class LocalTaggingService {
       );
     }
 
-    // Fix #3, #9, #10: TIER-BASED PEOPLE DECISION
-    // Decide if this is really a "people" photo based on tier system
+    // SIMPLIFIED PEOPLE DETECTION (v16)
+    // Rule: 2+ direct at moderate conf (≥55%), OR 3+ direct at any conf, OR 1+ direct + 2+ clothing
     bool shouldAddPeople = false;
-    String tierReason = '';
+    String peopleReason = '';
 
     if (hasIllustrationIndicator) {
       // Illustrations/cartoons/toys are NOT people (even with human-like features)
       shouldAddPeople = false;
-      tierReason = 'illustration detected';
-      developer.log('🎨 Not adding people - $tierReason');
-    } else if (hasTier0Label) {
-      // Tier 0: Explicit photo terms like selfie, portrait - definitely people
+      peopleReason = 'illustration detected';
+      developer.log('🎨 Not adding people - $peopleReason');
+    } else if (hasFurOrAnimalIndicator && directPeopleCount < 3) {
+      // Animal indicators present - need strong people evidence
+      shouldAddPeople = false;
+      peopleReason = 'animal indicator with weak people evidence';
+      developer.log('🐾 Not adding people - $peopleReason');
+    } else if (directPeopleModerateCount >= 2) {
+      // 2+ direct labels at moderate confidence (≥55%) = definitely people
       shouldAddPeople = true;
-      tierReason = 'Tier 0 (photo-specific term)';
-    } else if (hasTier1Label && !hasFurOrAnimalIndicator) {
-      // Tier 1: Human-specific body parts (hand, finger, arm) without animal indicators
+      peopleReason =
+          '2+ direct labels at moderate confidence ($directPeopleModerateCount)';
+    } else if (directPeopleCount >= 3) {
+      // 3+ direct labels at any confidence = corroborating evidence = people
       shouldAddPeople = true;
-      tierReason = 'Tier 1 (human body part, no fur/animal)';
-    } else if (hasAmbiguousBodyPart &&
-        !hasFurOrAnimalIndicator &&
-        tier2Count >= 1) {
-      // Ambiguous parts (ear, eye, eyelash) + at least one clothing/action = people
+      peopleReason = '3+ direct labels corroborating ($directPeopleCount)';
+    } else if (directPeopleCount >= 1 && clothingCount >= 2) {
+      // 1+ direct + 2+ clothing = body confirms clothes are worn = people
       shouldAddPeople = true;
-      tierReason = 'ambiguous body part + Tier 2 context';
-    } else if (tier2Count >= 2 && hasAmbiguousBodyPart) {
-      // ISSUE #8, #10 FIX: Tier2 alone is NOT enough - need body evidence
-      // 2+ tier2 items (clothing) + ambiguous body part = likely people
-      shouldAddPeople = true;
-      tierReason = 'Tier 2 combo + body part ($tier2Count items)';
-    } else if (tier2Count >= 2 && !hasFurOrAnimalIndicator) {
-      // FIX: 2+ tier2 clothing items (sweater, pants, shoes) = definitely people
-      // Animals don't wear clothes, so 2+ clothing items is strong evidence
-      shouldAddPeople = true;
-      tierReason = 'Tier 2 clothing combo ($tier2Count items, no animal)';
-    } else if (hasAmbiguousBodyPart && !hasFurOrAnimalIndicator) {
-      // FIX: Ambiguous body parts (ear, leg, foot, body) without fur = likely human
-      // Animals would have fur/paw/tail indicators alongside these
-      shouldAddPeople = true;
-      tierReason = 'ambiguous body part without fur/animal indicators';
-    } else if (tier2Count == 1 && hasStrongPersonLabel) {
-      // 1 tier2 item + strong person label = people
-      shouldAddPeople = true;
-      tierReason = 'Tier 2 + strong person label';
+      peopleReason =
+          'direct label + clothing combo ($directPeopleCount direct, $clothingCount clothing)';
     }
 
     if (shouldAddPeople) {
       categories.add('people');
-      developer.log('👤 Added people via tier system: $tierReason');
-    } else if (hasTier1Label || tier2Count > 0 || hasAmbiguousBodyPart) {
+      developer.log('👤 Added people: $peopleReason');
+    } else if (directPeopleCount > 0 || clothingCount > 0) {
       developer.log(
-        '🚫 Not adding people - insufficient evidence (T0:$hasTier0Label, T1:$hasTier1Label, T2:$tier2Count, ambig:$hasAmbiguousBodyPart, illust:$hasIllustrationIndicator)',
+        '🚫 Not adding people - insufficient evidence (direct:$directPeopleCount, moderate:$directPeopleModerateCount, clothing:$clothingCount)',
       );
     }
 
-    // SECOND PASS: Check for strong people indicators that may have been missed
-    // If we have beard, fun, event, party etc. without explicit 'person', add people
-    bool hasStrongPeopleContext = false;
-    bool hasBodyParts = false;
-    // Note: hasFurOrAnimalIndicator already set in first pass via _isAnimalIndicator()
-    for (final label in labels) {
-      final text = label.label.toLowerCase();
-      final confidence = label.confidence;
-
-      // FIX #3: Skip known false positives for body part detection
-      if (_isLowConfidenceFalsePeople(text)) {
-        continue; // Skip flesh, bird, jacked entirely
-      }
-
-      if (text.contains('beard') ||
-          text.contains('fun ') || // 'fun' with space to avoid 'function'
-          text.contains('event') ||
-          text.contains('party') ||
-          text.contains('gathering') ||
-          text.contains('celebration') ||
-          text.contains('crew') ||
-          text.contains('team')) {
-        hasStrongPeopleContext = true;
-      }
-      // Check for body parts (could be human or animal)
-      // ISSUE #2 & #3 FIX: Extended body parts for better people detection
-      // FIX #3: Require minimum confidence (65%) for body parts to count
-      if (confidence >= 0.65 &&
-          (text.contains('hand') ||
-              text.contains('finger') ||
-              text.contains('arm') ||
-              text.contains('leg') ||
-              text.contains('foot') ||
-              text.contains('back') ||
-              text.contains('shoulder') ||
-              text.contains('torso') ||
-              text.contains('body') ||
-              text.contains('skin') ||
-              text.contains('muscle') ||
-              text.contains('chest') ||
-              text.contains('neck') ||
-              text.contains('waist') ||
-              text.contains('hip') ||
-              text.contains('thigh') ||
-              text.contains('sitting') ||
-              text.contains('standing') ||
-              text.contains('walking') ||
-              text.contains('running'))) {
-        hasBodyParts = true;
-        developer.log(
-          '  → Body part detected: "$text" (${(confidence * 100).toInt()}%)',
-        );
-      } else if (confidence < 0.65 &&
-          (text.contains('hand') ||
-              text.contains('finger') ||
-              text.contains('arm') ||
-              text.contains('skin') ||
-              text.contains('muscle') ||
-              text.contains('body'))) {
-        developer.log(
-          '  🚫 Skipped low-confidence body part: "$text" (${(confidence * 100).toInt()}% < 65%)',
-        );
-      }
-    }
-    // FOOD PRIORITY FIX: Don't add people from weak context (celebration/party) when strong food detected
-    // This prevents cake photos being tagged as "people" just because of "celebration" label
-    // ISSUE #1 FIX: Only add people from context if we also have actual body/tier evidence
-    // Just having "party" or "christmas" alone shouldn't make it a people photo
-    // FIX: Event/party labels in tier2 shouldn't count as evidence - need ACTUAL body parts or tier1
-    final hasBodyOrTierEvidence = hasBodyParts || hasTier1Label;
-    if (hasStrongPeopleContext &&
-        hasBodyOrTierEvidence &&
-        !categories.contains('people') &&
-        !hasStrongFoodLabel) {
-      categories.add('people');
-      developer.log(
-        '👤 Added people category from context + body evidence (beard/fun/event/crew/team/etc)',
-      );
-    } else if (hasStrongPeopleContext && !hasBodyOrTierEvidence) {
-      developer.log(
-        '🚫 Skipped people from context alone - no body/tier evidence (party/event without people)',
-      );
-    } else if (hasStrongPeopleContext && hasStrongFoodLabel) {
-      developer.log(
-        '🍰 Skipped people from context - strong food label detected (${bestFoodLabel ?? "food"})',
-      );
-    }
-
-    // BODY PARTS WITHOUT FUR = PEOPLE (Issue #2)
-    // If we detect body parts but no fur/animal indicators, it's likely human
-    if (hasBodyParts &&
-        !hasFurOrAnimalIndicator &&
-        !categories.contains('people')) {
-      categories.add('people');
-      hasStrongPersonLabel =
-          true; // Treat as strong since body parts without fur = human
-      developer.log(
-        '👤 Added people category - body parts detected without fur/animal indicators',
-      );
-    }
-
-    // CONFLICT RESOLUTION: When both people AND animals detected, check confidence
-    // This prevents animal photos being tagged as people due to weak body-part labels
-    if (categories.contains('people') && categories.contains('animals')) {
-      // If animal confidence is significantly higher, remove people
-      // Or if people detection is based on weak/generic labels
-      if (bestAnimalConfidence > bestPeopleConfidence + 0.1) {
-        // But if we have strong people context, keep people instead
-        if (hasStrongPeopleContext) {
-          categories.remove('animals');
-          developer.log(
-            '🔄 Conflict: Kept people (strong context) over animals',
-          );
-        } else {
-          // Animal label is more confident - likely an animal photo
-          categories.remove('people');
-          developer.log(
-            '🔄 Conflict: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
-          );
+    // SIMPLIFIED ANIMAL DETECTION (v16)
+    // Same logic as people: multiple low-confidence detections = real animal
+    // Rule: 2+ animal labels at ≥50% OR animal indicator (fur/paw/tail) + 1 animal label
+    if (!categories.contains('animals')) {
+      final animalCount = detectedAnimalTypes.length;
+      if (animalCount >= 2) {
+        // 2+ different animal-related labels = definitely animals
+        categories.add('animals');
+        // Pick best confidence label
+        String? best;
+        double bestConf = 0;
+        for (final entry in animalConfidences.entries) {
+          if (entry.value > bestConf) {
+            bestConf = entry.value;
+            best = entry.key;
+          }
         }
-      } else if (_isWeakPeopleLabel(bestPeopleLabel ?? '') &&
-          !hasStrongPeopleContext) {
-        // People detection based on generic label that animals share
+        bestAnimalLabel = best;
+        bestAnimalConfidence = bestConf;
+        developer.log(
+          '🐾 Added animals: $animalCount labels corroborating (${detectedAnimalTypes.join(", ")})',
+        );
+      } else if (hasFurOrAnimalIndicator && animalCount >= 1) {
+        // Fur/paw/tail + at least one animal label = animals
+        categories.add('animals');
+        developer.log(
+          '🐾 Added animals: indicator + label combo ($animalCount labels)',
+        );
+      }
+    }
+
+    // CONFLICT RESOLUTION: When both people AND animals detected, check evidence strength
+    if (categories.contains('people') && categories.contains('animals')) {
+      // If we have strong direct people evidence (2+ moderate OR 3+ any), keep people
+      // Otherwise let animal win if its confidence is significantly higher
+      if (directPeopleModerateCount >= 2 || directPeopleCount >= 3) {
+        // Strong people evidence - keep both or remove animals
+        developer.log(
+          '🔄 Conflict: Keeping people (strong evidence: $directPeopleCount direct)',
+        );
+      } else if (bestAnimalConfidence > bestPeopleConfidence + 0.15) {
         categories.remove('people');
         developer.log(
-          '🔄 Conflict: Removed weak people label "$bestPeopleLabel" - animal detected',
+          '🔄 Conflict: Removed people in favor of animals (${bestAnimalLabel ?? "?"}: ${(bestAnimalConfidence * 100).toInt()}%)',
         );
       }
-    }
-
-    // LOW CONFIDENCE FILTER: If best people confidence is very low, use 'other'
-    // This prevents false positives like crystals being tagged as "mouth"
-    if (categories.contains('people') &&
-        bestPeopleConfidence < 0.7 &&
-        _isWeakPeopleLabel(bestPeopleLabel ?? '')) {
-      categories.remove('people');
-      developer.log(
-        '🔄 Low confidence: Removed people (${bestPeopleLabel ?? "?"}: ${(bestPeopleConfidence * 100).toInt()}%) - too uncertain',
-      );
-    }
-
-    // WEAK PEOPLE FILTER: Remove people if ONLY weak labels detected (clothing, furniture, etc)
-    // This prevents false positives like crates with labels, excel screenshots, cat photos
-    if (categories.contains('people') &&
-        !hasStrongPersonLabel &&
-        !hasStrongPeopleContext) {
-      categories.remove('people');
-      developer.log(
-        '🔄 Removed people - no strong person indicator found (only weak: ${bestPeopleLabel ?? "?"})',
-      );
-    }
-
-    // FOOD vs PEOPLE CONFLICT: If strong food detected without strong people, food wins
-    // This prevents kitchens/tables with food from being tagged as people
-    if (categories.contains('people') &&
-        categories.contains('food') &&
-        hasStrongFoodLabel &&
-        !hasStrongPersonLabel &&
-        !hasStrongPeopleContext) {
-      categories.remove('people');
-      developer.log(
-        '🔄 Removed people - strong food label detected without strong person indicator',
-      );
     }
 
     // SCENERY FILTER: Remove scenery if only indoor/product labels were matched
@@ -670,31 +518,12 @@ class LocalTaggingService {
       }
     }
 
-    // SCENERY vs PEOPLE CONFLICT: Body parts detected means people, not scenery
-    // This prevents outdoor photos with visible body parts from being tagged as scenery
-    if (categories.contains('scenery') &&
-        categories.contains('people') &&
-        hasBodyParts) {
+    // SCENERY vs PEOPLE CONFLICT: People detection takes priority over scenery
+    if (categories.contains('scenery') && categories.contains('people')) {
       categories.remove('scenery');
       developer.log(
-        '🔄 Removed scenery - body parts detected, keeping people category',
+        '🔄 Removed scenery - people detected, keeping people category',
       );
-    }
-
-    // SCENERY ONLY WITH BODY PARTS: Even if no other category, body parts = people
-    if (categories.contains('scenery') &&
-        hasBodyParts &&
-        !hasFurOrAnimalIndicator) {
-      // Body parts without people category means the weak filter removed it - add it back
-      if (!categories.contains('people')) {
-        categories.add('people');
-        hasStrongPersonLabel = true;
-        developer.log(
-          '👤 Re-added people category - body parts found with scenery',
-        );
-      }
-      categories.remove('scenery');
-      developer.log('🔄 Removed scenery - body parts take priority');
     }
 
     // DOCUMENT FILTER: Require strong document indicators
@@ -817,10 +646,9 @@ class LocalTaggingService {
     bool hasStrongCategory = false;
 
     if (categories.contains('people') &&
-        (hasTier0Label ||
-            hasTier1Label ||
-            hasStrongPersonLabel ||
-            hasBodyParts)) {
+        (directPeopleModerateCount >= 2 ||
+            directPeopleCount >= 3 ||
+            hasStrongPersonLabel)) {
       hasStrongCategory = true;
     }
     if (categories.contains('animals') && detectedAnimalTypes.isNotEmpty) {
@@ -1154,72 +982,6 @@ class LocalTaggingService {
       // which requires 2+ clothing items for people classification.
     ];
     return strongLabels.any((k) => label.contains(k));
-  }
-
-  /// Weak people labels - could match animals or other objects
-  /// Used for conflict resolution when both people and animals detected
-  static bool _isWeakPeopleLabel(String label) {
-    const weakLabels = [
-      // Body parts that animals can also have
-      'finger',
-      'hand',
-      'thumb',
-      'nail',
-      'arm',
-      'eye',
-      'ear',
-      'nose',
-      'mouth',
-      'lip',
-      'hair',
-      'skin',
-      'body',
-      'leg',
-      'foot',
-      'feet',
-      'toe',
-      // Generic actions animals can do too
-      'standing',
-      'walking',
-      'running',
-      // Items that can appear without people
-      'bag',
-      'handbag',
-      'backpack',
-      // Accessories only (not main clothing - those are now strong)
-      'shoe',
-      'sneaker',
-      'boot',
-      'hat',
-      'cap',
-      'glasses',
-      'sunglasses',
-      'goggle',
-      'eyewear',
-      'watch',
-      'jewelry',
-      'necklace',
-      'bracelet',
-      'tie',
-      'scarf',
-      'glove',
-      'sock',
-      'belt',
-      // Furniture/indoor items that don't indicate people
-      'desk',
-      'chair',
-      'table',
-      'furniture',
-      'office',
-      'monitor',
-      'computer',
-      'keyboard',
-      // Generic objects
-      'toy',
-      'vehicle',
-      'musical instrument',
-    ];
-    return weakLabels.any((k) => label.contains(k));
   }
 
   static bool _isAnimalLabel(String label) {
@@ -2060,87 +1822,6 @@ class LocalTaggingService {
     return illustrationKeywords.any((k) => label.contains(k));
   }
 
-  /// Tier 0: Photo-specific terms - definitely a real photo of people
-  /// One match is enough to confirm people
-  static bool _isTier0PeopleLabel(String label) {
-    const tier0Keywords = [
-      'selfie',
-      'portrait',
-      'headshot',
-      'mugshot',
-      'photo of person',
-      'photo of people',
-      'group photo',
-      'family photo',
-    ];
-    return tier0Keywords.any((k) => label.contains(k));
-  }
-
-  /// Tier 1: Human-specific body parts - animals don't have these
-  /// One match is enough IF no illustration/animal indicators
-  static bool _isTier1PeopleLabel(String label) {
-    const tier1Keywords = [
-      // Human-specific body parts (animals have paws, not hands)
-      'hand',
-      'finger',
-      'thumb',
-      'palm',
-      'wrist',
-      'arm',
-      'elbow',
-      'shoulder',
-      // Human facial features with specific terms
-      'beard',
-      'mustache',
-      'moustache',
-      'eyebrow',
-      // ISSUE #9 FIX: Removed 'eyelash' - moved to ambiguous (could be product photo)
-      'forehead',
-      'chin',
-      'cheek',
-      'jaw',
-      // Human hair (animals have fur)
-      'hair',
-      'hairstyle',
-      'haircut',
-      // Human skin (specific to people photos)
-      'skin',
-      // Specific human terms
-      'person',
-      'human',
-      'man',
-      'woman',
-      'child',
-      'kid',
-      'baby',
-      'boy',
-      'girl',
-      'adult',
-      'teenager',
-      'elder',
-      'senior',
-      'crowd',
-      'group',
-      'family',
-      'couple',
-      'people',
-      'face', // ML Kit uses 'face' for humans
-      'skin', // Animals have fur, not skin (as label)
-      // FIX: Walking/street human labels - person from behind
-      'pedestrian',
-      'walker',
-      'jogger',
-      'runner',
-      'cyclist', // person on bike
-      'commuter',
-      'passerby',
-      'traveler',
-      'tourist',
-      'hiker',
-    ];
-    return tier1Keywords.any((k) => label.contains(k));
-  }
-
   /// ISSUE #3 FIX: Known false positives for people detection at low confidence
   /// These should NEVER trigger people classification regardless of confidence
   static bool _isLowConfidenceFalsePeople(String label) {
@@ -2152,149 +1833,53 @@ class LocalTaggingService {
     return falsePeopleKeywords.any((k) => label.contains(k));
   }
 
-  /// Ambiguous body parts - could be human OR animal, or product photos
-  /// Need additional context (Tier 2 or animal indicator) to decide
-  static bool _isAmbiguousBodyPart(String label) {
-    const ambiguousKeywords = [
-      'ear',
-      'eye',
-      'eyelash', // ISSUE #9: Moved from tier1 - eyelash alone could be cosmetics/product photo
-      'nose',
-      'mouth',
-      'lip',
-      'tongue',
-      'head',
-      'neck',
-      'back',
-      'leg',
-      'foot',
-      'feet',
-      'toe',
-      'body',
+  /// SIMPLIFIED v16: Direct people labels - body parts + human terms
+  /// These directly indicate a person is present (not just clothing/accessories)
+  static bool _isDirectPeopleLabel(String label) {
+    const directKeywords = [
+      // Human terms
+      'person', 'human', 'people',
+      'man', 'woman', 'child', 'kid', 'baby', 'toddler',
+      'boy', 'girl', 'adult', 'teenager', 'elder', 'senior',
+      'crowd', 'group', 'family', 'couple',
+      // Face/head
+      'face', 'selfie', 'portrait', 'headshot',
+      'beard', 'mustache', 'moustache',
+      'forehead', 'chin', 'cheek', 'jaw', 'eyebrow',
+      // Body parts (human-specific)
+      'hand', 'finger', 'thumb', 'palm', 'wrist',
+      'arm', 'elbow', 'shoulder',
+      'hair', 'hairstyle', 'haircut', 'skin',
+      // Ambiguous but still direct (body parts)
+      'ear', 'eye', 'eyelash', 'nose', 'mouth', 'lip', 'tongue',
+      'head', 'neck', 'back', 'leg', 'foot', 'feet', 'toe', 'body',
+      'torso', 'chest', 'waist', 'hip', 'thigh',
+      // Actions that require a person
+      'sleeping', 'smiling', 'laughing', 'crying',
+      'sitting', 'standing', 'walking', 'running',
+      'pedestrian', 'walker', 'jogger', 'runner', 'cyclist',
+      'hiker', 'tourist', 'traveler',
     ];
-    return ambiguousKeywords.any((k) => label.contains(k));
+    return directKeywords.any((k) => label.contains(k));
   }
 
-  /// Tier 2: Clothing, accessories, actions - need 2+ or 1+context
-  /// Single match could be false positive (jeans on crates, etc.)
-  static bool _isTier2PeopleLabel(String label) {
-    // EXCLUSIONS: Holiday decorations and objects are NOT people
-    const tier2Exclusions = [
-      'christmas',
-      'xmas',
-      'holiday',
-      'ornament',
-      'decoration',
-      'decor',
-      'tree', // christmas tree
-      'wreath',
-      'garland',
-      'tinsel',
-      'lights',
-      'candle',
-      'gift',
-      'present',
-      'ribbon',
-      'bow',
-    ];
-
-    // If it's a holiday decoration context, don't count as people
-    if (tier2Exclusions.any((k) => label.contains(k))) {
-      return false;
-    }
-
-    const tier2Keywords = [
-      // Clothing (could be on hangers, in store, etc.)
-      'dress',
-      'jacket',
-      'coat',
-      'sweater',
-      'shirt',
-      'blouse',
-      'suit',
-      'tuxedo',
-      'gown',
-      'hoodie',
-      'cardigan',
-      'vest',
-      'uniform',
-      'costume',
-      'jeans',
-      'pants',
-      'trousers',
-      'shorts',
-      'skirt',
-      'legging',
+  /// SIMPLIFIED v16: Clothing labels - supporting evidence only
+  /// Need at least 1 direct label to confirm these belong to a real person
+  static bool _isClothingLabel(String label) {
+    const clothingKeywords = [
+      // Clothing
+      'shirt', 'blouse', 'dress', 'jacket', 'coat', 'sweater',
+      'suit', 'tuxedo', 'gown', 'hoodie', 'cardigan', 'vest',
+      'uniform', 'costume', 'jeans', 'pants', 'trousers',
+      'shorts', 'skirt', 'legging',
+      // Footwear
+      'shoe', 'sneaker', 'boot', 'sandal', 'slipper',
       // Accessories
-      'shoe',
-      'sneaker',
-      'boot',
-      'hat',
-      'cap',
-      'glasses',
-      'sunglasses',
-      'watch',
-      'jewelry',
-      'necklace',
-      'bracelet',
-      'tie',
-      'scarf',
-      'glove',
-      'bag',
-      'handbag',
-      'backpack',
-      'purse',
-      // Nails/manicure (human-specific grooming)
-      'nail',
-      'manicure',
-      'pedicure',
-      'fingernail',
-      // Actions/states (could be descriptions, not actual people)
-      'fun',
-      'smile',
-      'smiling',
-      'happy',
-      'joy',
-      'laugh',
-      'laughing',
-      'walking',
-      'sitting',
-      'standing',
-      'running',
-      'dancing',
-      'posing',
-      // Events/contexts
-      'party',
-      'wedding',
-      'celebration',
-      'event',
-      'gathering',
-      'meeting',
-      'concert',
-      'festival',
-      'ceremony',
-      'graduation',
-      'birthday',
-      // Sports/leisure
-      'sport',
-      'athlete',
-      'player',
-      'team',
-      'crew',
-      'leisure',
-      'recreation',
-      'workout',
-      'fitness',
-      'exercise',
-      // Technology in human context (person using phone/laptop)
-      'phone',
-      'mobile',
-      'smartphone',
-      'laptop',
-      'tablet',
-      'selfie',
+      'hat', 'cap', 'glasses', 'sunglasses',
+      'watch', 'jewelry', 'necklace', 'bracelet',
+      'tie', 'scarf', 'glove',
     ];
-    return tier2Keywords.any((k) => label.contains(k));
+    return clothingKeywords.any((k) => label.contains(k));
   }
 
   /// Animal-specific indicators - if detected with ambiguous body parts, it's an animal

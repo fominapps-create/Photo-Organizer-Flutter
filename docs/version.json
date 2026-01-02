@@ -1,14 +1,14 @@
 {
-  "appVersion": "0.4.0-alpha",
-  "buildNumber": 10,
-  "scanLogicVersion": 15,
-  "lastUpdated": "2026-01-02T15:00:00",
+  "appVersion": "0.4.1-dev",
+  "buildNumber": 11,
+  "scanLogicVersion": 16,
+  "lastUpdated": "2026-01-02T20:00:00",
   "changes": [
-    "Improved photo categorization accuracy",
-    "Better People detection (hair, skin, clothing)",
-    "Gem purchase system with tiered packages",
-    "UI improvements: Select All, scanning badges",
-    "Performance optimizations",
-    "Fixed various classification edge cases"
+    "SIMPLIFIED: Count-based people detection (replaces complex tiers)",
+    "People: 2+ direct@55%, 3+ direct@any, or 1 direct + 2 clothing",
+    "SIMPLIFIED: Count-based animal detection",
+    "Animals: 2+ labels@50%, or fur/paw indicator + 1 label",
+    "Face detection fallback when result is 'other'",
+    "Removed ~150 lines of complex tier logic"
   ]
 }

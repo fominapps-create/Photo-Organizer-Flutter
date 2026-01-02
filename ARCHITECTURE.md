@@ -593,6 +593,7 @@ When classification logic changes significantly between app versions, users with
 | 8 | Detections store confidence, search filters low-confidence tags |
 | 9 | Pedestrian/walker/jogger → People, 2+ clothing items → People |
 | 10 | Objects need 86%+ confidence to be searchable |
+| 16 | SIMPLIFIED: Count-based people detection (2+ direct@55%, 3+ direct@any, or 1 direct + 2 clothing) |
 
 ### Updating for New Versions
 1. Increment `scanLogicVersion` in `tag_store.dart`:

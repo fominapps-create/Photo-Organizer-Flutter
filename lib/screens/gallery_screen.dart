@@ -4364,7 +4364,7 @@ class GalleryScreenState extends State<GalleryScreen>
       _dotAnimationTimer = Timer.periodic(const Duration(milliseconds: 300), (
         timer,
       ) {
-        if (mounted && (_scanning || _validating)) {
+        if (mounted && (_scanning || _validating || _clearingTags)) {
           _dotIndexNotifier.value = (_dotIndexNotifier.value + 1) % 4;
         } else {
           timer.cancel();
