@@ -150,33 +150,34 @@
         .color-palette {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
             justify-content: center;
             margin-top: 25px;
-            padding: 15px;
             background: rgba(255, 255, 255, 0.05);
             border-radius: 12px;
+            overflow: hidden;
         }
         
         .color-swatch {
-            width: 60px;
-            height: 60px;
-            border-radius: 10px;
+            width: 70px;
+            height: 70px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-end;
-            padding-bottom: 5px;
-            font-size: 8px;
+            justify-content: center;
+            font-size: 9px;
             font-weight: bold;
             text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-            border: 2px solid rgba(255,255,255,0.2);
         }
         
-        .color-swatch span {
-            background: rgba(0,0,0,0.5);
-            padding: 2px 4px;
-            border-radius: 3px;
+        .color-swatch .name {
+            font-size: 8px;
+            margin-bottom: 2px;
+        }
+        
+        .color-swatch .hex {
+            font-size: 7px;
+            opacity: 0.8;
+            font-family: monospace;
         }
     </style>
 </head>
@@ -210,13 +211,15 @@
         <p class="timestamp" id="timestamp">Loading...</p>
         
         <div class="color-palette">
-            <div class="color-swatch" style="background: #E67A2E; color: white;"><span>Fox Orange</span></div>
-            <div class="color-swatch" style="background: #F5E4C3; color: #333;"><span>Cream</span></div>
-            <div class="color-swatch" style="background: #6B3F1D; color: white;"><span>Dark Brown</span></div>
-            <div class="color-swatch" style="background: #8EC6E6; color: #333;"><span>Sky Blue</span></div>
-            <div class="color-swatch" style="background: #2F3E4F; color: white;"><span>Dark Gray</span></div>
-            <div class="color-swatch" style="background: #4FA8D5; color: white;"><span>Eye Blue</span></div>
-            <div class="color-swatch" style="background: #FFFFFF; color: #333; border-color: #ccc;"><span>White</span></div>
+            <div class="color-swatch" style="background: #F47035; color: white;"><span class="name">Fox Orange</span><span class="hex">#F47035</span></div>
+            <div class="color-swatch" style="background: #E85420; color: white;"><span class="name">Deep Orange</span><span class="hex">#E85420</span></div>
+            <div class="color-swatch" style="background: #FFF5E8; color: #333;"><span class="name">Cream</span><span class="hex">#FFF5E8</span></div>
+            <div class="color-swatch" style="background: #5C3520; color: white;"><span class="name">Dark Brown</span><span class="hex">#5C3520</span></div>
+            <div class="color-swatch" style="background: #2952CC; color: white;"><span class="name">Deep Blue</span><span class="hex">#2952CC</span></div>
+            <div class="color-swatch" style="background: #7EB8FF; color: #333;"><span class="name">Light Blue</span><span class="hex">#7EB8FF</span></div>
+            <div class="color-swatch" style="background: #9B7FD1; color: white;"><span class="name">Purple</span><span class="hex">#9B7FD1</span></div>
+            <div class="color-swatch" style="background: #4ECDC4; color: #333;"><span class="name">Teal</span><span class="hex">#4ECDC4</span></div>
+            <div class="color-swatch" style="background: #F0B8D8; color: #333;"><span class="name">Pink</span><span class="hex">#F0B8D8</span></div>
         </div>
     </div>
     
