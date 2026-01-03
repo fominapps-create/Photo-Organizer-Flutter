@@ -1,13 +1,13 @@
 {
   "appVersion": "0.4.1-dev",
-  "buildNumber": 13,
+  "buildNumber": 14,
   "scanLogicVersion": 18,
-  "lastUpdated": "2026-01-04T00:50:00",
+  "lastUpdated": "2026-01-04T12:30:00",
   "changes": [
     "MobileCLIP ONNX with hardware acceleration (NNAPI/XNNPACK)",
+    "43 semantic sentence descriptions (e.g., 'a plate of cooked food')",
     "Dynamic thread tuning based on device specs",
     "Smart concurrency: 2 parallel on flagship devices with NNAPI",
-    "43 semantic descriptions for better photo classification",
     "Optimized session options: memory arena, graph optimization"
   ]
 }
