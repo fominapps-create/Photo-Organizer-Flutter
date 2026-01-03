@@ -390,10 +390,8 @@ class LocalTaggingService {
           hiddenLabels.any((h) => text.contains(h)) &&
           !text.contains('hot dog'); // hot dog is food, not animal
 
-      // DEBUG MODE: Show ALL labels regardless of confidence for debugging
-      // Change to 0.86 to hide low-confidence labels in production
-      const debugShowAllLabels = true;
-      final minVisibleConfidence = debugShowAllLabels ? 0.0 : 0.86;
+      // Show all labels for debugging (set to 0.86 to filter low-confidence in production)
+      const minVisibleConfidence = 0.0;
 
       if (confidence >= minVisibleConfidence &&
           !categoryNames.contains(text) &&

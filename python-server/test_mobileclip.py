@@ -2,7 +2,7 @@
 Test MobileCLIP for image classification
 """
 import torch
-import mobileclip
+import mobileclip  # type: ignore
 from PIL import Image
 import os
 import sys

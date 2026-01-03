@@ -16,7 +16,6 @@ import '../services/trash_store.dart';
 import '../services/api_service.dart';
 import '../services/tagging_service_factory.dart';
 import '../services/scan_foreground_service.dart';
-import '../services/local_tagging_service.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'photo_viewer.dart';
@@ -2943,17 +2942,17 @@ class GalleryScreenState extends State<GalleryScreen>
       setState(() => _scanPreparing = true);
     }
 
-    // Pre-warm ML Kit labeler (this is often the source of 30-50s delay on first run)
-    developer.log('🔥 Pre-warming ML Kit labeler...');
+    // Pre-warm the tagging service (MobileCLIP ONNX or ML Kit)
+    developer.log('🔥 Pre-warming tagging service...');
     final warmupStart = DateTime.now();
     try {
-      // Access the labeler singleton to trigger model loading
-      final _ = LocalTaggingService.labeler;
+      // This initializes ONNX models if using MobileCLIP, or ML Kit labeler otherwise
+      await TaggingServiceFactory.warmup();
       developer.log(
-        '✅ ML Kit labeler ready in ${DateTime.now().difference(warmupStart).inMilliseconds}ms',
+        '✅ Tagging service ready in ${DateTime.now().difference(warmupStart).inMilliseconds}ms',
       );
     } catch (e) {
-      developer.log('⚠️ ML Kit warmup error: $e');
+      developer.log('⚠️ Tagging service warmup error: $e');
     }
 
     // End preparing state

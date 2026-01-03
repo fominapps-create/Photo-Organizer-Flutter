@@ -4,7 +4,7 @@ This creates a more detailed understanding of image contents.
 """
 import numpy as np
 import torch
-import mobileclip
+import mobileclip  # type: ignore
 
 # Semantic descriptions grouped by category
 SEMANTIC_TAGS = {

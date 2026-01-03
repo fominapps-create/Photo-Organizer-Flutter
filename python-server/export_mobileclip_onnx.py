@@ -3,7 +3,7 @@ Convert MobileCLIP to ONNX format for Flutter
 Uses TorchScript tracing with fixed input sizes to avoid dynamic shape issues
 """
 import torch
-import mobileclip
+import mobileclip  # type: ignore
 import os
 
 class ImageEncoderWrapper(torch.nn.Module):
@@ -43,9 +43,9 @@ def export_to_onnx():
     onnx_path = "onnx_models/mobileclip_image_encoder.onnx"
     
     # Use trace-based export with fixed shapes (no dynamic axes)
-    torch.onnx.export(
+    torch.onnx.export(  # type: ignore
         wrapped_encoder,
-        dummy_image,
+        (dummy_image,),
         onnx_path,
         export_params=True,
         opset_version=12,  # Use older opset for better compatibility

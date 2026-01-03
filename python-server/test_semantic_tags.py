@@ -2,7 +2,7 @@
 Test MobileCLIP with semantic descriptions - shows what the model "sees" in each image.
 This helps validate the model's understanding beyond just category classification.
 """
-import onnxruntime as ort
+import onnxruntime as ort  # type: ignore
 import numpy as np
 from PIL import Image
 import os
@@ -72,7 +72,7 @@ def load_model_and_embeddings():
     # Since we exported only the image encoder, we'll use the Python model for text
     print("Loading MobileCLIP for text encoding...")
     import torch
-    import mobileclip
+    import mobileclip  # type: ignore
     
     checkpoint_path = "checkpoints/mobileclip_s0.pt"
     model, _, _ = mobileclip.create_model_and_transforms(

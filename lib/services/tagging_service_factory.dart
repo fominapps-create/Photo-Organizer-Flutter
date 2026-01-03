@@ -73,17 +73,29 @@ class TaggingServiceFactory {
     } catch (_) {}
 
     // Determine concurrency based on device tier
-    // Foreground: Full speed for best user experience
-    // Background: 25% slower to reduce heat when user isn't actively waiting
+    // ONNX models are MUCH heavier than ML Kit - use conservative concurrency
+    // High concurrency with ONNX causes severe lag
     int concurrency;
-    if (ramGB <= 3 || cpuCores <= 4) {
-      concurrency = isBackground ? 6 : 8; // Low-end: 6 bg / 8 fg
-    } else if (ramGB <= 6 || cpuCores <= 6) {
-      concurrency = isBackground ? 9 : 12; // Mid-range: 9 bg / 12 fg
-    } else if (ramGB <= 8 || cpuCores <= 8) {
-      concurrency = isBackground ? 12 : 16; // Mid-high: 12 bg / 16 fg
+    if (_useSemanticTags || _useMobileCLIP) {
+      // ONNX mode: Very conservative concurrency
+      if (ramGB <= 3 || cpuCores <= 4) {
+        concurrency = isBackground ? 1 : 2; // Low-end: 1 bg / 2 fg
+      } else if (ramGB <= 6 || cpuCores <= 6) {
+        concurrency = isBackground ? 2 : 3; // Mid-range: 2 bg / 3 fg
+      } else {
+        concurrency = isBackground ? 3 : 4; // High-end: 3 bg / 4 fg
+      }
     } else {
-      concurrency = isBackground ? 15 : 20; // High-end: 15 bg / 20 fg
+      // ML Kit mode: Higher concurrency is fine
+      if (ramGB <= 3 || cpuCores <= 4) {
+        concurrency = isBackground ? 6 : 8;
+      } else if (ramGB <= 6 || cpuCores <= 6) {
+        concurrency = isBackground ? 9 : 12;
+      } else if (ramGB <= 8 || cpuCores <= 8) {
+        concurrency = isBackground ? 12 : 16;
+      } else {
+        concurrency = isBackground ? 15 : 20;
+      }
     }
 
     final mode = isBackground ? 'background' : 'foreground';
@@ -108,6 +120,34 @@ class TaggingServiceFactory {
       return await ApiService.pingServer(timeout: const Duration(seconds: 2));
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Pre-initialize the tagging service (call during app startup or before scanning)
+  /// This loads ONNX models ahead of time to avoid delays during first scan
+  static Future<void> warmup() async {
+    if (_useSemanticTags) {
+      developer.log('🔥 Pre-warming SemanticTagService...');
+      final start = DateTime.now();
+      try {
+        await SemanticTagService.initialize();
+        developer.log(
+          '✅ SemanticTagService ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+        );
+      } catch (e) {
+        developer.log('⚠️ SemanticTagService warmup error: $e');
+      }
+    } else if (_useMobileCLIP) {
+      developer.log('🔥 Pre-warming MobileClipService...');
+      final start = DateTime.now();
+      try {
+        await MobileClipService.initialize();
+        developer.log(
+          '✅ MobileClipService ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+        );
+      } catch (e) {
+        developer.log('⚠️ MobileClipService warmup error: $e');
+      }
     }
   }
 
