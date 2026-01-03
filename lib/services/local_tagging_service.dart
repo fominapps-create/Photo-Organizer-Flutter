@@ -559,16 +559,18 @@ class LocalTaggingService {
     bool shouldAddPeople = false;
     String peopleReason = '';
 
-    if (hasIllustrationIndicator) {
+    if (hasStrongPersonLabel) {
+      // PRIORITY: Strong person label ALWAYS wins (baby, face, smile, ear, etc.)
+      // Body parts/facial features = definitely a real person, not illustration
+      // This now comes BEFORE illustration check
+      shouldAddPeople = true;
+      peopleReason = 'strong person label detected';
+    } else if (hasIllustrationIndicator) {
       // Illustrations/cartoons/toys are NOT people (even with human-like features)
+      // But only block if no strong person labels detected
       shouldAddPeople = false;
       peopleReason = 'illustration detected';
       developer.log('🎨 Not adding people - $peopleReason');
-    } else if (hasStrongPersonLabel) {
-      // PRIORITY: Strong person label ALWAYS wins (baby, face, person, flesh, etc.)
-      // This must come BEFORE animal indicator check
-      shouldAddPeople = true;
-      peopleReason = 'strong person label detected';
     } else if (hasFurOrAnimalIndicator && directPeopleCount < 3) {
       // Animal indicators present - need strong people evidence
       // But this is AFTER strong person check, so baby/face/etc. still work
@@ -665,25 +667,31 @@ class LocalTaggingService {
     }
 
     // PEOPLE vs FOOD CONFLICT: "flesh" can be body part OR raw meat
-    // Only apply when there's STRONG person evidence (face/body part detected)
-    // Don't remove food just because of weak people indicators like clothing
+    // But "flesh" + clothing = definitely a person, not raw meat
     if (categories.contains('people') &&
         categories.contains('food') &&
-        hasStrongPersonLabel &&
-        bestPeopleConfidence > 0 &&
-        bestFoodConfidence > 0) {
-      if (bestFoodConfidence > bestPeopleConfidence) {
-        // Food confidence is higher - it's probably raw meat, not a person
-        categories.remove('people');
-        developer.log(
-          '🔄 Conflict: Removed people in favor of food (food ${(bestFoodConfidence * 100).toInt()}% > people ${(bestPeopleConfidence * 100).toInt()}%)',
-        );
-      } else {
-        // People confidence is higher or equal - keep people, remove food
+        hasStrongPersonLabel) {
+      // If there's clothing detected, it's definitely a person wearing clothes
+      if (clothingCount >= 1) {
         categories.remove('food');
         developer.log(
-          '🔄 Conflict: Removed food in favor of people (people ${(bestPeopleConfidence * 100).toInt()}% >= food ${(bestFoodConfidence * 100).toInt()}%)',
+          '🔄 Conflict: Removed food - flesh + $clothingCount clothing item(s) = person',
         );
+      } else if (bestPeopleConfidence > 0 && bestFoodConfidence > 0) {
+        // No clothing - compare confidence levels
+        if (bestFoodConfidence > bestPeopleConfidence) {
+          // Food confidence is higher - it's probably raw meat, not a person
+          categories.remove('people');
+          developer.log(
+            '🔄 Conflict: Removed people in favor of food (food ${(bestFoodConfidence * 100).toInt()}% > people ${(bestPeopleConfidence * 100).toInt()}%)',
+          );
+        } else {
+          // People confidence is higher or equal - keep people, remove food
+          categories.remove('food');
+          developer.log(
+            '🔄 Conflict: Removed food in favor of people (people ${(bestPeopleConfidence * 100).toInt()}% >= food ${(bestFoodConfidence * 100).toInt()}%)',
+          );
+        }
       }
     }
 
@@ -1148,6 +1156,7 @@ class LocalTaggingService {
       'forehead',
       'chin',
       'cheek',
+      'ear', // Human ears are distinct from animal ears in ML Kit
       // Human-specific body features (animals have fur, not hair/skin)
       'hair',
       'skin',

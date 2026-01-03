@@ -1,12 +1,11 @@
 {
   "appVersion": "0.4.1-dev",
   "buildNumber": 12,
-  "scanLogicVersion": 17,
-  "lastUpdated": "2026-01-03T22:41:00",
+  "scanLogicVersion": 18,
+  "lastUpdated": "2026-01-04T01:30:00",
   "changes": [
-    "Food detection in object detection fallback",
-    "Case-insensitive word matching",
-    "Strong food labels override flower detection",
-    "People vs food conflict only with strong person indicators"
+    "MobileCLIP semantic tags - AI descriptions for photos",
+    "Switched from ML Kit to MobileCLIP ONNX model",
+    "43 semantic descriptions across 6 categories"
   ]
 }

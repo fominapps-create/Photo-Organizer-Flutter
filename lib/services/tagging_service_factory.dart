@@ -4,8 +4,16 @@ import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
 import 'local_tagging_service.dart';
+import 'mobile_clip_service.dart';
+import 'semantic_tag_service.dart';
 import 'api_service.dart';
 import 'dart:convert';
+
+/// Use MobileCLIP for classification (more accurate than ML Kit)
+const bool _useMobileCLIP = true;
+
+/// Use semantic tags (descriptive) instead of just category labels
+const bool _useSemanticTags = true;
 
 /// Factory that decides whether to use local (ML Kit) or cloud (API) tagging.
 /// Free tier = local on-device processing
@@ -154,7 +162,7 @@ class TaggingServiceFactory {
           try {
             String? tempPath;
 
-            // ML Kit needs a file path, so write bytes to temp file if needed
+            // ML Kit/MobileCLIP needs a file path, so write bytes to temp file if needed
             if (item.bytes != null) {
               final tempFile = File(
                 '$tempDirPath/tag_${DateTime.now().microsecondsSinceEpoch}_${item.photoID.hashCode}.jpg',
@@ -173,7 +181,54 @@ class TaggingServiceFactory {
               );
             }
 
-            // Use the new method that returns both tags and detections
+            // Use Semantic Tags for descriptive labels
+            if (_useSemanticTags) {
+              final semanticResult = await SemanticTagService.analyzeImage(
+                tempPath,
+              );
+              if (semanticResult != null) {
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: [semanticResult.category],
+                    // Show top semantic descriptions instead of just percentages
+                    allDetections: semanticResult.topMatches
+                        .map(
+                          (m) =>
+                              '${m.description} (${(m.score * 100).toStringAsFixed(1)}%)',
+                        )
+                        .toList(),
+                    source: 'semantic',
+                  ),
+                );
+              }
+              // Fallback to MobileCLIP category-only if semantic fails
+            }
+
+            // Use MobileCLIP or ML Kit based on configuration
+            if (_useMobileCLIP) {
+              final clipResult = await MobileClipService.classifyImage(
+                tempPath,
+              );
+              if (clipResult != null) {
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: [clipResult.category],
+                    allDetections: clipResult.allScores.entries
+                        .map(
+                          (e) =>
+                              '${e.key}:${(e.value * 100).toStringAsFixed(1)}%',
+                        )
+                        .toList(),
+                    source: 'mobileclip',
+                  ),
+                );
+              }
+              // Fallback to ML Kit if MobileCLIP fails
+            }
+
+            // Use the ML Kit method that returns both tags and detections
             final localResult =
                 await LocalTaggingService.classifyImageWithDetections(tempPath);
 

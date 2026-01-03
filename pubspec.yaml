@@ -56,6 +56,7 @@ dependencies:
   flutter_foreground_task: ^9.2.0
   flutter_local_notifications: ^18.0.1
   share_plus: ^10.1.4
+  flutter_onnxruntime: ^1.6.1  # For MobileCLIP inference
 
 dev_dependencies:
   flutter_test:
@@ -98,6 +99,7 @@ flutter:
     - assets/Fox face abstract 1024x1024.png
     - assets/Fox face abstract 1024x1024 padded.png
     - assets/omni-button.png
+    - assets/models/  # MobileCLIP ONNX model and embeddings
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

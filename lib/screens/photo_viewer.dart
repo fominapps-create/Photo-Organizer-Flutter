@@ -703,7 +703,7 @@ class _PhotoViewerState extends State<PhotoViewer>
               if (allDetectionsDebug.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Text(
-                  'ML Kit Labels (${allDetectionsDebug.length})',
+                  'AI Description (${allDetectionsDebug.length})',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
