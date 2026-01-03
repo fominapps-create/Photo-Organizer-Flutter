@@ -2,7 +2,7 @@
   "appVersion": "0.4.1-dev",
   "buildNumber": 12,
   "scanLogicVersion": 17,
-  "lastUpdated": "2026-01-02T22:30:00",
+  "lastUpdated": "2026-01-03T14:45:00",
   "changes": [
     "Face-first detection (16-30% faster scanning)",
     "People: 2+ direct labels at any confidence",
