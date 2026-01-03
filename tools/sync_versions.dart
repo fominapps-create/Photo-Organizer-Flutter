@@ -7,6 +7,12 @@
 ///   - docs/version.json (lastUpdated timestamp)
 ///   - lib/config/app_config.dart (appVersion, scanLogicVersion)
 ///   - pubspec.yaml (version line)
+///
+/// VERSION INCREMENT RULES:
+///   - dev builds: DO NOT increment anything (just update timestamp)
+///   - alpha/beta/production: INCREMENT versions as needed
+///
+/// See RELEASE_GUIDE.md for full versioning documentation.
 library;
 
 import 'dart:convert';

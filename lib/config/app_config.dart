@@ -6,6 +6,12 @@
 ///   dart tools/sync_versions.dart
 ///
 /// This keeps app, pubspec.yaml, and website in sync.
+///
+/// VERSION INCREMENT RULES:
+///   - dev builds: DO NOT increment anything
+///   - alpha/beta/production: INCREMENT versions as needed
+///
+/// See RELEASE_GUIDE.md for full versioning documentation.
 class AppConfig {
   // ============ APP VERSION ============
   // This should match pubspec.yaml version (without build number)
@@ -37,7 +43,7 @@ class AppConfig {
   //      People: 2+ direct@50%+ OR 3+ direct@any OR 1 direct + 2 clothing
   //      Animals: 2+ labels@50%+ OR 3+ labels@any OR indicator + 1 label
   //      Face detection fallback when result is "other"
-  static const int scanLogicVersion = 16;
+  static const int scanLogicVersion = 18;
 
   // ============ DERIVED VALUES ============
   /// Version without stage suffix (for display)

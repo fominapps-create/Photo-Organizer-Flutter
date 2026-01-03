@@ -303,6 +303,8 @@ class TagStore {
 
   // ============ Scan Version Tracking (Hybrid Approach) ============
   //
+  // See RELEASE_GUIDE.md for full versioning documentation and flows.
+  //
   // VERSIONING CONVENTION:
   // - Scan logic version is a simple INTEGER, independent from app version
   // - Increment when classification logic changes (triggers rescan dialog)
