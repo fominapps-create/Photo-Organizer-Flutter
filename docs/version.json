@@ -1,11 +1,13 @@
 {
   "appVersion": "0.4.1-dev",
-  "buildNumber": 12,
+  "buildNumber": 13,
   "scanLogicVersion": 18,
-  "lastUpdated": "2026-01-04T01:30:00",
+  "lastUpdated": "2026-01-04T00:50:00",
   "changes": [
-    "MobileCLIP semantic tags - AI descriptions for photos",
-    "Switched from ML Kit to MobileCLIP ONNX model",
-    "43 semantic descriptions across 6 categories"
+    "MobileCLIP ONNX with hardware acceleration (NNAPI/XNNPACK)",
+    "Dynamic thread tuning based on device specs",
+    "Smart concurrency: 2 parallel on flagship devices with NNAPI",
+    "43 semantic descriptions for better photo classification",
+    "Optimized session options: memory arena, graph optimization"
   ]
 }
