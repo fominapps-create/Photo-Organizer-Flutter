@@ -75,10 +75,10 @@ class HybridTaggingService {
   };
 
   // Confidence thresholds - lowered for better detection on thumbnails
-  static const double _yoloConfidence = 0.35; // Was 0.5
-  static const double _animalConfidence = 0.30; // Was 0.45
-  static const double _foodConfidence = 0.45; // Was 0.6
-  static const double _minBoxPercent = 0.01; // 1% of image minimum (was 2%)
+  static const double _yoloConfidence = 0.25; // Lowered from 0.35
+  static const double _animalConfidence = 0.20; // Lowered from 0.30
+  static const double _foodConfidence = 0.35; // Lowered from 0.45
+  static const double _minBoxPercent = 0.005; // 0.5% of image minimum (was 1%)
 
   // Scenery keywords for ML Kit ImageLabeler fallback
   static const Set<String> _sceneryKeywords = {
@@ -168,10 +168,16 @@ class HybridTaggingService {
         useArena: true, // Memory arena for faster allocation
       );
 
+      // Yield before heavy asset loading to let UI render
+      await Future.delayed(const Duration(milliseconds: 16));
+
       _yoloSession = await ort.createSessionFromAsset(
         'assets/models/yolov8n.onnx',
         options: sessionOptions,
       );
+
+      // Yield after to let UI catch up
+      await Future.delayed(const Duration(milliseconds: 16));
 
       _yoloReady = true;
       developer.log(
@@ -480,7 +486,15 @@ class HybridTaggingService {
         final boxArea = boxW * boxH;
         final boxPercent = boxArea / imageArea;
 
-        if (boxPercent < _minBoxPercent) continue;
+        if (boxPercent < _minBoxPercent) {
+          // Debug: Log rejected boxes for our categories
+          if (category != null && maxClassScore >= 0.20) {
+            developer.log(
+              '[YOLO] Rejected $category: box too small (${(boxPercent * 100).toStringAsFixed(2)}% < ${(_minBoxPercent * 100).toStringAsFixed(1)}%), conf=${(maxClassScore * 100).toStringAsFixed(1)}%',
+            );
+          }
+          continue;
+        }
 
         // Weighted score = confidence * size
         final weightedScore = maxClassScore * boxPercent;

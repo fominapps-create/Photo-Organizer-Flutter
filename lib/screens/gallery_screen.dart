@@ -2402,6 +2402,10 @@ class GalleryScreenState extends State<GalleryScreen>
       timeout: const Duration(seconds: 1),
       retries: 0,
     );
+    
+    // Yield to let UI respond after network check
+    await Future.delayed(const Duration(milliseconds: 16));
+    
     if (!serverAvailable) {
       developer.log(
         '📱 Server not available - will use LOCAL ML Kit for scanning',
@@ -2941,6 +2945,9 @@ class GalleryScreenState extends State<GalleryScreen>
     if (mounted) {
       setState(() => _scanPreparing = true);
     }
+    
+    // Yield to let UI render the "Preparing" state before blocking warmup
+    await Future.delayed(const Duration(milliseconds: 50));
 
     // Pre-warm the tagging service (MobileCLIP ONNX or ML Kit)
     developer.log('🔥 Pre-warming tagging service...');
@@ -2954,6 +2961,9 @@ class GalleryScreenState extends State<GalleryScreen>
     } catch (e) {
       developer.log('⚠️ Tagging service warmup error: $e');
     }
+    
+    // Yield after warmup to let UI update
+    await Future.delayed(const Duration(milliseconds: 16));
 
     // End preparing state
     if (mounted) {
