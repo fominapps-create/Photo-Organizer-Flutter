@@ -2604,6 +2604,9 @@ class GalleryScreenState extends State<GalleryScreen>
         _validationComplete = true;
       });
 
+      // Flush YOLO status cache to disk before starting verification
+      await YoloSilentVerifier.flushStatusCache();
+
       // Start silent YOLO verification for "Other" photos
       _startSilentYoloVerification();
     }
@@ -2743,6 +2746,9 @@ class GalleryScreenState extends State<GalleryScreen>
         _validationComplete = true;
       });
       _showGalleryReadyMessage();
+
+      // Flush YOLO status cache to disk before starting verification
+      await YoloSilentVerifier.flushStatusCache();
 
       // Start silent YOLO verification for "Other" photos
       _startSilentYoloVerification();
@@ -3430,10 +3436,23 @@ class GalleryScreenState extends State<GalleryScreen>
                 batchTagsToSave[photoID] = tags;
                 batchDetectionsToSave[photoID] = allDetections;
 
-                // Queue "other" and "scenery" photos for silent YOLO verification
-                final category = tags.isNotEmpty ? tags.first.toLowerCase() : 'other';
+                // Set YOLO status based on category:
+                // - "other"/"scenery" → pending (needs YOLO verification)
+                // - everything else → notNeeded (ML Kit is confident)
+                final category = tags.isNotEmpty
+                    ? tags.first.toLowerCase()
+                    : 'other';
                 if (category == 'other' || category == 'scenery') {
-                  final file = i < batchItems.length ? batchItems[i]['file'] as File? : null;
+                  // Mark as "no yolo yet" immediately - user sees status right away
+                  YoloSilentVerifier.saveYoloStatusSync(
+                    photoID,
+                    YoloStatus.pending,
+                  );
+
+                  // Queue for background YOLO verification
+                  final file = i < batchItems.length
+                      ? batchItems[i]['file'] as File?
+                      : null;
                   if (file != null) {
                     YoloSilentVerifier.queueForVerification(
                       photoId: photoID,
@@ -3441,6 +3460,12 @@ class GalleryScreenState extends State<GalleryScreen>
                       mlKitCategory: category,
                     );
                   }
+                } else {
+                  // ML Kit is confident - no YOLO needed
+                  YoloSilentVerifier.saveYoloStatusSync(
+                    photoID,
+                    YoloStatus.notNeeded,
+                  );
                 }
 
                 // Update cached tag counts incrementally
@@ -4018,10 +4043,13 @@ class GalleryScreenState extends State<GalleryScreen>
       return;
     }
 
-    developer.log('[YOLO Silent] Starting verification of $pendingCount photos...');
+    developer.log(
+      '[YOLO Silent] Starting verification of $pendingCount photos...',
+    );
 
     // Set up callbacks for reclassification updates
-    YoloSilentVerifier.onReclassified = (photoId, oldCategory, newCategory, confidence) {
+    YoloSilentVerifier
+        .onReclassified = (photoId, oldCategory, newCategory, confidence) {
       if (!mounted) return;
 
       // Find the basename from photoId
@@ -4037,7 +4065,7 @@ class GalleryScreenState extends State<GalleryScreen>
           photoTags[key] = [newCategory];
         });
         developer.log(
-          '[YOLO Silent] UI updated: $key → $newCategory (was $oldCategory)'
+          '[YOLO Silent] UI updated: $key → $newCategory (was $oldCategory)',
         );
       }
     };

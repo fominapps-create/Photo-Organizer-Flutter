@@ -17,7 +17,7 @@ enum YoloStatus {
 }
 
 /// Silent background YOLO verifier
-/// 
+///
 /// Runs YOLO on photos classified as "Other" or "Scenery" by ML Kit.
 /// Completely non-blocking:
 /// - Lazy loads YOLO model only when verification starts
@@ -37,21 +37,34 @@ class YoloSilentVerifier {
   static int _totalReclassified = 0;
 
   // Callbacks
-  static void Function(String photoId, String oldCategory, String newCategory, double confidence)? onReclassified;
+  static void Function(
+    String photoId,
+    String oldCategory,
+    String newCategory,
+    double confidence,
+  )?
+  onReclassified;
   static void Function(String photoId, String category)? onVerified;
   static void Function(int processed, int total, int reclassified)? onProgress;
 
   // Configuration
   static const int _inputSize = 320;
-  static const int _delayBetweenPhotosMs = 1500; // Very slow = completely silent
+  static const int _delayBetweenPhotosMs =
+      1500; // Very slow = completely silent
   static const double _confidenceThreshold = 0.25;
   static const double _animalConfidence = 0.20;
 
   // YOLO COCO class mapping
   static const Map<int, String> _yoloToCategory = {
     0: 'people', // person
-    14: 'animals', 15: 'animals', 16: 'animals', 17: 'animals', // bird, cat, dog, horse
-    18: 'animals', 19: 'animals', 20: 'animals', 21: 'animals', // sheep, cow, elephant, bear
+    14: 'animals',
+    15: 'animals',
+    16: 'animals',
+    17: 'animals', // bird, cat, dog, horse
+    18: 'animals',
+    19: 'animals',
+    20: 'animals',
+    21: 'animals', // sheep, cow, elephant, bear
     22: 'animals', 23: 'animals', // zebra, giraffe
   };
 
@@ -66,13 +79,17 @@ class YoloSilentVerifier {
       return;
     }
 
-    _queue.add(_VerificationItem(
-      photoId: photoId,
-      imagePath: imagePath,
-      mlKitCategory: mlKitCategory,
-    ));
+    _queue.add(
+      _VerificationItem(
+        photoId: photoId,
+        imagePath: imagePath,
+        mlKitCategory: mlKitCategory,
+      ),
+    );
 
-    developer.log('[YOLO Silent] Queued: $photoId ($mlKitCategory) - queue size: ${_queue.length}');
+    developer.log(
+      '[YOLO Silent] Queued: $photoId ($mlKitCategory) - queue size: ${_queue.length}',
+    );
   }
 
   /// Get number of photos pending verification
@@ -103,19 +120,23 @@ class YoloSilentVerifier {
     _totalReclassified = 0;
     final totalToProcess = _queue.length;
 
-    developer.log('[YOLO Silent] Starting verification of $totalToProcess photos...');
+    developer.log(
+      '[YOLO Silent] Starting verification of $totalToProcess photos...',
+    );
 
     // Lazy load YOLO model with extra delays
     if (!_yoloReady && !_yoloLoading) {
       developer.log('[YOLO Silent] Lazy loading YOLO model...');
       await Future.delayed(const Duration(seconds: 3)); // Wait for UI to settle
-      
+
       try {
         _yoloLoading = true;
         await _initializeYolo();
         _yoloLoading = false;
-        
-        await Future.delayed(const Duration(seconds: 1)); // Cool down after load
+
+        await Future.delayed(
+          const Duration(seconds: 1),
+        ); // Cool down after load
       } catch (e) {
         developer.log('[YOLO Silent] Failed to load YOLO: $e');
         _yoloLoading = false;
@@ -142,7 +163,9 @@ class YoloSilentVerifier {
 
       try {
         // Long delay before inference - completely silent
-        await Future.delayed(const Duration(milliseconds: _delayBetweenPhotosMs));
+        await Future.delayed(
+          const Duration(milliseconds: _delayBetweenPhotosMs),
+        );
 
         // Check file exists
         final file = File(item.imagePath);
@@ -155,15 +178,17 @@ class YoloSilentVerifier {
         final result = await _runYolo(item.imagePath);
 
         // Long delay after inference
-        await Future.delayed(const Duration(milliseconds: _delayBetweenPhotosMs ~/ 2));
+        await Future.delayed(
+          const Duration(milliseconds: _delayBetweenPhotosMs ~/ 2),
+        );
 
         if (result != null && result.category != item.mlKitCategory) {
           // Reclassified!
           _totalReclassified++;
-          
+
           developer.log(
             '[YOLO Silent] ✨ Reclassified: ${item.mlKitCategory} → ${result.category} '
-            '(${(result.confidence * 100).toInt()}%) - ${item.photoId}'
+            '(${(result.confidence * 100).toInt()}%) - ${item.photoId}',
           );
 
           // Save new tags
@@ -190,7 +215,7 @@ class YoloSilentVerifier {
         if (_totalProcessed % 10 == 0) {
           developer.log(
             '[YOLO Silent] Progress: $_totalProcessed/$totalToProcess '
-            '(reclassified: $_totalReclassified)'
+            '(reclassified: $_totalReclassified)',
           );
         }
       } catch (e) {
@@ -200,7 +225,7 @@ class YoloSilentVerifier {
 
     _running = false;
     developer.log(
-      '[YOLO Silent] Complete! Processed $_totalProcessed, reclassified $_totalReclassified'
+      '[YOLO Silent] Complete! Processed $_totalProcessed, reclassified $_totalReclassified',
     );
   }
 
@@ -214,37 +239,98 @@ class YoloSilentVerifier {
   /// Clear queue without stopping (for new scan)
   static void clearQueue() {
     _queue.clear();
+    _statusCache.clear();
     developer.log('[YOLO Silent] Queue cleared');
   }
 
   // ============ YOLO Status Persistence ============
 
+  /// In-memory cache for fast synchronous access during scan
+  static final Map<String, YoloStatus> _statusCache = {};
+
+  /// Pending status saves (batched for efficiency)
+  static final Map<String, YoloStatus> _pendingStatusSaves = {};
+  static bool _saveScheduled = false;
+
   static String _yoloStatusKey(String photoId) => 'yolo_status_$photoId';
 
+  /// Save YOLO status synchronously (caches in memory, persists in batch)
+  /// Use this during scan for performance
+  static void saveYoloStatusSync(String photoId, YoloStatus status) {
+    _statusCache[photoId] = status;
+    _pendingStatusSaves[photoId] = status;
+
+    // Schedule batch save if not already scheduled
+    if (!_saveScheduled) {
+      _saveScheduled = true;
+      Future.delayed(const Duration(milliseconds: 500), _flushPendingSaves);
+    }
+  }
+
+  /// Flush pending status saves to disk
+  static Future<void> _flushPendingSaves() async {
+    if (_pendingStatusSaves.isEmpty) {
+      _saveScheduled = false;
+      return;
+    }
+
+    final toSave = Map<String, YoloStatus>.from(_pendingStatusSaves);
+    _pendingStatusSaves.clear();
+    _saveScheduled = false;
+
+    final prefs = await TagStore.getPrefs();
+    for (final entry in toSave.entries) {
+      await prefs.setInt(_yoloStatusKey(entry.key), entry.value.index);
+    }
+  }
+
+  /// Ensure all pending status saves are persisted (call after scan completes)
+  static Future<void> flushStatusCache() async {
+    await _flushPendingSaves();
+    developer.log('[YOLO Silent] Status cache flushed to disk');
+  }
+
   static Future<void> _saveYoloStatus(String photoId, YoloStatus status) async {
+    _statusCache[photoId] = status;
     final prefs = await TagStore.getPrefs();
     await prefs.setInt(_yoloStatusKey(photoId), status.index);
   }
 
-  /// Load YOLO status for a photo
+  /// Load YOLO status for a photo (checks cache first)
   static Future<YoloStatus> loadYoloStatus(String photoId) async {
+    // Check cache first
+    if (_statusCache.containsKey(photoId)) {
+      return _statusCache[photoId]!;
+    }
+
     final prefs = await TagStore.getPrefs();
     final index = prefs.getInt(_yoloStatusKey(photoId));
     if (index == null || index < 0 || index >= YoloStatus.values.length) {
       return YoloStatus.pending;
     }
-    return YoloStatus.values[index];
+    final status = YoloStatus.values[index];
+    _statusCache[photoId] = status;
+    return status;
   }
 
   /// Load YOLO status for multiple photos
-  static Future<Map<String, YoloStatus>> loadYoloStatusBatch(List<String> photoIds) async {
+  static Future<Map<String, YoloStatus>> loadYoloStatusBatch(
+    List<String> photoIds,
+  ) async {
     final prefs = await TagStore.getPrefs();
     final result = <String, YoloStatus>{};
 
     for (final photoId in photoIds) {
+      // Check cache first
+      if (_statusCache.containsKey(photoId)) {
+        result[photoId] = _statusCache[photoId]!;
+        continue;
+      }
+
       final index = prefs.getInt(_yoloStatusKey(photoId));
       if (index != null && index >= 0 && index < YoloStatus.values.length) {
         result[photoId] = YoloStatus.values[index];
+        _statusCache[photoId] = result[photoId]!;
       }
     }
 
@@ -296,7 +382,7 @@ class YoloSilentVerifier {
 
       _yoloReady = true;
       developer.log(
-        '[YOLO Silent] Model loaded in ${DateTime.now().difference(start).inMilliseconds}ms'
+        '[YOLO Silent] Model loaded in ${DateTime.now().difference(start).inMilliseconds}ms',
       );
     } catch (e) {
       developer.log('[YOLO Silent] Failed to initialize: $e');
@@ -321,7 +407,12 @@ class YoloSilentVerifier {
       await Future.delayed(const Duration(milliseconds: 16));
 
       // Run inference
-      input = await OrtValue.fromList(prepResult.tensor, [1, 3, _inputSize, _inputSize]);
+      input = await OrtValue.fromList(prepResult.tensor, [
+        1,
+        3,
+        _inputSize,
+        _inputSize,
+      ]);
       outputs = await _yoloSession!.run({'images': input});
 
       // Yield for UI
@@ -369,8 +460,8 @@ class YoloSilentVerifier {
         if (category == null) continue;
 
         // Check confidence threshold
-        final minConf = (maxClassId >= 14 && maxClassId <= 23) 
-            ? _animalConfidence 
+        final minConf = (maxClassId >= 14 && maxClassId <= 23)
+            ? _animalConfidence
             : _confidenceThreshold;
         if (maxClassScore < minConf) continue;
 
