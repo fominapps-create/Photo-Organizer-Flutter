@@ -1,12 +1,12 @@
 {
-  "appVersion": "0.4.1-dev",
-  "buildNumber": 15,
-  "scanLogicVersion": 18,
-  "lastUpdated": "2026-01-04T01:45:00",
+  "appVersion": "0.4.2-dev",
+  "buildNumber": 20,
+  "scanLogicVersion": 19,
+  "lastUpdated": "2026-01-04T12:00:00",
   "changes": [
-    "Fixed Float64→Float32 ONNX input (was causing all failures)",
-    "Simplified gallery tags to scanned/unscanned",
-    "MobileCLIP with 43 semantic sentence descriptions",
-    "Check photo detail view for AI descriptions"
+    "Fast 6-category tagging (people, animals, food, scenery, documents, other)",
+    "XNNPACK hardware acceleration (~7x faster)",
+    "Isolate preprocessing - no more UI lag",
+    "Fixed MobileCLIP 256×256 input size"
   ]
 }
