@@ -3,7 +3,9 @@ import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart' show getTemporaryDirectory;
-import 'local_tagging_service.dart';
+import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
+// ML Kit disabled - using MobileCLIP ONNX
+// import 'local_tagging_service.dart';
 import 'mobile_clip_service.dart';
 import 'semantic_tag_service.dart';
 import 'api_service.dart';
@@ -25,16 +27,49 @@ class TaggingServiceFactory {
   /// Cached device concurrency level for background scanning (25% slower)
   static int? _cachedBackgroundConcurrency;
 
-  /// Get optimal concurrency for ML Kit based on device capabilities
-  static Future<int> _getOptimalConcurrency({bool isBackground = false}) async {
-    // For background scanning, use cached background value if available
-    if (isBackground && _cachedBackgroundConcurrency != null) {
-      return _cachedBackgroundConcurrency!;
+  /// Cached optimal thread count for ONNX intra-op
+  static int? _cachedIntraOpThreads;
+
+  /// Cached device info
+  static int? _cachedCpuCores;
+  static int? _cachedRamGB;
+
+  /// Get optimal intra-op thread count for ONNX based on device capabilities
+  /// Returns 2-6 depending on device tier
+  static Future<int> getOptimalIntraOpThreads() async {
+    if (_cachedIntraOpThreads != null) return _cachedIntraOpThreads!;
+
+    await _detectDeviceSpecs();
+    final cpuCores = _cachedCpuCores ?? 4;
+    final ramGB = _cachedRamGB ?? 4;
+
+    // Thread count based on device tier
+    // More cores + RAM = can use more threads effectively
+    int threads;
+    if (cpuCores >= 8 && ramGB >= 8) {
+      // Flagship (S24+, Pixel 8 Pro, etc.)
+      threads = 6;
+    } else if (cpuCores >= 6 && ramGB >= 6) {
+      // Upper mid-range
+      threads = 5;
+    } else if (cpuCores >= 4 && ramGB >= 4) {
+      // Mid-range
+      threads = 4;
+    } else {
+      // Low-end - be conservative
+      threads = 2;
     }
-    // For foreground scanning, use cached foreground value if available
-    if (!isBackground && _cachedConcurrency != null) {
-      return _cachedConcurrency!;
-    }
+
+    _cachedIntraOpThreads = threads;
+    developer.log(
+      '📱 Device: $cpuCores cores, ${ramGB}GB RAM → ONNX intra-op threads: $threads',
+    );
+    return threads;
+  }
+
+  /// Detect device specs (CPU cores and RAM)
+  static Future<void> _detectDeviceSpecs() async {
+    if (_cachedCpuCores != null && _cachedRamGB != null) return;
 
     int cpuCores = 4;
     int ramGB = 4;
@@ -72,18 +107,58 @@ class TaggingServiceFactory {
       }
     } catch (_) {}
 
+    _cachedCpuCores = cpuCores;
+    _cachedRamGB = ramGB;
+  }
+
+  /// Cached NNAPI availability
+  static bool? _cachedHasNNAPI;
+
+  /// Check if NNAPI is available (for smarter concurrency decisions)
+  static Future<bool> hasNNAPISupport() async {
+    if (_cachedHasNNAPI != null) return _cachedHasNNAPI!;
+
+    try {
+      final ort = OnnxRuntime();
+      final providers = await ort.getAvailableProviders();
+      _cachedHasNNAPI = providers.contains(OrtProvider.NNAPI);
+      developer.log('📱 NNAPI available: $_cachedHasNNAPI');
+    } catch (_) {
+      _cachedHasNNAPI = false;
+    }
+    return _cachedHasNNAPI!;
+  }
+
+  /// Get optimal concurrency for ML Kit based on device capabilities
+  static Future<int> _getOptimalConcurrency({bool isBackground = false}) async {
+    // For background scanning, use cached background value if available
+    if (isBackground && _cachedBackgroundConcurrency != null) {
+      return _cachedBackgroundConcurrency!;
+    }
+    // For foreground scanning, use cached foreground value if available
+    if (!isBackground && _cachedConcurrency != null) {
+      return _cachedConcurrency!;
+    }
+
+    // Detect device specs (reuses cached values if available)
+    await _detectDeviceSpecs();
+    final cpuCores = _cachedCpuCores ?? 4;
+    final ramGB = _cachedRamGB ?? 4;
+
     // Determine concurrency based on device tier
-    // ONNX models are MUCH heavier than ML Kit - use conservative concurrency
-    // High concurrency with ONNX causes severe lag
+    // ONNX with NNAPI/XNNPACK is more efficient than pure CPU
+    // Still conservative but can allow some parallelism on good devices
     int concurrency;
     if (_useSemanticTags || _useMobileCLIP) {
-      // ONNX mode: Very conservative concurrency
-      if (ramGB <= 3 || cpuCores <= 4) {
-        concurrency = isBackground ? 1 : 2; // Low-end: 1 bg / 2 fg
-      } else if (ramGB <= 6 || cpuCores <= 6) {
-        concurrency = isBackground ? 2 : 3; // Mid-range: 2 bg / 3 fg
+      // ONNX mode: Only allow concurrency=2 on flagship devices with NNAPI
+      // - RAM >= 8GB (enough headroom for 2 concurrent inferences)
+      // - NNAPI available (GPU/NPU handles memory more efficiently)
+      // - 6+ cores
+      final hasNNAPI = await hasNNAPISupport();
+      if (ramGB >= 8 && cpuCores >= 6 && hasNNAPI) {
+        concurrency = isBackground ? 1 : 2; // 2 foreground, 1 background
       } else {
-        concurrency = isBackground ? 3 : 4; // High-end: 3 bg / 4 fg
+        concurrency = 1; // Serial for safety on other devices
       }
     } else {
       // ML Kit mode: Higher concurrency is fine
@@ -230,8 +305,8 @@ class TaggingServiceFactory {
                 return MapEntry(
                   item.photoID,
                   TagResult(
-                    tags: [semanticResult.category],
-                    // Show top semantic descriptions instead of just percentages
+                    tags: ['scanned'], // Simplified: just mark as scanned
+                    // Keep semantic descriptions for detail view
                     allDetections: semanticResult.topMatches
                         .map(
                           (m) =>
@@ -241,11 +316,25 @@ class TaggingServiceFactory {
                     source: 'semantic',
                   ),
                 );
+              } else {
+                // SemanticTag failed - show actual error
+                final errorMsg =
+                    SemanticTagService.lastError ?? 'Unknown error';
+                developer.log(
+                  '[Tagging] SemanticTag failed for ${item.photoID}: $errorMsg',
+                );
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: ['unscanned'],
+                    allDetections: ['Error: $errorMsg'],
+                    source: 'error',
+                  ),
+                );
               }
-              // Fallback to MobileCLIP category-only if semantic fails
             }
 
-            // Use MobileCLIP or ML Kit based on configuration
+            // MobileCLIP category-only mode (not semantic)
             if (_useMobileCLIP) {
               final clipResult = await MobileClipService.classifyImage(
                 tempPath,
@@ -264,20 +353,29 @@ class TaggingServiceFactory {
                     source: 'mobileclip',
                   ),
                 );
+              } else {
+                // MobileCLIP failed - log and return 'other'
+                developer.log(
+                  '[Tagging] MobileCLIP returned null for ${item.photoID}',
+                );
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: ['other'],
+                    allDetections: ['MobileCLIP failed'],
+                    source: 'error',
+                  ),
+                );
               }
-              // Fallback to ML Kit if MobileCLIP fails
             }
 
-            // Use the ML Kit method that returns both tags and detections
-            final localResult =
-                await LocalTaggingService.classifyImageWithDetections(tempPath);
-
+            // No tagging method available
             return MapEntry(
               item.photoID,
               TagResult(
-                tags: localResult.tags,
-                allDetections: localResult.allDetections,
-                source: 'local',
+                tags: ['other'],
+                allDetections: ['No tagger configured'],
+                source: 'none',
               ),
             );
           } catch (e) {

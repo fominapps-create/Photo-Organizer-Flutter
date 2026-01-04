@@ -57,6 +57,7 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   share_plus: ^10.1.4
   flutter_onnxruntime: ^1.6.1  # For MobileCLIP inference
+  image: ^4.7.2
 
 dev_dependencies:
   flutter_test:

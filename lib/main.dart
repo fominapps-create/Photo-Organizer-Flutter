@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:developer' as developer;
+// ML Kit disabled - using MobileCLIP ONNX
+// import 'dart:developer' as developer;
 import 'screens/home_screen.dart';
 import 'screens/intro_video_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/api_service.dart';
-import 'services/local_tagging_service.dart';
+// import 'services/local_tagging_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Pre-warm ML Kit labeler in background (prevents 30-60s delay on first gallery load)
-  // This starts model loading immediately so it's ready when scanning starts
-  _preWarmMLKit();
+  // ML Kit warmup disabled - using MobileCLIP ONNX now
+  // _preWarmMLKit();
 
   // Set system UI overlay style (status bar and navigation bar)
   SystemChrome.setSystemUIOverlayStyle(
@@ -62,24 +62,25 @@ void main() async {
   runApp(const FiltoredApp());
 }
 
+/// ML Kit warmup disabled - using MobileCLIP ONNX now
 /// Pre-warm ML Kit labeler in background to avoid 30-60s delay on first scan
 /// This runs asynchronously so it doesn't block app startup
-void _preWarmMLKit() {
-  Future(() async {
-    try {
-      final startTime = DateTime.now();
-      developer.log('🔥 Pre-warming ML Kit labeler...');
-
-      // Access the labeler singleton - this triggers model loading
-      final _ = LocalTaggingService.labeler;
-
-      final elapsed = DateTime.now().difference(startTime).inMilliseconds;
-      developer.log('✅ ML Kit labeler pre-warmed in ${elapsed}ms');
-    } catch (e) {
-      developer.log('⚠️ ML Kit pre-warm error (non-fatal): $e');
-    }
-  });
-}
+// void _preWarmMLKit() {
+//   Future(() async {
+//     try {
+//       final startTime = DateTime.now();
+//       developer.log('🔥 Pre-warming ML Kit labeler...');
+//
+//       // Access the labeler singleton - this triggers model loading
+//       final _ = LocalTaggingService.labeler;
+//
+//       final elapsed = DateTime.now().difference(startTime).inMilliseconds;
+//       developer.log('✅ ML Kit labeler pre-warmed in ${elapsed}ms');
+//     } catch (e) {
+//       developer.log('⚠️ ML Kit pre-warm error (non-fatal): $e');
+//     }
+//   });
+// }
 
 class FiltoredApp extends StatefulWidget {
   const FiltoredApp({super.key});

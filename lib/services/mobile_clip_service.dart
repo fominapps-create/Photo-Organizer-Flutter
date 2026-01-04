@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
-import 'dart:ui' as ui;
+import 'package:image/image.dart' as img;
+import 'tagging_service_factory.dart';
 
 /// Result containing category prediction with confidence
 class MobileClipResult {
@@ -27,6 +30,10 @@ class MobileClipService {
   static OrtSession? _session;
   static Float32List? _categoryEmbeddings;
   static bool _initialized = false;
+  static bool _initializing = false;
+
+  /// Simple mutex for ONNX inference
+  static Completer<void>? _mutex;
 
   /// The 6 categories we classify into
   static const List<String> categories = [
@@ -49,23 +56,63 @@ class MobileClipService {
   static Future<void> initialize() async {
     if (_initialized) return;
 
+    // Prevent concurrent initialization
+    if (_initializing) {
+      while (_initializing) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      return;
+    }
+    _initializing = true;
+
     try {
       developer.log('[MobileCLIP] Initializing ONNX Runtime...');
 
       // Create ONNX Runtime instance
       _ort = OnnxRuntime();
 
-      // Create session from asset
+      // Check available providers for hardware acceleration
+      final availableProviders = await _ort!.getAvailableProviders();
+      developer.log('[MobileCLIP] Available providers: $availableProviders');
+
+      // Build provider list: XNNPACK/CPU only (NNAPI can cause issues)
+      final providers = <OrtProvider>[];
+      // Skip NNAPI for now - can cause issues on some devices
+      // if (availableProviders.contains(OrtProvider.NNAPI)) {
+      //   providers.add(OrtProvider.NNAPI);
+      // }
+      if (availableProviders.contains(OrtProvider.XNNPACK)) {
+        providers.add(OrtProvider.XNNPACK);
+      }
+      providers.add(OrtProvider.CPU); // Always fallback to CPU
+
+      // Get optimal thread count based on device capabilities
+      final intraOpThreads =
+          await TaggingServiceFactory.getOptimalIntraOpThreads();
+
+      // Optimized session options
+      final sessionOptions = OrtSessionOptions(
+        intraOpNumThreads: intraOpThreads, // Dynamic: 2-6 based on device
+        interOpNumThreads: 1, // Sequential execution between ops
+        providers: providers,
+        useArena: true, // Memory arena for faster allocation
+      );
+
+      // Create session from asset with optimized options
+      developer.log('[MobileCLIP] Loading model with providers: $providers...');
       _session = await _ort!.createSessionFromAsset(
         'assets/models/mobileclip_image_encoder.onnx',
+        options: sessionOptions,
       );
 
       // Load category embeddings
       await _loadCategoryEmbeddings();
 
       _initialized = true;
+      _initializing = false;
       developer.log('[MobileCLIP] ✓ Initialized successfully');
     } catch (e, st) {
+      _initializing = false;
       developer.log('[MobileCLIP] ✗ Initialization failed: $e\n$st');
       rethrow;
     }
@@ -112,6 +159,19 @@ class MobileClipService {
   /// Check if service is ready
   static bool get isReady => _initialized && _session != null;
 
+  static Future<void> _acquireLock() async {
+    while (_mutex != null) {
+      await _mutex!.future;
+    }
+    _mutex = Completer<void>();
+  }
+
+  static void _releaseLock() {
+    final m = _mutex;
+    _mutex = null;
+    m?.complete();
+  }
+
   /// Classify an image file and return the predicted category
   static Future<MobileClipResult?> classifyImage(String imagePath) async {
     if (!isReady) {
@@ -119,16 +179,27 @@ class MobileClipService {
       await initialize();
     }
 
+    // Serialize ONNX calls to prevent memory issues
+    await _acquireLock();
+
+    OrtValue? inputValue;
+    Map<String, OrtValue>? outputs;
+
     try {
-      // Load and preprocess image
+      // Load and preprocess image (in isolate)
       final inputData = await _preprocessImage(imagePath);
 
       // Create OrtValue from the preprocessed data
-      final inputValue = await OrtValue.fromList(inputData, [1, 3, 224, 224]);
+      inputValue = await OrtValue.fromList(inputData, [1, 3, 224, 224]);
 
-      // Run inference
+      // Run inference with timeout
       final inputs = {'image': inputValue};
-      final outputs = await _session!.run(inputs);
+      outputs = await _session!
+          .run(inputs)
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw Exception('ONNX inference timeout'),
+          );
 
       // Get embedding output
       final embeddingValue = outputs.values.first;
@@ -165,74 +236,35 @@ class MobileClipService {
         output.dispose();
       }
 
+      _releaseLock();
+
       return MobileClipResult(
         category: categories[bestIdx],
         confidence: bestProb,
         allScores: allScores,
       );
     } catch (e, st) {
+      // Clean up on error
+      inputValue?.dispose();
+      if (outputs != null) {
+        for (final output in outputs.values) {
+          output.dispose();
+        }
+      }
+      _releaseLock();
       developer.log('[MobileCLIP] Classification error: $e\n$st');
       return null;
     }
   }
 
   /// Preprocess image to NCHW tensor format with CLIP normalization
-  static Future<List<double>> _preprocessImage(String imagePath) async {
-    // Read image file
-    final file = File(imagePath);
-    final bytes = await file.readAsBytes();
-
-    // Decode image using dart:ui
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-
-    // Resize to 224x224
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-    canvas.drawImageRect(
-      image,
-      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      const ui.Rect.fromLTWH(0, 0, 224, 224),
-      ui.Paint()..filterQuality = ui.FilterQuality.high,
+  /// Runs in a separate isolate to avoid blocking the UI thread
+  static Future<Float64List> _preprocessImage(String imagePath) async {
+    final bytes = await File(imagePath).readAsBytes();
+    return compute(
+      _preprocessImageIsolate,
+      _ClipPreprocessInput(bytes, _mean, _std),
     );
-    final picture = recorder.endRecording();
-    final resizedImage = await picture.toImage(224, 224);
-
-    // Get pixel data
-    final byteData = await resizedImage.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    final pixels = byteData!.buffer.asUint8List();
-
-    // Convert to NCHW format with normalization
-    // Shape: [1, 3, 224, 224]
-    final tensor = List<double>.filled(1 * 3 * 224 * 224, 0.0);
-
-    for (int y = 0; y < 224; y++) {
-      for (int x = 0; x < 224; x++) {
-        final pixelIndex = (y * 224 + x) * 4; // RGBA
-        final r = pixels[pixelIndex] / 255.0;
-        final g = pixels[pixelIndex + 1] / 255.0;
-        final b = pixels[pixelIndex + 2] / 255.0;
-
-        // Normalize with ImageNet stats
-        final rNorm = (r - _mean[0]) / _std[0];
-        final gNorm = (g - _mean[1]) / _std[1];
-        final bNorm = (b - _mean[2]) / _std[2];
-
-        // NCHW layout: batch=0, channel, height, width
-        tensor[0 * 224 * 224 + y * 224 + x] = rNorm; // R channel
-        tensor[1 * 224 * 224 + y * 224 + x] = gNorm; // G channel
-        tensor[2 * 224 * 224 + y * 224 + x] = bNorm; // B channel
-      }
-    }
-
-    // Clean up
-    image.dispose();
-    resizedImage.dispose();
-
-    return tensor;
   }
 
   /// Calculate cosine similarities between image embedding and category embeddings
@@ -268,4 +300,51 @@ class MobileClipService {
     _ort = null;
     developer.log('[MobileCLIP] Disposed');
   }
+}
+
+/// Input data for the preprocessing isolate
+class _ClipPreprocessInput {
+  final Uint8List bytes;
+  final List<double> mean;
+  final List<double> std;
+  _ClipPreprocessInput(this.bytes, this.mean, this.std);
+}
+
+/// Runs on a separate isolate - decodes, resizes, and normalizes image
+Float64List _preprocessImageIsolate(_ClipPreprocessInput input) {
+  // Decode image
+  final image = img.decodeImage(input.bytes);
+  if (image == null) {
+    throw Exception('Failed to decode image');
+  }
+
+  // Resize to 224x224 using bilinear interpolation
+  final resized = img.copyResize(
+    image,
+    width: 224,
+    height: 224,
+    interpolation: img.Interpolation.linear,
+  );
+
+  // Convert to NCHW format with CLIP normalization
+  final tensor = Float64List(1 * 3 * 224 * 224);
+
+  for (int y = 0; y < 224; y++) {
+    for (int x = 0; x < 224; x++) {
+      final pixel = resized.getPixel(x, y);
+      final r = pixel.r / 255.0;
+      final g = pixel.g / 255.0;
+      final b = pixel.b / 255.0;
+
+      final rNorm = (r - input.mean[0]) / input.std[0];
+      final gNorm = (g - input.mean[1]) / input.std[1];
+      final bNorm = (b - input.mean[2]) / input.std[2];
+
+      tensor[0 * 224 * 224 + y * 224 + x] = rNorm;
+      tensor[1 * 224 * 224 + y * 224 + x] = gNorm;
+      tensor[2 * 224 * 224 + y * 224 + x] = bNorm;
+    }
+  }
+
+  return tensor;
 }

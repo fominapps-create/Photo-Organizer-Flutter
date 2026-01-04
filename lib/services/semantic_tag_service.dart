@@ -1,25 +1,228 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
-import 'dart:ui' as ui;
+import 'package:image/image.dart' as img;
 
-/// Result containing semantic descriptions of what's in the image
+/// Fast category-only tagging (6 categories instead of 43 descriptions)
+class SemanticTagService {
+  static OrtSession? _session;
+  static Float32List? _categoryEmbeddings; // 6 x 512
+  static bool _ready = false;
+  static String? lastError;
+
+  static const _categories = [
+    'people',
+    'animals',
+    'food',
+    'scenery',
+    'documents',
+    'other',
+  ];
+
+  static bool get isReady => _ready;
+
+  /// Initialize with XNNPACK acceleration
+  static Future<void> initialize() async {
+    if (_ready) return;
+
+    final start = DateTime.now();
+    try {
+      final ort = OnnxRuntime();
+
+      // Use XNNPACK for hardware acceleration
+      final providers = await ort.getAvailableProviders();
+      final sessionOptions = OrtSessionOptions(
+        providers: [
+          if (providers.contains(OrtProvider.XNNPACK)) OrtProvider.XNNPACK,
+          OrtProvider.CPU,
+        ],
+        intraOpNumThreads: 4,
+        interOpNumThreads: 1,
+      );
+
+      _session = await ort.createSessionFromAsset(
+        'assets/models/mobileclip_image_encoder.onnx',
+        options: sessionOptions,
+      );
+
+      // Load 6 category embeddings (not 43 descriptions)
+      final embBytes = await rootBundle.load(
+        'assets/models/category_embeddings.npy',
+      );
+      final embData = embBytes.buffer.asUint8List();
+      final headerLen = embData[8] + (embData[9] << 8);
+      final floatData = embData.sublist(10 + headerLen);
+      _categoryEmbeddings = Float32List.view(
+        floatData.buffer,
+        floatData.offsetInBytes,
+        6 * 512,
+      );
+
+      _ready = true;
+      developer.log(
+        '[ST] Ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+      );
+    } catch (e) {
+      lastError = e.toString();
+      developer.log('[ST] Init failed: $e');
+      rethrow;
+    }
+  }
+
+  /// Analyze image and return category
+  static Future<CategoryResult?> analyzeImageCategory(String imagePath) async {
+    if (!_ready) {
+      await initialize();
+      if (!_ready) return null;
+    }
+
+    OrtValue? input;
+    Map<String, OrtValue>? outputs;
+
+    try {
+      // Preprocess in isolate (won't block UI)
+      final tensor = await compute(_preprocessImage, imagePath);
+
+      // Run inference
+      input = await OrtValue.fromList(tensor, [1, 3, 256, 256]);
+      outputs = await _session!.run({'image': input});
+
+      // Get embedding
+      final embList = await outputs.values.first.asList();
+      final Float32List embedding;
+      if (embList.isNotEmpty && embList[0] is List) {
+        final inner = embList[0] as List;
+        embedding = Float32List.fromList(
+          inner.map((e) => (e as num).toDouble()).toList(),
+        );
+      } else if (embList is Float32List) {
+        embedding = embList;
+      } else {
+        embedding = Float32List.fromList(
+          embList.map((e) => (e as num).toDouble()).toList(),
+        );
+      }
+
+      // Calculate 6 dot products (fast!)
+      final scores = <double>[];
+      for (int i = 0; i < 6; i++) {
+        double dot = 0;
+        for (int j = 0; j < 512; j++) {
+          dot += embedding[j] * _categoryEmbeddings![i * 512 + j];
+        }
+        scores.add(dot);
+      }
+
+      // Find best category
+      int bestIdx = 0;
+      double bestScore = scores[0];
+      for (int i = 1; i < 6; i++) {
+        if (scores[i] > bestScore) {
+          bestScore = scores[i];
+          bestIdx = i;
+        }
+      }
+
+      // Cleanup
+      input.dispose();
+      for (final o in outputs.values) o.dispose();
+
+      lastError = null;
+      return CategoryResult(
+        category: _categories[bestIdx],
+        confidence: bestScore,
+        allScores: {for (int i = 0; i < 6; i++) _categories[i]: scores[i]},
+      );
+    } catch (e) {
+      input?.dispose();
+      outputs?.values.forEach((o) => o.dispose());
+      lastError = e.toString();
+      return null;
+    }
+  }
+
+  static Future<void> dispose() async {
+    await _session?.close();
+    _session = null;
+    _ready = false;
+  }
+
+  /// Backward-compatible wrapper for factory
+  static Future<SemanticTagResult?> analyzeImage(String imagePath) async {
+    final cat = await analyzeImageCategory(imagePath);
+    if (cat == null) return null;
+    return SemanticTagResult.fromCategory(cat);
+  }
+}
+
+/// Result with just category (not 43 descriptions)
+class CategoryResult {
+  final String category;
+  final double confidence;
+  final Map<String, double> allScores;
+
+  CategoryResult({
+    required this.category,
+    required this.confidence,
+    required this.allScores,
+  });
+}
+
+/// Preprocessing in isolate - doesn't block UI
+Float32List _preprocessImage(String imagePath) {
+  final bytes = File(imagePath).readAsBytesSync();
+  final image = img.decodeImage(bytes);
+  if (image == null) throw Exception('Failed to decode image');
+
+  final resized = img.copyResize(image, width: 256, height: 256);
+  final tensor = Float32List(3 * 256 * 256);
+
+  for (int y = 0; y < 256; y++) {
+    for (int x = 0; x < 256; x++) {
+      final p = resized.getPixel(x, y);
+      tensor[0 * 256 * 256 + y * 256 + x] = p.rNormalized.toDouble();
+      tensor[1 * 256 * 256 + y * 256 + x] = p.gNormalized.toDouble();
+      tensor[2 * 256 * 256 + y * 256 + x] = p.bNormalized.toDouble();
+    }
+  }
+  return tensor;
+}
+
+// Keep old classes for backward compatibility
 class SemanticTagResult {
-  final String category; // Main category (people, animals, food, etc.)
+  final String category;
   final double categoryConfidence;
-  final List<SemanticMatch> topMatches; // Top semantic descriptions
+  final List<SemanticMatch> topMatches;
 
   SemanticTagResult({
     required this.category,
     required this.categoryConfidence,
     required this.topMatches,
   });
+
+  /// Create from CategoryResult
+  factory SemanticTagResult.fromCategory(CategoryResult cat) {
+    return SemanticTagResult(
+      category: cat.category,
+      categoryConfidence: cat.confidence,
+      topMatches:
+          cat.allScores.entries
+              .map(
+                (e) => SemanticMatch(
+                  description: e.key,
+                  category: e.key,
+                  score: e.value,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => b.score.compareTo(a.score)),
+    );
+  }
 }
 
-/// A single semantic description match
 class SemanticMatch {
   final String description;
   final String category;
@@ -30,253 +233,4 @@ class SemanticMatch {
     required this.category,
     required this.score,
   });
-}
-
-/// On-device AI that provides semantic descriptions of images using MobileCLIP.
-/// Instead of just "food", it can tell you "a plate of cooked food" or "breakfast food".
-class SemanticTagService {
-  static OnnxRuntime? _ort;
-  static OrtSession? _session;
-  static Float32List? _semanticEmbeddings;
-  static List<String>? _descriptions;
-  static List<String>? _categoryForDesc;
-  static bool _initialized = false;
-
-  /// ImageNet normalization constants (used by CLIP)
-  static const List<double> _mean = [0.48145466, 0.4578275, 0.40821073];
-  static const List<double> _std = [0.26862954, 0.26130258, 0.27577711];
-
-  /// Initialize the ONNX runtime and load semantic embeddings
-  static Future<void> initialize() async {
-    if (_initialized) return;
-
-    try {
-      developer.log('[SemanticTag] Initializing...');
-
-      // Create ONNX Runtime instance
-      _ort = OnnxRuntime();
-
-      // Create session from asset
-      _session = await _ort!.createSessionFromAsset(
-        'assets/models/mobileclip_image_encoder.onnx',
-      );
-
-      // Load semantic embeddings and metadata
-      await _loadSemanticEmbeddings();
-
-      _initialized = true;
-      developer.log(
-        '[SemanticTag] ✓ Initialized with ${_descriptions!.length} semantic descriptions',
-      );
-    } catch (e, st) {
-      developer.log('[SemanticTag] ✗ Initialization failed: $e\n$st');
-      rethrow;
-    }
-  }
-
-  /// Load semantic embeddings and metadata
-  static Future<void> _loadSemanticEmbeddings() async {
-    // Load embeddings
-    final embBytes = await rootBundle.load(
-      'assets/models/semantic_embeddings.npy',
-    );
-    final embData = embBytes.buffer.asUint8List();
-
-    // Parse numpy .npy format
-    if (embData[0] != 0x93 ||
-        embData[1] != 0x4E ||
-        embData[2] != 0x55 ||
-        embData[3] != 0x4D ||
-        embData[4] != 0x50 ||
-        embData[5] != 0x59) {
-      throw Exception('Invalid numpy file format');
-    }
-
-    final headerLen = embData[8] + (embData[9] << 8);
-    final dataOffset = 10 + headerLen;
-    final floatData = embData.sublist(dataOffset);
-
-    // 43 descriptions x 512 dimensions = 21,974 floats
-    _semanticEmbeddings = Float32List.view(
-      floatData.buffer,
-      floatData.offsetInBytes,
-      43 * 512,
-    );
-
-    // Load metadata
-    final metaString = await rootBundle.loadString(
-      'assets/models/semantic_metadata.json',
-    );
-    final metadata = json.decode(metaString) as Map<String, dynamic>;
-    _descriptions = List<String>.from(metadata['descriptions'] as List);
-    _categoryForDesc = List<String>.from(metadata['categories'] as List);
-
-    developer.log(
-      '[SemanticTag] ✓ Loaded ${_descriptions!.length} descriptions',
-    );
-  }
-
-  /// Check if service is ready
-  static bool get isReady => _initialized && _session != null;
-
-  /// Analyze an image and return semantic descriptions
-  static Future<SemanticTagResult?> analyzeImage(String imagePath) async {
-    if (!isReady) {
-      developer.log('[SemanticTag] Not initialized, initializing now...');
-      await initialize();
-    }
-
-    try {
-      // Load and preprocess image
-      final inputData = await _preprocessImage(imagePath);
-
-      // Create OrtValue from the preprocessed data
-      final inputValue = await OrtValue.fromList(inputData, [1, 3, 224, 224]);
-
-      // Run inference
-      final inputs = {'image': inputValue};
-      final outputs = await _session!.run(inputs);
-
-      // Get embedding output
-      final embeddingValue = outputs.values.first;
-      final embedding = await embeddingValue.asList();
-      final imageEmbedding = Float32List.fromList(
-        embedding.map((e) => (e as num).toDouble()).toList(),
-      );
-
-      // Calculate similarities with all semantic embeddings
-      final similarities = _calculateSimilarities(imageEmbedding);
-
-      // Get top matches
-      final matches = <SemanticMatch>[];
-      for (int i = 0; i < _descriptions!.length; i++) {
-        matches.add(
-          SemanticMatch(
-            description: _descriptions![i],
-            category: _categoryForDesc![i],
-            score: similarities[i],
-          ),
-        );
-      }
-
-      // Sort by score descending
-      matches.sort((a, b) => b.score.compareTo(a.score));
-
-      // Calculate category scores by averaging top matches per category
-      final categoryScores = <String, List<double>>{};
-      for (final match in matches) {
-        categoryScores.putIfAbsent(match.category, () => []);
-        categoryScores[match.category]!.add(match.score);
-      }
-
-      // Find best category (highest average of top 2 scores)
-      String bestCategory = 'other';
-      double bestCategoryScore = 0.0;
-      categoryScores.forEach((cat, scores) {
-        scores.sort((a, b) => b.compareTo(a));
-        final avgTop2 = scores.take(2).reduce((a, b) => a + b) / 2;
-        if (avgTop2 > bestCategoryScore) {
-          bestCategoryScore = avgTop2;
-          bestCategory = cat;
-        }
-      });
-
-      // Clean up
-      inputValue.dispose();
-      for (final output in outputs.values) {
-        output.dispose();
-      }
-
-      return SemanticTagResult(
-        category: bestCategory,
-        categoryConfidence: bestCategoryScore,
-        topMatches: matches.take(7).toList(),
-      );
-    } catch (e, st) {
-      developer.log('[SemanticTag] Analysis error: $e\n$st');
-      return null;
-    }
-  }
-
-  /// Preprocess image to NCHW tensor format with CLIP normalization
-  static Future<List<double>> _preprocessImage(String imagePath) async {
-    final file = File(imagePath);
-    final bytes = await file.readAsBytes();
-
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
-
-    // Resize to 224x224
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-    canvas.drawImageRect(
-      image,
-      ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      const ui.Rect.fromLTWH(0, 0, 224, 224),
-      ui.Paint()..filterQuality = ui.FilterQuality.high,
-    );
-    final picture = recorder.endRecording();
-    final resizedImage = await picture.toImage(224, 224);
-
-    final byteData = await resizedImage.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    final pixels = byteData!.buffer.asUint8List();
-
-    // Convert to NCHW format with normalization
-    final tensor = List<double>.filled(1 * 3 * 224 * 224, 0.0);
-
-    for (int y = 0; y < 224; y++) {
-      for (int x = 0; x < 224; x++) {
-        final pixelIndex = (y * 224 + x) * 4;
-        final r = pixels[pixelIndex] / 255.0;
-        final g = pixels[pixelIndex + 1] / 255.0;
-        final b = pixels[pixelIndex + 2] / 255.0;
-
-        final rNorm = (r - _mean[0]) / _std[0];
-        final gNorm = (g - _mean[1]) / _std[1];
-        final bNorm = (b - _mean[2]) / _std[2];
-
-        tensor[0 * 224 * 224 + y * 224 + x] = rNorm;
-        tensor[1 * 224 * 224 + y * 224 + x] = gNorm;
-        tensor[2 * 224 * 224 + y * 224 + x] = bNorm;
-      }
-    }
-
-    image.dispose();
-    resizedImage.dispose();
-
-    return tensor;
-  }
-
-  /// Calculate cosine similarities
-  static List<double> _calculateSimilarities(Float32List imageEmbedding) {
-    final similarities = <double>[];
-    const embeddingDim = 512;
-    final numDescriptions = _descriptions!.length;
-
-    for (int i = 0; i < numDescriptions; i++) {
-      double dotProduct = 0.0;
-      for (int j = 0; j < embeddingDim; j++) {
-        dotProduct +=
-            imageEmbedding[j] * _semanticEmbeddings![i * embeddingDim + j];
-      }
-      similarities.add(dotProduct);
-    }
-
-    return similarities;
-  }
-
-  /// Clean up resources
-  static Future<void> dispose() async {
-    await _session?.close();
-    _session = null;
-    _semanticEmbeddings = null;
-    _descriptions = null;
-    _categoryForDesc = null;
-    _initialized = false;
-    _ort = null;
-    developer.log('[SemanticTag] Disposed');
-  }
 }
