@@ -2,12 +2,12 @@
   "appVersion": "0.4.3-dev",
   "buildNumber": 21,
   "scanLogicVersion": 20,
-  "lastUpdated": "2026-01-04T18:30:00",
+  "lastUpdated": "2026-01-04T19:45:00",
   "changes": [
-    "Optimized hybrid tagging: YOLO only at startup",
-    "Lazy-load ML Kit ImageLabeler for scenery (faster startup)",
-    "Removed face detection (YOLO handles people)",
-    "Removed text recognition (too aggressive on screenshots)",
-    "Fixed memory crash when scanning 1600+ photos"
+    "Added detailed YOLO error tracking for debugging",
+    "Errors now displayed in photo viewer with red highlights",
+    "Dynamic ONNX thread count based on device tier",
+    "UI yields around ML Kit processing to prevent lag",
+    "Memory arena enabled for faster ONNX allocation"
   ]
 }

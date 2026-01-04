@@ -321,28 +321,41 @@ class TaggingServiceFactory {
               if (hybridResult != null) {
                 final confidence = (hybridResult.confidence * 100)
                     .toStringAsFixed(0);
+                
+                // Build detection list with error info if present
+                final detections = <String>[
+                  '${hybridResult.category} ($confidence%) [${hybridResult.method}]',
+                  ...hybridResult.allDetections,
+                ];
+                
+                // Include YOLO error for debugging if category is 'other' or 'error'
+                if (hybridResult.error != null) {
+                  detections.add('⚠️ ${hybridResult.error}');
+                }
+                
                 return MapEntry(
                   item.photoID,
                   TagResult(
                     tags: [hybridResult.category],
-                    allDetections: [
-                      '${hybridResult.category} ($confidence%) [${hybridResult.method}]',
-                      ...hybridResult.allDetections,
-                    ],
-                    source: 'hybrid',
+                    allDetections: detections,
+                    source: hybridResult.hasError ? 'error' : 'hybrid',
                   ),
                 );
               } else {
                 final errorMsg =
                     HybridTaggingService.lastError ?? 'Unknown error';
+                final yoloError = HybridTaggingService.lastYoloError;
                 developer.log(
-                  '[Tagging] Hybrid failed for ${item.photoID}: $errorMsg',
+                  '[Tagging] Hybrid failed for ${item.photoID}: $errorMsg (YOLO: $yoloError)',
                 );
                 return MapEntry(
                   item.photoID,
                   TagResult(
                     tags: ['unscanned'],
-                    allDetections: ['Error: $errorMsg'],
+                    allDetections: [
+                      'Error: $errorMsg',
+                      if (yoloError != null) '⚠️ YOLO: $yoloError',
+                    ],
                     source: 'error',
                   ),
                 );

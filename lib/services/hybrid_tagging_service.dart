@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:image/image.dart' as img;
+import 'tagging_service_factory.dart';
 
 /// Optimized hybrid tagging service:
 /// 1. YOLO object detection (people, animals, food) - always runs
@@ -25,6 +26,7 @@ class HybridTaggingService {
   static bool _labelerInitialized = false;
 
   static String? lastError;
+  static String? lastYoloError; // Detailed YOLO-specific error for debugging
 
   // YOLO input size - matches the exported ONNX model (320x320)
   static const int _yoloInputSize = 320;
@@ -149,12 +151,17 @@ class HybridTaggingService {
     try {
       final ort = OnnxRuntime();
       final providers = await ort.getAvailableProviders();
+      
+      // Get optimal thread count based on device capabilities (2-6 threads)
+      final intraOpThreads = await TaggingServiceFactory.getOptimalIntraOpThreads();
+      
       final sessionOptions = OrtSessionOptions(
         providers: [
           if (providers.contains(OrtProvider.XNNPACK)) OrtProvider.XNNPACK,
           OrtProvider.CPU,
         ],
-        intraOpNumThreads: 4,
+        intraOpNumThreads: intraOpThreads,
+        useArena: true, // Memory arena for faster allocation
       );
 
       _yoloSession = await ort.createSessionFromAsset(
@@ -191,7 +198,26 @@ class HybridTaggingService {
   static Future<HybridTagResult?> classifyImage(String imagePath) async {
     if (!_yoloReady) {
       await initialize();
-      if (!_yoloReady) return null;
+      if (!_yoloReady) {
+        return HybridTagResult(
+          category: 'error',
+          confidence: 0.0,
+          method: 'error',
+          timings: {},
+          error: 'YOLO init failed: ${lastError ?? "Unknown"}',
+        );
+      }
+    }
+    
+    // Double-check session is valid
+    if (_yoloSession == null) {
+      return HybridTagResult(
+        category: 'error',
+        confidence: 0.0,
+        method: 'error',
+        timings: {},
+        error: 'YOLO session is null after init',
+      );
     }
 
     final timings = <String, int>{};
@@ -220,8 +246,14 @@ class HybridTaggingService {
 
       await _initializeLabeler();
       if (_imageLabeler != null) {
+        // Yield to let UI render before ML Kit processing
+        await Future.delayed(Duration.zero);
+        
         final inputImage = InputImage.fromFilePath(imagePath);
         final labels = await _imageLabeler!.processImage(inputImage);
+        
+        // Yield to let UI render after ML Kit processing
+        await Future.delayed(Duration.zero);
         stopwatch.stop();
         timings['labeler'] = stopwatch.elapsedMilliseconds;
 
@@ -257,16 +289,25 @@ class HybridTaggingService {
       }
 
       // Step 3: Nothing matched → other
+      // Include YOLO error info if available for debugging
       return HybridTagResult(
         category: 'other',
         confidence: 0.5,
         method: 'fallback',
         timings: timings,
+        error: lastYoloError, // Pass YOLO error for debugging
       );
-    } catch (e) {
+    } catch (e, st) {
       lastError = e.toString();
-      developer.log('[Hybrid] Error: $e');
-      return null;
+      developer.log('[Hybrid] Error: $e\n$st');
+      // Return error result instead of null so UI can display it
+      return HybridTagResult(
+        category: 'error',
+        confidence: 0.0,
+        method: 'error',
+        timings: timings,
+        error: 'Hybrid error: $e',
+      );
     }
   }
 
@@ -276,9 +317,29 @@ class HybridTaggingService {
     Map<String, OrtValue>? outputs;
 
     try {
+      // Check if file exists first
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        lastYoloError = 'YOLO: File not found at $imagePath';
+        developer.log('[YOLO] $lastYoloError');
+        return null;
+      }
+      
+      // Check file size
+      final fileSize = await file.length();
+      if (fileSize == 0) {
+        lastYoloError = 'YOLO: File is empty (0 bytes) at $imagePath';
+        developer.log('[YOLO] $lastYoloError');
+        return null;
+      }
+      
       // Step 1: Preprocess image in separate isolate (won't block UI)
       final prepResult = await compute(_preprocessImageIsolate, imagePath);
-      if (prepResult == null) return null;
+      if (prepResult == null) {
+        lastYoloError = 'YOLO preprocess failed: Could not decode image ($fileSize bytes) at $imagePath';
+        developer.log('[YOLO] $lastYoloError');
+        return null;
+      }
 
       final tensor = prepResult.tensor;
       final imageWidth = prepResult.width;
@@ -408,17 +469,23 @@ class HybridTaggingService {
         }
       }
 
-      if (winner == null) return null;
+      if (winner == null) {
+        lastYoloError = 'YOLO found no matching categories (scores: $categoryScores)';
+        return null;
+      }
 
+      // Clear error on success
+      lastYoloError = null;
       return _YoloDetection(
         category: winner,
         confidence: math.min(winnerScore * 10, 0.99),
         allDetections: allDetections,
       );
-    } catch (e) {
+    } catch (e, st) {
       input?.dispose();
       outputs?.values.forEach((o) => o.dispose());
-      developer.log('[Hybrid] YOLO error: $e');
+      lastYoloError = 'YOLO inference error: $e';
+      developer.log('[YOLO] $lastYoloError\n$st');
       return null;
     }
   }
@@ -540,6 +607,7 @@ class HybridTagResult {
   final String method;
   final Map<String, int> timings;
   final List<String> allDetections;
+  final String? error; // Detailed error info for debugging
 
   HybridTagResult({
     required this.category,
@@ -547,9 +615,11 @@ class HybridTagResult {
     required this.method,
     required this.timings,
     this.allDetections = const [],
+    this.error,
   });
 
   int get totalTimeMs => timings.values.fold(0, (a, b) => a + b);
+  bool get hasError => error != null;
 }
 
 /// Result from preprocessing isolate
