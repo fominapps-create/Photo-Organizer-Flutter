@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:image/image.dart' as img;
@@ -24,8 +26,10 @@ class HybridTaggingService {
 
   static String? lastError;
 
-  // YOLO input size
-  static const int _yoloInputSize = 640;
+  // YOLO input size - matches the exported ONNX model (320x320)
+  static const int _yoloInputSize = 320;
+  // Output shape is [1, 84, 2100] for 320x320 input
+  static const int _yoloNumDetections = 2100;
 
   // YOLO COCO class mapping to our categories
   static const Map<int, String> _yoloToCategory = {
@@ -70,7 +74,6 @@ class HybridTaggingService {
   static const double _animalConfidence = 0.45;
   static const double _foodConfidence = 0.6;
   static const double _minBoxPercent = 0.02; // 2% of image minimum
-  static const double _sceneryMinConfidence = 0.5; // For ML Kit labels
 
   // Scenery keywords for ML Kit ImageLabeler fallback
   static const Set<String> _sceneryKeywords = {
@@ -144,7 +147,6 @@ class HybridTaggingService {
 
     final start = DateTime.now();
     try {
-      // Initialize YOLO ONNX only - fast startup
       final ort = OnnxRuntime();
       final providers = await ort.getAvailableProviders();
       final sessionOptions = OrtSessionOptions(
@@ -175,15 +177,11 @@ class HybridTaggingService {
   static Future<void> _initializeLabeler() async {
     if (_labelerInitialized) return;
 
-    final start = DateTime.now();
     try {
       _imageLabeler = ImageLabeler(
         options: ImageLabelerOptions(confidenceThreshold: 0.5),
       );
       _labelerInitialized = true;
-      developer.log(
-        '[Hybrid] ImageLabeler ready in ${DateTime.now().difference(start).inMilliseconds}ms',
-      );
     } catch (e) {
       developer.log('[Hybrid] ImageLabeler init failed: $e');
     }
@@ -207,9 +205,6 @@ class HybridTaggingService {
       timings['yolo'] = stopwatch.elapsedMilliseconds;
 
       if (yoloResult != null) {
-        developer.log(
-          '[Hybrid] YOLO detected ${yoloResult.category} (${(yoloResult.confidence * 100).toStringAsFixed(0)}%)',
-        );
         return HybridTagResult(
           category: yoloResult.category,
           confidence: yoloResult.confidence,
@@ -220,7 +215,6 @@ class HybridTaggingService {
       }
 
       // Step 2: YOLO found nothing → try ML Kit ImageLabeler for scenery
-      // Lazy-load the labeler only when needed (saves ~300ms on startup)
       stopwatch.reset();
       stopwatch.start();
 
@@ -240,7 +234,6 @@ class HybridTaggingService {
           final conf = (label.confidence * 100).toInt();
           allDetections.add('$text:$conf%');
 
-          // Count strong scenery matches (not weak ones)
           if (_sceneryKeywords.contains(text) &&
               !_weakSceneryKeywords.contains(text) &&
               label.confidence >= 0.5) {
@@ -249,11 +242,7 @@ class HybridTaggingService {
         }
 
         // Need 2+ strong scenery labels to classify as scenery
-        // (prevents false positives from single "sky" in product photos)
         if (strongSceneryCount >= 2) {
-          developer.log(
-            '[Hybrid] Scenery detected ($strongSceneryCount labels) → scenery',
-          );
           return HybridTagResult(
             category: 'scenery',
             confidence: 0.75,
@@ -268,7 +257,6 @@ class HybridTaggingService {
       }
 
       // Step 3: Nothing matched → other
-      developer.log('[Hybrid] No match → other');
       return HybridTagResult(
         category: 'other',
         confidence: 0.5,
@@ -288,37 +276,19 @@ class HybridTaggingService {
     Map<String, OrtValue>? outputs;
 
     try {
-      // Load and preprocess image
-      final bytes = await File(imagePath).readAsBytes();
-      final image = img.decodeImage(bytes);
-      if (image == null) return null;
+      // Step 1: Preprocess image in separate isolate (won't block UI)
+      final prepResult = await compute(_preprocessImageIsolate, imagePath);
+      if (prepResult == null) return null;
 
-      final imageWidth = image.width;
-      final imageHeight = image.height;
+      final tensor = prepResult.tensor;
+      final imageWidth = prepResult.width;
+      final imageHeight = prepResult.height;
       final imageArea = imageWidth * imageHeight;
 
-      // Resize to 640x640 (YOLO input)
-      final resized = img.copyResize(
-        image,
-        width: _yoloInputSize,
-        height: _yoloInputSize,
-      );
+      // Yield to let UI render a frame before inference
+      await Future.delayed(Duration.zero);
 
-      // Create tensor [1, 3, 640, 640] normalized to 0-1
-      final tensor = Float32List(3 * _yoloInputSize * _yoloInputSize);
-      for (int y = 0; y < _yoloInputSize; y++) {
-        for (int x = 0; x < _yoloInputSize; x++) {
-          final p = resized.getPixel(x, y);
-          tensor[0 * _yoloInputSize * _yoloInputSize + y * _yoloInputSize + x] =
-              p.rNormalized.toDouble();
-          tensor[1 * _yoloInputSize * _yoloInputSize + y * _yoloInputSize + x] =
-              p.gNormalized.toDouble();
-          tensor[2 * _yoloInputSize * _yoloInputSize + y * _yoloInputSize + x] =
-              p.bNormalized.toDouble();
-        }
-      }
-
-      // Run inference
+      // Step 2: Run ONNX inference (this is the heavy part that blocks main thread)
       input = await OrtValue.fromList(tensor, [
         1,
         3,
@@ -327,58 +297,62 @@ class HybridTaggingService {
       ]);
       outputs = await _yoloSession!.run({'images': input});
 
-      // Parse YOLO output [1, 84, 8400] -> 8400 detections, 84 values each
-      // Values: x, y, w, h, class_scores[80]
+      // Yield to let UI render after inference
+      await Future.delayed(Duration.zero);
+
+      // Step 3: Parse YOLO output
+      // Expected shape: [1, 84, 2100] where 84 = 4 (box) + 80 (classes)
       final outputList = await outputs.values.first.asList();
 
-      // Handle nested list structure
-      List<dynamic> flatOutput;
+      // Unwrap the batch dimension: outputList is [batch] -> [84 rows] -> [2100 values each]
+      List<dynamic> rows;
       if (outputList.isNotEmpty && outputList[0] is List) {
-        flatOutput = outputList[0] as List;
+        rows = outputList[0] as List;
       } else {
-        flatOutput = outputList;
+        rows = outputList;
       }
+
+      // Validate we have 84 rows
+      if (rows.length != 84) {
+        developer.log(
+          '[YOLO] Unexpected output shape: rows.length=${rows.length}, expected 84',
+        );
+        input.dispose();
+        for (final o in outputs.values) o.dispose();
+        return null;
+      }
+
+      // Get the number of detections from the first row
+      final firstRow = rows[0] as List;
+      final numDetections = firstRow.length;
 
       // Category scores with weighted scoring
       final categoryScores = <String, double>{};
       final allDetections = <String>[];
 
-      // YOLOv8 output is [1, 84, 8400] - need to transpose
-      // Each of 84 rows contains 8400 values
-      final numDetections = 8400;
-      final numClasses = 80;
-
       for (int i = 0; i < numDetections; i++) {
-        // Get box coordinates (first 4 values for this detection)
-        double cx = 0, cy = 0, w = 0, h = 0;
+        // Get box coordinates (first 4 rows)
+        final cx = (rows[0] as List)[i].toDouble();
+        final cy = (rows[1] as List)[i].toDouble();
+        final w = (rows[2] as List)[i].toDouble();
+        final h = (rows[3] as List)[i].toDouble();
+
+        // Find max class score (rows 4-83 = 80 classes)
         double maxClassScore = 0;
         int maxClassId = -1;
-
-        // For YOLOv8, output shape is [1, 84, 8400]
-        // flatOutput[j] is the j-th row (84 rows), each with 8400 values
-        if (flatOutput.length == 84) {
-          // Transposed format
-          cx = (flatOutput[0] as List)[i].toDouble();
-          cy = (flatOutput[1] as List)[i].toDouble();
-          w = (flatOutput[2] as List)[i].toDouble();
-          h = (flatOutput[3] as List)[i].toDouble();
-
-          // Find max class score
-          for (int c = 0; c < numClasses; c++) {
-            final score = (flatOutput[4 + c] as List)[i].toDouble();
-            if (score > maxClassScore) {
-              maxClassScore = score;
-              maxClassId = c;
-            }
+        for (int c = 0; c < 80; c++) {
+          final score = (rows[4 + c] as List)[i].toDouble();
+          if (score > maxClassScore) {
+            maxClassScore = score;
+            maxClassId = c;
           }
-        } else {
-          continue; // Unknown format
         }
 
-        // Check confidence threshold
+        // Check if this class maps to our categories
         final category = _yoloToCategory[maxClassId];
         if (category == null) continue;
 
+        // Apply category-specific confidence thresholds
         double minConf = _yoloConfidence;
         if (maxClassId >= 14 && maxClassId <= 23) {
           minConf = _animalConfidence;
@@ -389,7 +363,6 @@ class HybridTaggingService {
         if (maxClassScore < minConf) continue;
 
         // Calculate box size as percentage of original image
-        // Scale from 640 back to original
         final scaleX = imageWidth / _yoloInputSize;
         final scaleY = imageHeight / _yoloInputSize;
         final boxW = w * scaleX;
@@ -427,7 +400,6 @@ class HybridTaggingService {
 
       for (final entry in categoryScores.entries) {
         final priority = _categoryPriority[entry.key] ?? 0;
-        // If higher priority, or same priority with higher score
         if (priority > winnerPriority ||
             (priority == winnerPriority && entry.value > winnerScore)) {
           winner = entry.key;
@@ -440,7 +412,7 @@ class HybridTaggingService {
 
       return _YoloDetection(
         category: winner,
-        confidence: math.min(winnerScore * 10, 0.99), // Scale for display
+        confidence: math.min(winnerScore * 10, 0.99),
         allDetections: allDetections,
       );
     } catch (e) {
@@ -565,7 +537,7 @@ class _YoloDetection {
 class HybridTagResult {
   final String category;
   final double confidence;
-  final String method; // face, yolo, text, labels, fallback
+  final String method;
   final Map<String, int> timings;
   final List<String> allDetections;
 
@@ -578,4 +550,48 @@ class HybridTagResult {
   });
 
   int get totalTimeMs => timings.values.fold(0, (a, b) => a + b);
+}
+
+/// Result from preprocessing isolate
+class _PreprocessResult {
+  final Float32List tensor;
+  final int width;
+  final int height;
+
+  _PreprocessResult(this.tensor, this.width, this.height);
+}
+
+/// Runs on a separate isolate - decodes, resizes, and normalizes image
+/// This prevents UI freezing during the expensive image processing
+_PreprocessResult? _preprocessImageIsolate(String imagePath) {
+  try {
+    final bytes = File(imagePath).readAsBytesSync();
+    final image = img.decodeImage(bytes);
+    if (image == null) return null;
+
+    final imageWidth = image.width;
+    final imageHeight = image.height;
+
+    // Resize to 320x320 (YOLO input size)
+    final resized = img.copyResize(image, width: 320, height: 320);
+
+    // Create tensor [1, 3, 320, 320] normalized to 0-1
+    const inputSize = 320;
+    final tensor = Float32List(3 * inputSize * inputSize);
+    for (int y = 0; y < inputSize; y++) {
+      for (int x = 0; x < inputSize; x++) {
+        final p = resized.getPixel(x, y);
+        tensor[0 * inputSize * inputSize + y * inputSize + x] = p.rNormalized
+            .toDouble();
+        tensor[1 * inputSize * inputSize + y * inputSize + x] = p.gNormalized
+            .toDouble();
+        tensor[2 * inputSize * inputSize + y * inputSize + x] = p.bNormalized
+            .toDouble();
+      }
+    }
+
+    return _PreprocessResult(tensor, imageWidth, imageHeight);
+  } catch (e) {
+    return null;
+  }
 }

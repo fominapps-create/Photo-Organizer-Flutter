@@ -152,14 +152,9 @@ class TaggingServiceFactory {
     // Determine concurrency based on device tier and tagging mode
     int concurrency;
     if (_useHybridTags) {
-      // Hybrid mode: YOLO is lightweight, can allow moderate concurrency
-      if (ramGB <= 3 || cpuCores <= 4) {
-        concurrency = isBackground ? 2 : 4;
-      } else if (ramGB <= 6 || cpuCores <= 6) {
-        concurrency = isBackground ? 3 : 6;
-      } else {
-        concurrency = isBackground ? 4 : 8;
-      }
+      // Hybrid mode uses ONNX YOLO - requires serial processing (concurrency=1)
+      // ONNX blocks main thread, so parallel calls cause UI freeze
+      concurrency = 1;
     } else if (_useSemanticTags || _useMobileCLIP) {
       // ONNX mode: Only allow concurrency=2 on flagship devices with NNAPI
       // - RAM >= 8GB (enough headroom for 2 concurrent inferences)
