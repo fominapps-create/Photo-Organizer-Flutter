@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 import '../services/api_service.dart';
+import '../services/yolo_silent_verifier.dart';
+import '../services/photo_id.dart';
 
 /// Data class for a photo in the gallery viewer
 /// Uses URL string for lazy loading instead of pre-resolved file paths
@@ -703,6 +705,11 @@ class _PhotoViewerState extends State<PhotoViewer>
                     );
                   }).toList(),
                 ),
+                // Show YOLO verification status for "Other" and "Scenery" photos
+                if (_isOtherOrScenery(photo.tags)) ...[
+                  const SizedBox(height: 8),
+                  _buildYoloStatusIndicator(photo),
+                ],
               ],
               // All detected objects
               if (extraDetections.isNotEmpty) ...[
@@ -804,5 +811,60 @@ class _PhotoViewerState extends State<PhotoViewer>
       default:
         return Icons.label;
     }
+  }
+
+  /// Check if photo is categorized as "Other" or "Scenery" (needs YOLO verification)
+  bool _isOtherOrScenery(List<String> tags) {
+    if (tags.isEmpty) return true;
+    final category = tags.first.toLowerCase();
+    return category == 'other' || category == 'scenery';
+  }
+
+  /// Build YOLO verification status indicator for "Other" photos
+  Widget _buildYoloStatusIndicator(PhotoData photo) {
+    final photoId = PhotoId.canonicalId(photo.url);
+
+    return FutureBuilder<YoloStatus>(
+      future: YoloSilentVerifier.loadYoloStatus(photoId),
+      builder: (context, snapshot) {
+        final status = snapshot.data ?? YoloStatus.pending;
+        final statusText = YoloSilentVerifier.getStatusText(status);
+
+        if (statusText.isEmpty) return const SizedBox.shrink();
+
+        // Color based on status
+        Color statusColor;
+        switch (status) {
+          case YoloStatus.pending:
+            statusColor = Colors.orange.shade300;
+            break;
+          case YoloStatus.verified:
+            statusColor = Colors.green.shade300;
+            break;
+          case YoloStatus.reclassified:
+            statusColor = Colors.blue.shade300;
+            break;
+          case YoloStatus.notNeeded:
+            return const SizedBox.shrink();
+        }
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: statusColor.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: statusColor.withValues(alpha: 0.6)),
+          ),
+          child: Text(
+            statusText,
+            style: TextStyle(
+              color: statusColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        );
+      },
+    );
   }
 }

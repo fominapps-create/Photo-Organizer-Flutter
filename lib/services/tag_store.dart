@@ -7,6 +7,9 @@ class TagStore {
   static String _detectionsKeyFor(String photoID) => 'detections_$photoID';
   static String _scanVersionKeyFor(String photoID) => 'scanver_$photoID';
 
+  /// Get SharedPreferences instance (for use by other services)
+  static Future<SharedPreferences> getPrefs() => SharedPreferences.getInstance();
+
   /// Save tags locally under canonical `photoID`.
   static Future<void> saveLocalTags(String photoID, List<String> tags) async {
     final prefs = await SharedPreferences.getInstance();

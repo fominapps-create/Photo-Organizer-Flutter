@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.4.1-dev+4
+version: 0.4.1-dev+5
 
 environment:
   sdk: ^3.10.0
@@ -55,6 +55,9 @@ dependencies:
   flutter_foreground_task: ^9.2.0
   flutter_local_notifications: ^18.0.1
   share_plus: ^10.1.4
+  # YOLO silent verifier dependencies
+  flutter_onnxruntime: ^1.6.1
+  image: ^4.5.3
 
 dev_dependencies:
   flutter_test:
@@ -97,6 +100,8 @@ flutter:
     - assets/Fox face abstract 1024x1024.png
     - assets/Fox face abstract 1024x1024 padded.png
     - assets/omni-button.png
+    # YOLO model for silent background verification
+    - assets/models/yolov8n.onnx
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

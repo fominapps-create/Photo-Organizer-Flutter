@@ -18,6 +18,7 @@ import '../services/api_service.dart';
 import '../services/tagging_service_factory.dart';
 import '../services/scan_foreground_service.dart';
 import '../services/local_tagging_service.dart';
+import '../services/yolo_silent_verifier.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'photo_viewer.dart';
@@ -2602,6 +2603,9 @@ class GalleryScreenState extends State<GalleryScreen>
       setState(() {
         _validationComplete = true;
       });
+
+      // Start silent YOLO verification for "Other" photos
+      _startSilentYoloVerification();
     }
 
     // Cancel dot animation and show ready message
@@ -2739,6 +2743,9 @@ class GalleryScreenState extends State<GalleryScreen>
         _validationComplete = true;
       });
       _showGalleryReadyMessage();
+
+      // Start silent YOLO verification for "Other" photos
+      _startSilentYoloVerification();
     } else if (mounted && !_hasScannedAtLeastOneBatch) {
       developer.log(
         '⚠️ Manual scan ended but no batches were processed - NOT marking complete',
@@ -3423,6 +3430,19 @@ class GalleryScreenState extends State<GalleryScreen>
                 batchTagsToSave[photoID] = tags;
                 batchDetectionsToSave[photoID] = allDetections;
 
+                // Queue "other" and "scenery" photos for silent YOLO verification
+                final category = tags.isNotEmpty ? tags.first.toLowerCase() : 'other';
+                if (category == 'other' || category == 'scenery') {
+                  final file = i < batchItems.length ? batchItems[i]['file'] as File? : null;
+                  if (file != null) {
+                    YoloSilentVerifier.queueForVerification(
+                      photoId: photoID,
+                      imagePath: file.path,
+                      mlKitCategory: category,
+                    );
+                  }
+                }
+
                 // Update cached tag counts incrementally
                 _incrementTagCounts(tags, allDetections);
 
@@ -3987,6 +4007,54 @@ class GalleryScreenState extends State<GalleryScreen>
       '✅ Gallery ready: $totalPhotos photos scanned & verified',
       duration: const Duration(seconds: 3),
     );
+  }
+
+  /// Start silent YOLO background verification for "Other" photos
+  /// Completely non-blocking - runs with long delays, lazy loads YOLO model
+  void _startSilentYoloVerification() {
+    final pendingCount = YoloSilentVerifier.pendingCount;
+    if (pendingCount == 0) {
+      developer.log('[YOLO Silent] No photos to verify');
+      return;
+    }
+
+    developer.log('[YOLO Silent] Starting verification of $pendingCount photos...');
+
+    // Set up callbacks for reclassification updates
+    YoloSilentVerifier.onReclassified = (photoId, oldCategory, newCategory, confidence) {
+      if (!mounted) return;
+
+      // Find the basename from photoId
+      final key = imageUrls
+          .map((u) => p.basename(u))
+          .firstWhere(
+            (k) => PhotoId.canonicalId(k) == photoId || k == photoId,
+            orElse: () => '',
+          );
+
+      if (key.isNotEmpty && photoTags.containsKey(key)) {
+        setState(() {
+          photoTags[key] = [newCategory];
+        });
+        developer.log(
+          '[YOLO Silent] UI updated: $key → $newCategory (was $oldCategory)'
+        );
+      }
+    };
+
+    // Progress callback (optional - just for logging)
+    YoloSilentVerifier.onProgress = (processed, total, reclassified) {
+      if (reclassified > 0 && processed == total) {
+        // Show a subtle notification when complete with fixes
+        _showSnackBar(
+          '✨ YOLO verified $total photos, fixed $reclassified',
+          duration: const Duration(seconds: 2),
+        );
+      }
+    };
+
+    // Start verification (runs completely in background)
+    YoloSilentVerifier.startVerification();
   }
 
   // ignore: unused_element
@@ -6899,6 +6967,9 @@ class GalleryScreenState extends State<GalleryScreen>
     // Stop PhotoManager change notifications
     PhotoManager.stopChangeNotify();
     PhotoManager.removeChangeCallback(_onPhotoLibraryChanged);
+
+    // Stop silent YOLO verification
+    YoloSilentVerifier.stopVerification();
 
     WidgetsBinding.instance.removeObserver(this);
     _photoChangesSubscription?.cancel();
