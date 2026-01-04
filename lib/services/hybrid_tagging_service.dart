@@ -2,24 +2,25 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
-import 'package:flutter/services.dart';
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:image/image.dart' as img;
 
-/// Hybrid tagging service combining:
-/// 1. ML Kit Face Detection (fast, accurate for people)
-/// 2. YOLO object detection (with size/priority logic)
-/// 3. ML Kit Text Recognition (for documents)
+/// Optimized hybrid tagging service:
+/// 1. YOLO object detection (people, animals, food) - always runs
+/// 2. ML Kit ImageLabeler (scenery only) - lazy-loaded fallback when YOLO finds nothing
+///
+/// Removed for performance:
+/// - Face detection: YOLO already detects people reliably
+/// - Text recognition: Too aggressive, tags screenshots as documents
 class HybridTaggingService {
   // YOLO ONNX
   static OrtSession? _yoloSession;
   static bool _yoloReady = false;
 
-  // ML Kit detectors
-  static FaceDetector? _faceDetector;
-  static TextRecognizer? _textRecognizer;
+  // ML Kit ImageLabeler - lazy loaded only when needed for scenery
+  static ImageLabeler? _imageLabeler;
+  static bool _labelerInitialized = false;
 
   static String? lastError;
 
@@ -65,22 +66,85 @@ class HybridTaggingService {
   };
 
   // Confidence thresholds
-  static const double _faceMinSize = 0.02; // 2% of image = valid face
   static const double _yoloConfidence = 0.5;
   static const double _animalConfidence = 0.45;
   static const double _foodConfidence = 0.6;
   static const double _minBoxPercent = 0.02; // 2% of image minimum
-  static const double _textMinChars = 50; // Minimum chars to be "document"
+  static const double _sceneryMinConfidence = 0.5; // For ML Kit labels
+
+  // Scenery keywords for ML Kit ImageLabeler fallback
+  static const Set<String> _sceneryKeywords = {
+    'landscape',
+    'scenery',
+    'nature',
+    'outdoor',
+    'sky',
+    'cloud',
+    'mountain',
+    'hill',
+    'valley',
+    'forest',
+    'tree',
+    'garden',
+    'park',
+    'beach',
+    'ocean',
+    'sea',
+    'lake',
+    'river',
+    'waterfall',
+    'sunset',
+    'sunrise',
+    'dawn',
+    'dusk',
+    'night',
+    'star',
+    'moon',
+    'city',
+    'street',
+    'road',
+    'bridge',
+    'castle',
+    'church',
+    'temple',
+    'monument',
+    'field',
+    'meadow',
+    'desert',
+    'snow',
+    'ice',
+    'horizon',
+    'view',
+    'panorama',
+    'aerial',
+  };
+
+  // Weak scenery labels that shouldn't trigger scenery category alone
+  static const Set<String> _weakSceneryKeywords = {
+    'building',
+    'architecture',
+    'room',
+    'interior',
+    'shelf',
+    'store',
+    'shop',
+    'furniture',
+    'wall',
+    'floor',
+    'ceiling',
+    'window',
+    'door',
+  };
 
   static bool get isReady => _yoloReady;
 
-  /// Initialize all models
+  /// Initialize YOLO only - ML Kit ImageLabeler is lazy-loaded when needed
   static Future<void> initialize() async {
     if (_yoloReady) return;
 
     final start = DateTime.now();
     try {
-      // Initialize YOLO ONNX
+      // Initialize YOLO ONNX only - fast startup
       final ort = OnnxRuntime();
       final providers = await ort.getAvailableProviders();
       final sessionOptions = OrtSessionOptions(
@@ -96,28 +160,32 @@ class HybridTaggingService {
         options: sessionOptions,
       );
 
-      // Initialize ML Kit detectors
-      _faceDetector = FaceDetector(
-        options: FaceDetectorOptions(
-          enableContours: false,
-          enableLandmarks: false,
-          enableClassification: false,
-          enableTracking: false,
-          minFaceSize: 0.1,
-          performanceMode: FaceDetectorMode.fast,
-        ),
-      );
-
-      _textRecognizer = TextRecognizer();
-
       _yoloReady = true;
       developer.log(
-        '[Hybrid] Ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+        '[Hybrid] YOLO ready in ${DateTime.now().difference(start).inMilliseconds}ms',
       );
     } catch (e) {
       lastError = e.toString();
       developer.log('[Hybrid] Init failed: $e');
       rethrow;
+    }
+  }
+
+  /// Lazy-initialize ML Kit ImageLabeler (only when YOLO finds nothing)
+  static Future<void> _initializeLabeler() async {
+    if (_labelerInitialized) return;
+
+    final start = DateTime.now();
+    try {
+      _imageLabeler = ImageLabeler(
+        options: ImageLabelerOptions(confidenceThreshold: 0.5),
+      );
+      _labelerInitialized = true;
+      developer.log(
+        '[Hybrid] ImageLabeler ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+      );
+    } catch (e) {
+      developer.log('[Hybrid] ImageLabeler init failed: $e');
     }
   }
 
@@ -128,44 +196,11 @@ class HybridTaggingService {
       if (!_yoloReady) return null;
     }
 
-    final inputImage = InputImage.fromFilePath(imagePath);
     final timings = <String, int>{};
     final stopwatch = Stopwatch();
 
     try {
-      // Step 1: Face Detection (fastest path to "people")
-      stopwatch.start();
-      final faces = await _faceDetector!.processImage(inputImage);
-      stopwatch.stop();
-      timings['face'] = stopwatch.elapsedMilliseconds;
-
-      if (faces.isNotEmpty) {
-        // Check if any face is significant size
-        final imageFile = File(imagePath);
-        final bytes = await imageFile.readAsBytes();
-        final image = img.decodeImage(bytes);
-        if (image != null) {
-          final imageArea = image.width * image.height;
-          for (final face in faces) {
-            final faceArea = face.boundingBox.width * face.boundingBox.height;
-            final facePercent = faceArea / imageArea;
-            if (facePercent >= _faceMinSize) {
-              developer.log(
-                '[Hybrid] Face detected (${(facePercent * 100).toStringAsFixed(1)}%) → people',
-              );
-              return HybridTagResult(
-                category: 'people',
-                confidence: 0.95,
-                method: 'face',
-                timings: timings,
-              );
-            }
-          }
-        }
-      }
-
-      // Step 2: YOLO Object Detection
-      stopwatch.reset();
+      // Step 1: YOLO Object Detection (people, animals, food)
       stopwatch.start();
       final yoloResult = await _runYolo(imagePath);
       stopwatch.stop();
@@ -184,26 +219,55 @@ class HybridTaggingService {
         );
       }
 
-      // Step 3: Text Recognition (for documents)
+      // Step 2: YOLO found nothing → try ML Kit ImageLabeler for scenery
+      // Lazy-load the labeler only when needed (saves ~300ms on startup)
       stopwatch.reset();
       stopwatch.start();
-      final recognizedText = await _textRecognizer!.processImage(inputImage);
-      stopwatch.stop();
-      timings['text'] = stopwatch.elapsedMilliseconds;
 
-      if (recognizedText.text.length >= _textMinChars) {
-        developer.log(
-          '[Hybrid] Text detected (${recognizedText.text.length} chars) → documents',
-        );
-        return HybridTagResult(
-          category: 'documents',
-          confidence: 0.85,
-          method: 'text',
-          timings: timings,
-        );
+      await _initializeLabeler();
+      if (_imageLabeler != null) {
+        final inputImage = InputImage.fromFilePath(imagePath);
+        final labels = await _imageLabeler!.processImage(inputImage);
+        stopwatch.stop();
+        timings['labeler'] = stopwatch.elapsedMilliseconds;
+
+        // Check for scenery keywords
+        int strongSceneryCount = 0;
+        final allDetections = <String>[];
+
+        for (final label in labels) {
+          final text = label.label.toLowerCase();
+          final conf = (label.confidence * 100).toInt();
+          allDetections.add('$text:$conf%');
+
+          // Count strong scenery matches (not weak ones)
+          if (_sceneryKeywords.contains(text) &&
+              !_weakSceneryKeywords.contains(text) &&
+              label.confidence >= 0.5) {
+            strongSceneryCount++;
+          }
+        }
+
+        // Need 2+ strong scenery labels to classify as scenery
+        // (prevents false positives from single "sky" in product photos)
+        if (strongSceneryCount >= 2) {
+          developer.log(
+            '[Hybrid] Scenery detected ($strongSceneryCount labels) → scenery',
+          );
+          return HybridTagResult(
+            category: 'scenery',
+            confidence: 0.75,
+            method: 'labeler',
+            timings: timings,
+            allDetections: allDetections,
+          );
+        }
+      } else {
+        stopwatch.stop();
+        timings['labeler'] = stopwatch.elapsedMilliseconds;
       }
 
-      // Step 4: Nothing matched → other
+      // Step 3: Nothing matched → other
       developer.log('[Hybrid] No match → other');
       return HybridTagResult(
         category: 'other',
@@ -478,12 +542,11 @@ class HybridTaggingService {
 
   static Future<void> dispose() async {
     await _yoloSession?.close();
-    await _faceDetector?.close();
-    await _textRecognizer?.close();
+    await _imageLabeler?.close();
     _yoloSession = null;
-    _faceDetector = null;
-    _textRecognizer = null;
+    _imageLabeler = null;
     _yoloReady = false;
+    _labelerInitialized = false;
   }
 }
 

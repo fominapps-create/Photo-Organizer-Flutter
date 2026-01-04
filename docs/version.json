@@ -2,12 +2,12 @@
   "appVersion": "0.4.3-dev",
   "buildNumber": 21,
   "scanLogicVersion": 20,
-  "lastUpdated": "2026-01-04T14:00:00",
+  "lastUpdated": "2026-01-04T18:30:00",
   "changes": [
-    "Hybrid tagging: Face → YOLO → Text → fallback",
-    "YOLO object detection with size/priority logic",
-    "ML Kit face detection for fast people tagging",
-    "ML Kit text recognition for documents",
-    "~3x faster scanning (70ms avg vs 500ms)"
+    "Optimized hybrid tagging: YOLO only at startup",
+    "Lazy-load ML Kit ImageLabeler for scenery (faster startup)",
+    "Removed face detection (YOLO handles people)",
+    "Removed text recognition (too aggressive on screenshots)",
+    "Fixed memory crash when scanning 1600+ photos"
   ]
 }

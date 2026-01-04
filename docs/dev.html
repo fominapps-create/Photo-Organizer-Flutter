@@ -240,7 +240,7 @@
                     'Updated: ' + date.toLocaleDateString('en-US', options);
                 
                 document.getElementById('download-btn').href = 
-                    'https://github.com/fominapps-create/Photo-Organizer-Flutter/releases/download/v' + data.appVersion + '/filtored-' + data.appVersion + '.apk';
+                    'download/filtored-' + data.appVersion + '.apk';
                 
                 const changesList = document.getElementById('changes-list');
                 changesList.innerHTML = data.changes.map(c => '<li>' + c + '</li>').join('');

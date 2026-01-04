@@ -3443,14 +3443,13 @@ class GalleryScreenState extends State<GalleryScreen>
                   developer.log('✅ Tagged $basename with: ${tags.join(", ")}');
 
                   // Track for background validation (only non-empty tags)
-                  if (i < batchItems.length) {
-                    yoloClassifiedImages.add({
-                      'file': batchItems[i]['file'],
-                      'url': url,
-                      'tags': tags,
-                      'photoID': photoID,
-                    });
-                  }
+                  // NOTE: We don't store image bytes here to prevent memory buildup
+                  // with large photo libraries. Bytes are reloaded during validation.
+                  yoloClassifiedImages.add({
+                    'url': url,
+                    'tags': tags,
+                    'photoID': photoID,
+                  });
                 }
               }
               final processingEndTime = DateTime.now();
@@ -3765,8 +3764,51 @@ class GalleryScreenState extends State<GalleryScreen>
             ? 'photo_${item['photoID']}.jpg'
             : p.basename(url);
 
-        validationData.add({'file': item['file'], 'filename': filename});
+        // Lazily load image bytes if not already present (memory optimization)
+        Uint8List? imageBytes = item['file'] as Uint8List?;
+        if (imageBytes == null) {
+          if (url.startsWith('local:')) {
+            final id = url.substring('local:'.length);
+            final asset = _localAssets[id];
+            if (asset != null) {
+              try {
+                imageBytes = await asset.thumbnailDataWithSize(
+                  const ThumbnailSize(256, 256),
+                  quality: 70,
+                );
+              } catch (e) {
+                developer.log(
+                  '⚠️ Failed to load thumbnail for validation: $id',
+                );
+              }
+            }
+          } else if (url.startsWith('file:')) {
+            final path = url.substring('file:'.length);
+            final file = File(path);
+            if (await file.exists()) {
+              try {
+                imageBytes = await file.readAsBytes();
+              } catch (e) {
+                developer.log('⚠️ Failed to read file for validation: $path');
+              }
+            }
+          }
+        }
+
+        // Skip if we couldn't load the image
+        if (imageBytes == null || imageBytes.isEmpty) {
+          developer.log('⏭️ Skipping validation for $filename (no image data)');
+          continue;
+        }
+
+        validationData.add({'file': imageBytes, 'filename': filename});
         yoloTagsList.add(item['tags'] as List<String>);
+      }
+
+      // Skip if no valid images in batch
+      if (validationData.isEmpty) {
+        developer.log('⏭️ Skipping empty validation batch');
+        return;
       }
 
       final res = await ApiService.validateYoloClassifications(
