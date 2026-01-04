@@ -8,14 +8,18 @@ import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 // import 'local_tagging_service.dart';
 import 'mobile_clip_service.dart';
 import 'semantic_tag_service.dart';
+import 'hybrid_tagging_service.dart';
 import 'api_service.dart';
 import 'dart:convert';
 
+/// Use Hybrid tagging (Face + YOLO + Text) - fast and accurate
+const bool _useHybridTags = true;
+
 /// Use MobileCLIP for classification (more accurate than ML Kit)
-const bool _useMobileCLIP = true;
+const bool _useMobileCLIP = false;
 
 /// Use semantic tags (descriptive) instead of just category labels
-const bool _useSemanticTags = true;
+const bool _useSemanticTags = false;
 
 /// Factory that decides whether to use local (ML Kit) or cloud (API) tagging.
 /// Free tier = local on-device processing
@@ -145,11 +149,18 @@ class TaggingServiceFactory {
     final cpuCores = _cachedCpuCores ?? 4;
     final ramGB = _cachedRamGB ?? 4;
 
-    // Determine concurrency based on device tier
-    // ONNX with NNAPI/XNNPACK is more efficient than pure CPU
-    // Still conservative but can allow some parallelism on good devices
+    // Determine concurrency based on device tier and tagging mode
     int concurrency;
-    if (_useSemanticTags || _useMobileCLIP) {
+    if (_useHybridTags) {
+      // Hybrid mode: YOLO is lightweight, can allow moderate concurrency
+      if (ramGB <= 3 || cpuCores <= 4) {
+        concurrency = isBackground ? 2 : 4;
+      } else if (ramGB <= 6 || cpuCores <= 6) {
+        concurrency = isBackground ? 3 : 6;
+      } else {
+        concurrency = isBackground ? 4 : 8;
+      }
+    } else if (_useSemanticTags || _useMobileCLIP) {
       // ONNX mode: Only allow concurrency=2 on flagship devices with NNAPI
       // - RAM >= 8GB (enough headroom for 2 concurrent inferences)
       // - NNAPI available (GPU/NPU handles memory more efficiently)
@@ -201,7 +212,18 @@ class TaggingServiceFactory {
   /// Pre-initialize the tagging service (call during app startup or before scanning)
   /// This loads ONNX models ahead of time to avoid delays during first scan
   static Future<void> warmup() async {
-    if (_useSemanticTags) {
+    if (_useHybridTags) {
+      developer.log('🔥 Pre-warming HybridTaggingService...');
+      final start = DateTime.now();
+      try {
+        await HybridTaggingService.initialize();
+        developer.log(
+          '✅ HybridTaggingService ready in ${DateTime.now().difference(start).inMilliseconds}ms',
+        );
+      } catch (e) {
+        developer.log('⚠️ HybridTaggingService warmup error: $e');
+      }
+    } else if (_useSemanticTags) {
       developer.log('🔥 Pre-warming SemanticTagService...');
       final start = DateTime.now();
       try {
@@ -296,23 +318,59 @@ class TaggingServiceFactory {
               );
             }
 
+            // Use Hybrid tagging (Face + YOLO + Text)
+            if (_useHybridTags) {
+              final hybridResult = await HybridTaggingService.classifyImage(
+                tempPath,
+              );
+              if (hybridResult != null) {
+                final confidence = (hybridResult.confidence * 100)
+                    .toStringAsFixed(0);
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: [hybridResult.category],
+                    allDetections: [
+                      '${hybridResult.category} ($confidence%) [${hybridResult.method}]',
+                      ...hybridResult.allDetections,
+                    ],
+                    source: 'hybrid',
+                  ),
+                );
+              } else {
+                final errorMsg =
+                    HybridTaggingService.lastError ?? 'Unknown error';
+                developer.log(
+                  '[Tagging] Hybrid failed for ${item.photoID}: $errorMsg',
+                );
+                return MapEntry(
+                  item.photoID,
+                  TagResult(
+                    tags: ['unscanned'],
+                    allDetections: ['Error: $errorMsg'],
+                    source: 'error',
+                  ),
+                );
+              }
+            }
+
             // Use Semantic Tags for descriptive labels
             if (_useSemanticTags) {
               final semanticResult = await SemanticTagService.analyzeImage(
                 tempPath,
               );
               if (semanticResult != null) {
+                // Only show the winning category, not all 6
+                final topCategory = semanticResult.category;
+                final confidence = (semanticResult.categoryConfidence * 100)
+                    .toStringAsFixed(0);
                 return MapEntry(
                   item.photoID,
                   TagResult(
-                    tags: ['scanned'], // Simplified: just mark as scanned
-                    // Keep semantic descriptions for detail view
-                    allDetections: semanticResult.topMatches
-                        .map(
-                          (m) =>
-                              '${m.description} (${(m.score * 100).toStringAsFixed(1)}%)',
-                        )
-                        .toList(),
+                    tags: [topCategory], // The actual category for filtering
+                    allDetections: [
+                      '$topCategory ($confidence%)',
+                    ], // Just the winner
                     source: 'semantic',
                   ),
                 );
@@ -397,6 +455,9 @@ class TaggingServiceFactory {
         for (final entry in chunkResults) {
           results[entry.key] = entry.value;
         }
+
+        // Let UI breathe between chunks - prevents lag during scanning
+        await Future.delayed(const Duration(milliseconds: 10));
 
         // Delete chunk temp files immediately after chunk completes
         for (final path in chunkTempFiles) {

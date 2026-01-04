@@ -86,6 +86,9 @@ class SemanticTagService {
       // Preprocess in isolate (won't block UI)
       final tensor = await compute(_preprocessImage, imagePath);
 
+      // Yield to let UI render a frame before inference
+      await Future.delayed(Duration.zero);
+
       // Run inference
       input = await OrtValue.fromList(tensor, [1, 3, 256, 256]);
       outputs = await _session!.run({'image': input});

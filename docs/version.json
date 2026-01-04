@@ -1,12 +1,13 @@
 {
-  "appVersion": "0.4.2-dev",
-  "buildNumber": 20,
-  "scanLogicVersion": 19,
-  "lastUpdated": "2026-01-04T12:00:00",
+  "appVersion": "0.4.3-dev",
+  "buildNumber": 21,
+  "scanLogicVersion": 20,
+  "lastUpdated": "2026-01-04T14:00:00",
   "changes": [
-    "Fast 6-category tagging (people, animals, food, scenery, documents, other)",
-    "XNNPACK hardware acceleration (~7x faster)",
-    "Isolate preprocessing - no more UI lag",
-    "Fixed MobileCLIP 256×256 input size"
+    "Hybrid tagging: Face → YOLO → Text → fallback",
+    "YOLO object detection with size/priority logic",
+    "ML Kit face detection for fast people tagging",
+    "ML Kit text recognition for documents",
+    "~3x faster scanning (70ms avg vs 500ms)"
   ]
 }
