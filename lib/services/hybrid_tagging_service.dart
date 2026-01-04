@@ -28,6 +28,9 @@ class HybridTaggingService {
   static String? lastError;
   static String? lastYoloError; // Detailed YOLO-specific error for debugging
 
+  // Debug: Log first inference details
+  static bool _firstInferenceLogged = false;
+
   // YOLO input size - matches the exported ONNX model (320x320)
   static const int _yoloInputSize = 320;
   // Output shape is [1, 84, 2100] for 320x320 input
@@ -71,11 +74,11 @@ class HybridTaggingService {
     'other': 0,
   };
 
-  // Confidence thresholds
-  static const double _yoloConfidence = 0.5;
-  static const double _animalConfidence = 0.45;
-  static const double _foodConfidence = 0.6;
-  static const double _minBoxPercent = 0.02; // 2% of image minimum
+  // Confidence thresholds - lowered for better detection on thumbnails
+  static const double _yoloConfidence = 0.35; // Was 0.5
+  static const double _animalConfidence = 0.30; // Was 0.45
+  static const double _foodConfidence = 0.45; // Was 0.6
+  static const double _minBoxPercent = 0.01; // 1% of image minimum (was 2%)
 
   // Scenery keywords for ML Kit ImageLabeler fallback
   static const Set<String> _sceneryKeywords = {
@@ -151,10 +154,11 @@ class HybridTaggingService {
     try {
       final ort = OnnxRuntime();
       final providers = await ort.getAvailableProviders();
-      
+
       // Get optimal thread count based on device capabilities (2-6 threads)
-      final intraOpThreads = await TaggingServiceFactory.getOptimalIntraOpThreads();
-      
+      final intraOpThreads =
+          await TaggingServiceFactory.getOptimalIntraOpThreads();
+
       final sessionOptions = OrtSessionOptions(
         providers: [
           if (providers.contains(OrtProvider.XNNPACK)) OrtProvider.XNNPACK,
@@ -208,7 +212,7 @@ class HybridTaggingService {
         );
       }
     }
-    
+
     // Double-check session is valid
     if (_yoloSession == null) {
       return HybridTagResult(
@@ -247,13 +251,13 @@ class HybridTaggingService {
       await _initializeLabeler();
       if (_imageLabeler != null) {
         // Yield to let UI render before ML Kit processing
-        await Future.delayed(Duration.zero);
-        
+        await Future.delayed(const Duration(milliseconds: 16));
+
         final inputImage = InputImage.fromFilePath(imagePath);
         final labels = await _imageLabeler!.processImage(inputImage);
-        
+
         // Yield to let UI render after ML Kit processing
-        await Future.delayed(Duration.zero);
+        await Future.delayed(const Duration(milliseconds: 16));
         stopwatch.stop();
         timings['labeler'] = stopwatch.elapsedMilliseconds;
 
@@ -283,12 +287,23 @@ class HybridTaggingService {
             allDetections: allDetections,
           );
         }
+
+        // ML Kit ran but didn't find scenery - pass detections for debugging
+        // and return 'other' with ML Kit's findings
+        return HybridTagResult(
+          category: 'other',
+          confidence: 0.5,
+          method: 'fallback',
+          timings: timings,
+          allDetections: allDetections,
+          error: lastYoloError, // Include YOLO error for debugging
+        );
       } else {
         stopwatch.stop();
         timings['labeler'] = stopwatch.elapsedMilliseconds;
       }
 
-      // Step 3: Nothing matched → other
+      // Step 3: Nothing matched and no ML Kit → other
       // Include YOLO error info if available for debugging
       return HybridTagResult(
         category: 'other',
@@ -324,7 +339,7 @@ class HybridTaggingService {
         developer.log('[YOLO] $lastYoloError');
         return null;
       }
-      
+
       // Check file size
       final fileSize = await file.length();
       if (fileSize == 0) {
@@ -332,11 +347,12 @@ class HybridTaggingService {
         developer.log('[YOLO] $lastYoloError');
         return null;
       }
-      
+
       // Step 1: Preprocess image in separate isolate (won't block UI)
       final prepResult = await compute(_preprocessImageIsolate, imagePath);
       if (prepResult == null) {
-        lastYoloError = 'YOLO preprocess failed: Could not decode image ($fileSize bytes) at $imagePath';
+        lastYoloError =
+            'YOLO preprocess failed: Could not decode image ($fileSize bytes) at $imagePath';
         developer.log('[YOLO] $lastYoloError');
         return null;
       }
@@ -347,7 +363,8 @@ class HybridTaggingService {
       final imageArea = imageWidth * imageHeight;
 
       // Yield to let UI render a frame before inference
-      await Future.delayed(Duration.zero);
+      // Longer delay to give UI time for multiple frames
+      await Future.delayed(const Duration(milliseconds: 16));
 
       // Step 2: Run ONNX inference (this is the heavy part that blocks main thread)
       input = await OrtValue.fromList(tensor, [
@@ -359,7 +376,7 @@ class HybridTaggingService {
       outputs = await _yoloSession!.run({'images': input});
 
       // Yield to let UI render after inference
-      await Future.delayed(Duration.zero);
+      await Future.delayed(const Duration(milliseconds: 16));
 
       // Step 3: Parse YOLO output
       // Expected shape: [1, 84, 2100] where 84 = 4 (box) + 80 (classes)
@@ -387,6 +404,32 @@ class HybridTaggingService {
       final firstRow = rows[0] as List;
       final numDetections = firstRow.length;
 
+      // Debug: Log first inference details
+      if (!_firstInferenceLogged) {
+        _firstInferenceLogged = true;
+        developer.log(
+          '[YOLO] First inference - numDetections: $numDetections, imageSize: ${imageWidth}x$imageHeight',
+        );
+        // Sample some raw values to verify model output
+        if (numDetections > 0) {
+          final sampleScores = <String>[];
+          for (int c = 0; c < 80 && c < 10; c++) {
+            final score = (rows[4 + c] as List)[0].toDouble();
+            if (score > 0.1) {
+              sampleScores.add('class$c:${(score * 100).toStringAsFixed(1)}%');
+            }
+          }
+          developer.log(
+            '[YOLO] Sample scores (first detection): $sampleScores',
+          );
+        }
+      }
+
+      // Debug: Track what YOLO actually sees (top 5 scores across all classes)
+      final debugTopScores = <String>[];
+      double maxScoreFound = 0;
+      int maxClassIdFound = -1;
+
       // Category scores with weighted scoring
       final categoryScores = <String, double>{};
       final allDetections = <String>[];
@@ -407,6 +450,12 @@ class HybridTaggingService {
             maxClassScore = score;
             maxClassId = c;
           }
+        }
+
+        // Track overall highest score for debugging
+        if (maxClassScore > maxScoreFound) {
+          maxScoreFound = maxClassScore;
+          maxClassIdFound = maxClassId;
         }
 
         // Check if this class maps to our categories
@@ -452,7 +501,17 @@ class HybridTaggingService {
       input.dispose();
       for (final o in outputs.values) o.dispose();
 
-      if (categoryScores.isEmpty) return null;
+      if (categoryScores.isEmpty) {
+        // YOLO found objects but none match our categories (people/animals/food)
+        final topClass = maxClassIdFound >= 0
+            ? _getClassName(maxClassIdFound)
+            : 'none';
+        final topScore = (maxScoreFound * 100).toStringAsFixed(1);
+        lastYoloError =
+            'YOLO: No people/animals/food. Top detection: $topClass ($topScore%) from $numDetections boxes';
+        developer.log('[YOLO] $lastYoloError');
+        return null;
+      }
 
       // Pick winner with priority tie-breaking
       String? winner;
@@ -470,7 +529,8 @@ class HybridTaggingService {
       }
 
       if (winner == null) {
-        lastYoloError = 'YOLO found no matching categories (scores: $categoryScores)';
+        lastYoloError =
+            'YOLO found no matching categories (scores: $categoryScores)';
         return null;
       }
 

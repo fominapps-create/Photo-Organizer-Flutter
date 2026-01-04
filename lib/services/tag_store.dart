@@ -143,23 +143,26 @@ class TagStore {
 
   /// Check which photos have NON-EMPTY tags (excludes photos with empty [] tags)
   /// Returns a Set of photoIDs that have actual tags
+  /// OPTIMIZED: Avoids JSON parsing - just checks if value is more than "[]"
   static Future<Set<String>> getPhotoIDsWithNonEmptyTags(
     List<String> photoIDs,
   ) async {
     final prefs = await SharedPreferences.getInstance();
     final result = <String>{};
 
+    // Get all keys once - much faster than individual getString calls
+    final allKeys = prefs.getKeys();
+    final tagKeys = allKeys.where((k) => k.startsWith('tags_')).toSet();
+
     for (final photoID in photoIDs) {
-      final raw = prefs.getString(_keyFor(photoID));
-      if (raw != null) {
-        try {
-          final list = json.decode(raw) as List;
-          if (list.isNotEmpty) {
-            result.add(photoID);
-          }
-        } catch (_) {
-          // Invalid entry, don't include
-        }
+      final key = _keyFor(photoID);
+      if (!tagKeys.contains(key)) continue;
+
+      final raw = prefs.getString(key);
+      // FAST CHECK: Skip JSON parsing - just check if it's non-empty and not "[]"
+      if (raw != null && raw.length > 2) {
+        // Length > 2 means it's not just "[]"
+        result.add(photoID);
       }
     }
 

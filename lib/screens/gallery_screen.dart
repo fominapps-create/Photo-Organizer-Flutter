@@ -3217,12 +3217,12 @@ class GalleryScreenState extends State<GalleryScreen>
           final id = u.substring('local:'.length);
           final asset = _localAssets[id];
           if (asset != null) {
-            // Use 256px thumbnail for scanning - matches ML Kit's 224x224 input
-            // Smaller = faster loading + faster ML processing
+            // Use 400px thumbnail for scanning - YOLO uses 320x320 input
+            // Slightly larger source = better quality after resize
             try {
               imageBytes = await asset.thumbnailDataWithSize(
-                const ThumbnailSize(256, 256),
-                quality: 70,
+                const ThumbnailSize(400, 400),
+                quality: 80,
               );
             } catch (e) {
               developer.log('⚠️ Failed to load thumbnail for $id: $e');
@@ -3773,8 +3773,8 @@ class GalleryScreenState extends State<GalleryScreen>
             if (asset != null) {
               try {
                 imageBytes = await asset.thumbnailDataWithSize(
-                  const ThumbnailSize(256, 256),
-                  quality: 70,
+                  const ThumbnailSize(400, 400),
+                  quality: 80,
                 );
               } catch (e) {
                 developer.log(

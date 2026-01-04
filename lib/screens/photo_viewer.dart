@@ -719,7 +719,8 @@ class _PhotoViewerState extends State<PhotoViewer>
                       runSpacing: 6,
                       children: allDetectionsDebug.map((obj) {
                         // Highlight errors in red
-                        final isError = obj.startsWith('⚠️') || 
+                        final isError =
+                            obj.startsWith('⚠️') ||
                             obj.toLowerCase().startsWith('error');
                         return Container(
                           padding: const EdgeInsets.symmetric(
@@ -727,7 +728,7 @@ class _PhotoViewerState extends State<PhotoViewer>
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: isError 
+                            color: isError
                                 ? Colors.red.withValues(alpha: 0.7)
                                 : labelBgColor,
                             borderRadius: BorderRadius.circular(10),
@@ -742,8 +743,8 @@ class _PhotoViewerState extends State<PhotoViewer>
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: isError ? 11 : 10,
-                              fontWeight: isError 
-                                  ? FontWeight.w600 
+                              fontWeight: isError
+                                  ? FontWeight.w600
                                   : FontWeight.w500,
                             ),
                           ),

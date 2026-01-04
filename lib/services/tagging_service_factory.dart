@@ -152,9 +152,14 @@ class TaggingServiceFactory {
     // Determine concurrency based on device tier and tagging mode
     int concurrency;
     if (_useHybridTags) {
-      // Hybrid mode uses ONNX YOLO - requires serial processing (concurrency=1)
-      // ONNX blocks main thread, so parallel calls cause UI freeze
-      concurrency = 1;
+      // Hybrid mode uses ONNX YOLO
+      // Allow concurrency=2 on decent devices - preprocessing is isolated
+      // and ONNX has proper UI yields between images
+      if (ramGB >= 6 && cpuCores >= 6) {
+        concurrency = isBackground ? 1 : 2;
+      } else {
+        concurrency = 1;
+      }
     } else if (_useSemanticTags || _useMobileCLIP) {
       // ONNX mode: Only allow concurrency=2 on flagship devices with NNAPI
       // - RAM >= 8GB (enough headroom for 2 concurrent inferences)
@@ -261,6 +266,114 @@ class TaggingServiceFactory {
     }
   }
 
+  /// Process a single image through the appropriate tagging service
+  static Future<TagResult> _processSingleImage(
+    String photoID,
+    String imagePath,
+  ) async {
+    try {
+      // Use Hybrid tagging (Face + YOLO + Text)
+      if (_useHybridTags) {
+        final hybridResult = await HybridTaggingService.classifyImage(
+          imagePath,
+        );
+        if (hybridResult != null) {
+          final confidence = (hybridResult.confidence * 100).toStringAsFixed(0);
+
+          // Build detection list with error info if present
+          final detections = <String>[
+            '${hybridResult.category} ($confidence%) [${hybridResult.method}]',
+            ...hybridResult.allDetections,
+          ];
+
+          // Include YOLO error for debugging if category is 'other' or 'error'
+          if (hybridResult.error != null) {
+            detections.add('⚠️ ${hybridResult.error}');
+          }
+
+          return TagResult(
+            tags: [hybridResult.category],
+            allDetections: detections,
+            source: hybridResult.hasError ? 'error' : 'hybrid',
+          );
+        } else {
+          final errorMsg = HybridTaggingService.lastError ?? 'Unknown error';
+          final yoloError = HybridTaggingService.lastYoloError;
+          developer.log(
+            '[Tagging] Hybrid failed for $photoID: $errorMsg (YOLO: $yoloError)',
+          );
+          return TagResult(
+            tags: ['unscanned'],
+            allDetections: [
+              'Error: $errorMsg',
+              if (yoloError != null) '⚠️ YOLO: $yoloError',
+            ],
+            source: 'error',
+          );
+        }
+      }
+
+      // Use Semantic Tags for descriptive labels
+      if (_useSemanticTags) {
+        final semanticResult = await SemanticTagService.analyzeImage(imagePath);
+        if (semanticResult != null) {
+          final topCategory = semanticResult.category;
+          final confidence = (semanticResult.categoryConfidence * 100)
+              .toStringAsFixed(0);
+          return TagResult(
+            tags: [topCategory],
+            allDetections: ['$topCategory ($confidence%)'],
+            source: 'semantic',
+          );
+        } else {
+          final errorMsg = SemanticTagService.lastError ?? 'Unknown error';
+          developer.log('[Tagging] SemanticTag failed for $photoID: $errorMsg');
+          return TagResult(
+            tags: ['unscanned'],
+            allDetections: ['Error: $errorMsg'],
+            source: 'error',
+          );
+        }
+      }
+
+      // MobileCLIP category-only mode (not semantic)
+      if (_useMobileCLIP) {
+        final clipResult = await MobileClipService.classifyImage(imagePath);
+        if (clipResult != null) {
+          return TagResult(
+            tags: [clipResult.category],
+            allDetections: clipResult.allScores.entries
+                .map((e) => '${e.key}:${(e.value * 100).toStringAsFixed(1)}%')
+                .toList(),
+            source: 'mobileclip',
+          );
+        } else {
+          developer.log('[Tagging] MobileCLIP returned null for $photoID');
+          return TagResult(
+            tags: ['other'],
+            allDetections: ['MobileCLIP failed'],
+            source: 'error',
+          );
+        }
+      }
+
+      // No tagging method available
+      return TagResult(
+        tags: ['other'],
+        allDetections: ['No tagger configured'],
+        source: 'none',
+      );
+    } catch (e) {
+      developer.log('LocalTagging error for $photoID: $e');
+      return TagResult(
+        tags: ['other'],
+        allDetections: [],
+        source: 'local',
+        error: e.toString(),
+      );
+    }
+  }
+
   /// Tag images using on-device ML Kit - PARALLEL processing for speed
   static Future<Map<String, TagResult>> _tagWithLocalService(
     List<TaggingInput> items, {
@@ -273,206 +386,150 @@ class TaggingServiceFactory {
     final tempDirPath = tempDir.path;
     final tempFilesToDelete = <String>[];
 
-    // Dynamic concurrency based on device capabilities
-    // Higher concurrency = faster processing, but more memory/CPU
-    // Background scanning uses 25% less concurrency to reduce heat
-    final concurrencyLimit = await _getOptimalConcurrency(
-      isBackground: isBackground,
-    );
-    developer.log(
-      '🚀 Local ML Kit processing (${isBackground ? "background" : "foreground"}) with concurrency: $concurrencyLimit',
-    );
+    // For ONNX-based modes (Hybrid/Semantic/CLIP), process SEQUENTIALLY
+    // because ONNX blocks main thread - parallel futures just queue up blocking calls.
+    // For ML Kit mode, use parallel processing since it's truly async.
+    final useSequential = _useHybridTags || _useSemanticTags || _useMobileCLIP;
+
+    if (useSequential) {
+      developer.log(
+        '🚀 ONNX mode - processing ${items.length} items SEQUENTIALLY for UI responsiveness',
+      );
+    } else {
+      final concurrencyLimit = await _getOptimalConcurrency(
+        isBackground: isBackground,
+      );
+      developer.log(
+        '🚀 ML Kit mode - processing with concurrency: $concurrencyLimit',
+      );
+    }
 
     try {
-      // Process items in chunks for controlled parallelism
-      for (var i = 0; i < items.length; i += concurrencyLimit) {
-        final chunk = items.skip(i).take(concurrencyLimit).toList();
-        final chunkTempFiles = <String>[];
+      if (useSequential) {
+        // SEQUENTIAL PROCESSING for ONNX modes - better UI responsiveness
+        for (var i = 0; i < items.length; i++) {
+          final item = items[i];
+          String? tempPath;
 
-        // Process chunk in parallel
-        final futures = chunk.map((item) async {
-          try {
-            String? tempPath;
+          // Write temp file if needed
+          if (item.bytes != null) {
+            final tempFile = File(
+              '$tempDirPath/tag_${DateTime.now().microsecondsSinceEpoch}_${item.photoID.hashCode}.jpg',
+            );
+            await tempFile.writeAsBytes(item.bytes!, flush: true);
+            tempPath = tempFile.path;
+            tempFilesToDelete.add(tempPath);
+          } else if (item.filePath != null) {
+            tempPath = item.filePath;
+          }
 
-            // ML Kit/MobileCLIP needs a file path, so write bytes to temp file if needed
-            if (item.bytes != null) {
-              final tempFile = File(
-                '$tempDirPath/tag_${DateTime.now().microsecondsSinceEpoch}_${item.photoID.hashCode}.jpg',
-              );
-              await tempFile.writeAsBytes(item.bytes!, flush: false);
-              tempPath = tempFile.path;
-              chunkTempFiles.add(tempPath);
-            } else if (item.filePath != null) {
-              tempPath = item.filePath;
-            }
+          if (tempPath == null) {
+            results[item.photoID] = TagResult(
+              tags: ['other'],
+              allDetections: [],
+              source: 'local',
+            );
+            continue;
+          }
 
-            if (tempPath == null) {
-              return MapEntry(
-                item.photoID,
-                TagResult(tags: ['other'], allDetections: [], source: 'local'),
-              );
-            }
+          // Process single image
+          final result = await _processSingleImage(item.photoID, tempPath);
+          results[item.photoID] = result;
 
-            // Use Hybrid tagging (Face + YOLO + Text)
-            if (_useHybridTags) {
-              final hybridResult = await HybridTaggingService.classifyImage(
-                tempPath,
-              );
-              if (hybridResult != null) {
-                final confidence = (hybridResult.confidence * 100)
-                    .toStringAsFixed(0);
-                
-                // Build detection list with error info if present
-                final detections = <String>[
-                  '${hybridResult.category} ($confidence%) [${hybridResult.method}]',
-                  ...hybridResult.allDetections,
-                ];
-                
-                // Include YOLO error for debugging if category is 'other' or 'error'
-                if (hybridResult.error != null) {
-                  detections.add('⚠️ ${hybridResult.error}');
+          // Delete temp file immediately
+          if (item.bytes != null && tempPath != null) {
+            try {
+              await File(tempPath).delete();
+              tempFilesToDelete.remove(tempPath);
+            } catch (_) {}
+          }
+
+          // Yield between items - critical for UI responsiveness with ONNX
+          // 50ms gives UI time for ~3 frames at 60fps
+          if (i < items.length - 1) {
+            await Future.delayed(const Duration(milliseconds: 50));
+          }
+        }
+      } else {
+        // PARALLEL PROCESSING for ML Kit mode (truly async)
+        final concurrencyLimit = await _getOptimalConcurrency(
+          isBackground: isBackground,
+        );
+
+        for (var i = 0; i < items.length; i += concurrencyLimit) {
+          final chunk = items.skip(i).take(concurrencyLimit).toList();
+          final chunkTempFiles = <String>[];
+
+          // Process chunk in parallel
+          final futures = chunk.map((item) async {
+            try {
+              String? tempPath;
+
+              // ML Kit/MobileCLIP needs a file path, so write bytes to temp file if needed
+              if (item.bytes != null) {
+                final tempFile = File(
+                  '$tempDirPath/tag_${DateTime.now().microsecondsSinceEpoch}_${item.photoID.hashCode}.jpg',
+                );
+                await tempFile.writeAsBytes(item.bytes!, flush: true);
+                tempPath = tempFile.path;
+                chunkTempFiles.add(tempPath);
+
+                // Debug: Log temp file size on first write
+                if (chunkTempFiles.length == 1) {
+                  final size = await tempFile.length();
+                  developer.log(
+                    '[Tagging] Temp file: ${item.bytes!.length} bytes in memory, $size bytes on disk',
+                  );
                 }
-                
-                return MapEntry(
-                  item.photoID,
-                  TagResult(
-                    tags: [hybridResult.category],
-                    allDetections: detections,
-                    source: hybridResult.hasError ? 'error' : 'hybrid',
-                  ),
-                );
-              } else {
-                final errorMsg =
-                    HybridTaggingService.lastError ?? 'Unknown error';
-                final yoloError = HybridTaggingService.lastYoloError;
-                developer.log(
-                  '[Tagging] Hybrid failed for ${item.photoID}: $errorMsg (YOLO: $yoloError)',
-                );
-                return MapEntry(
-                  item.photoID,
-                  TagResult(
-                    tags: ['unscanned'],
-                    allDetections: [
-                      'Error: $errorMsg',
-                      if (yoloError != null) '⚠️ YOLO: $yoloError',
-                    ],
-                    source: 'error',
-                  ),
-                );
+              } else if (item.filePath != null) {
+                tempPath = item.filePath;
               }
-            }
 
-            // Use Semantic Tags for descriptive labels
-            if (_useSemanticTags) {
-              final semanticResult = await SemanticTagService.analyzeImage(
-                tempPath,
-              );
-              if (semanticResult != null) {
-                // Only show the winning category, not all 6
-                final topCategory = semanticResult.category;
-                final confidence = (semanticResult.categoryConfidence * 100)
-                    .toStringAsFixed(0);
-                return MapEntry(
-                  item.photoID,
-                  TagResult(
-                    tags: [topCategory], // The actual category for filtering
-                    allDetections: [
-                      '$topCategory ($confidence%)',
-                    ], // Just the winner
-                    source: 'semantic',
-                  ),
-                );
-              } else {
-                // SemanticTag failed - show actual error
-                final errorMsg =
-                    SemanticTagService.lastError ?? 'Unknown error';
-                developer.log(
-                  '[Tagging] SemanticTag failed for ${item.photoID}: $errorMsg',
-                );
-                return MapEntry(
-                  item.photoID,
-                  TagResult(
-                    tags: ['unscanned'],
-                    allDetections: ['Error: $errorMsg'],
-                    source: 'error',
-                  ),
-                );
-              }
-            }
-
-            // MobileCLIP category-only mode (not semantic)
-            if (_useMobileCLIP) {
-              final clipResult = await MobileClipService.classifyImage(
-                tempPath,
-              );
-              if (clipResult != null) {
-                return MapEntry(
-                  item.photoID,
-                  TagResult(
-                    tags: [clipResult.category],
-                    allDetections: clipResult.allScores.entries
-                        .map(
-                          (e) =>
-                              '${e.key}:${(e.value * 100).toStringAsFixed(1)}%',
-                        )
-                        .toList(),
-                    source: 'mobileclip',
-                  ),
-                );
-              } else {
-                // MobileCLIP failed - log and return 'other'
-                developer.log(
-                  '[Tagging] MobileCLIP returned null for ${item.photoID}',
-                );
+              if (tempPath == null) {
                 return MapEntry(
                   item.photoID,
                   TagResult(
                     tags: ['other'],
-                    allDetections: ['MobileCLIP failed'],
-                    source: 'error',
+                    allDetections: [],
+                    source: 'local',
                   ),
                 );
               }
+
+              return MapEntry(
+                item.photoID,
+                await _processSingleImage(item.photoID, tempPath),
+              );
+            } catch (e) {
+              developer.log('LocalTagging error for ${item.photoID}: $e');
+              return MapEntry(
+                item.photoID,
+                TagResult(
+                  tags: ['other'],
+                  allDetections: [],
+                  source: 'local',
+                  error: e.toString(),
+                ),
+              );
             }
+          });
 
-            // No tagging method available
-            return MapEntry(
-              item.photoID,
-              TagResult(
-                tags: ['other'],
-                allDetections: ['No tagger configured'],
-                source: 'none',
-              ),
-            );
-          } catch (e) {
-            developer.log('LocalTagging error for ${item.photoID}: $e');
-            return MapEntry(
-              item.photoID,
-              TagResult(
-                tags: ['other'],
-                allDetections: [],
-                source: 'local',
-                error: e.toString(),
-              ),
-            );
+          // Wait for chunk to complete
+          final chunkResults = await Future.wait(futures);
+          for (final entry in chunkResults) {
+            results[entry.key] = entry.value;
           }
-        });
 
-        // Wait for chunk to complete
-        final chunkResults = await Future.wait(futures);
-        for (final entry in chunkResults) {
-          results[entry.key] = entry.value;
-        }
+          // Let UI breathe between chunks
+          await Future.delayed(const Duration(milliseconds: 50));
 
-        // Let UI breathe between chunks - prevents lag during scanning
-        await Future.delayed(const Duration(milliseconds: 10));
-
-        // Delete chunk temp files immediately after chunk completes
-        for (final path in chunkTempFiles) {
-          try {
-            await File(path).delete();
-          } catch (_) {
-            tempFilesToDelete.add(path); // Track for final cleanup
+          // Delete chunk temp files immediately after chunk completes
+          for (final path in chunkTempFiles) {
+            try {
+              await File(path).delete();
+            } catch (_) {
+              tempFilesToDelete.add(path);
+            }
           }
         }
       }
